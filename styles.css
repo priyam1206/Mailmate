@@ -167,6 +167,29 @@ body {
   display: block;
 }
 
+/* Minimal Apple-inspired time readout */
+.top-datetime {
+  position: fixed;
+  top: 24px;
+  right: 28px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.datetime-time {
+  display: block;
+  white-space: nowrap;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Fullscreen Canvas for Tubelight Glitching Dot Logo */
 .dot-logo {
   position: fixed;
@@ -520,6 +543,10 @@ body {
   .top-collab-badge {
     top: 16px;
     left: 18px;
+  }
+  .top-datetime {
+    top: 16px;
+    right: 18px;
   }
   .mini-lockup {
     padding: 5px 12px 5px 7px;
