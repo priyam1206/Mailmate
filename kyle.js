@@ -49,7 +49,68 @@
     const run = activeRun;
     recognitionTranscript = '';
 
+    try {
+      const sttRes = await fetch(`${API_BASE}/api/stt/status`).catch(() => null);
+      if (sttRes && sttRes.ok) {
+        const status = await sttRes.json();
+        if (status.loaded || status.available) {
+          return startWhisperListening(run);
+        }
+      }
+    } catch (_) {}
+
     return startBrowserListening(run);
+  }
+
+  async function startWhisperListening(run) {
+    try {
+      await audio.openMic();
+      if (run !== activeRun) return;
+
+      store.set(store.states.LISTENING);
+      ui.setLiveText('Listening (Whisper)...');
+      console.log('[Kyle Voice] local Whisper recording started');
+
+      currentRecorder = audio.startRecording(
+        () => {},
+        async blob => {
+          currentRecorder = null;
+          audio.cleanupMic();
+          if (run !== activeRun) return;
+          if (!blob || blob.size < 1000) {
+            store.set(store.states.IDLE);
+            ui.setLiveText('');
+            return;
+          }
+          store.set(store.states.TRANSCRIBING);
+          ui.setLiveText('Transcribing with Whisper...');
+          try {
+            const formData = new FormData();
+            formData.append('audio', blob, 'recording.webm');
+            const res = await fetch(`${API_BASE}/api/stt/transcribe`, {
+              method: 'POST',
+              body: formData
+            });
+            if (!res.ok) throw new Error(`Whisper STT returned ${res.status}`);
+            const data = await res.json();
+            const transcript = String(data.text || '').trim();
+            if (transcript) {
+              handlePrompt(transcript, run);
+            } else {
+              store.set(store.states.IDLE);
+              ui.setLiveText('');
+            }
+          } catch (e) {
+            console.warn('[Kyle Voice] Whisper transcription error:', e);
+            fail('Whisper transcription failed. Try speaking again.');
+          }
+        }
+      );
+      recognitionTimer = setTimeout(() => stopListening(), 15000);
+    } catch (error) {
+      console.warn('[Kyle Voice] local recording failed, falling back to browser:', error);
+      startBrowserListening(run);
+    }
   }
 
   async function startBrowserListening(run) {

@@ -192,23 +192,13 @@ class SupabaseCache:
         }
 
     def save_emails(self, user_id: str, emails: Iterable[Dict[str, Any]]) -> int:
-        if not self.enabled or not user_id:
-            return 0
-        rows = [
-            self._email_row(user_id, email)
-            for email in (emails or [])
-            if email.get("id") or email.get("gmail_id")
-        ]
-        if not rows:
-            return 0
-        try:
-            result = self.client.table("emails").upsert(
-                rows, on_conflict="user_id,gmail_id"
-            ).execute()
-            return len(self._data(result) or rows)
-        except Exception as exc:
-            self._error(exc)
-            return 0
+        """
+        Two-Plane Security: Central mailbox content retention is PROHIBITED.
+        Gmail content lives transiently in browser RAM on the Display Plane.
+        No raw email records are written to remote databases.
+        """
+        return 0
+
 
     def get_emails(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         if not self.enabled or not user_id:

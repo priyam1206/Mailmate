@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=11">
+  <link rel="stylesheet" href="./dashboard.css?v=12">
 </head>
 <body>
   <div class="app-shell">
@@ -96,24 +96,137 @@
       </section>
 
       <section class="tab-panel" id="tab-work">
+        <div class="work-permission-banner" id="workPermissionBanner" style="display:none;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.35);border-radius:10px;padding:12px 16px;margin-bottom:16px;align-items:center;justify-content:space-between;gap:12px;">
+          <div style="display:flex;align-items:center;gap:10px;font-size:0.85rem;color:#fef08a;">
+            <i class="fas fa-triangle-exclamation" style="color:#eab308;font-size:1.1rem;"></i>
+            <span><strong>Google reconnection required for Gmail drafts &amp; sending</strong> — Your current Google login is read-only. Reconnect Google once to grant <code>gmail.modify</code> so Kyle can stage and send Gmail replies.</span>
+          </div>
+          <a href="/auth/google" class="btn btn-primary" style="padding:6px 14px;font-size:0.8rem;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:6px;"><i class="fas fa-rotate"></i> Reconnect Google</a>
+        </div>
         <div class="work-layout">
+
           <aside class="work-history">
             <div class="section-heading"><p class="section-label">Work history</p><span id="workCount">0 runs</span></div>
             <div class="work-list" id="workList"></div>
           </aside>
-          <section class="work-run">
+          <section class="work-run" id="workRunInspector">
+            <!-- Header: Clean Title, Status Badge, Submeta -->
             <div class="run-heading">
-              <div><p class="section-label">Selected run</p><h2 id="runTitle">Inbox priority review</h2></div>
-              <span class="run-status">In progress</span>
+              <div>
+                <h2 id="runTitle">Select a Work Task</h2>
+                <p class="work-submeta" id="workSubMeta" style="margin:4px 0 0;font-size:0.82rem;color:var(--muted);display:none;">
+                  <span id="workSourceSender">Sender</span> · <span>Gmail</span> · <span id="workDeadlineBadge" class="work-deadline-pill">Due</span>
+                </p>
+              </div>
+              <span class="run-status badge-queued" id="workRunStatus">Idle</span>
             </div>
-            <div class="agent-timeline" id="agentTimeline">
-              <article><span>K</span><div><strong>Kyle</strong><p>Found actionable requests in your recent Gmail.</p></div></article>
-              <article><span>P</span><div><strong>Planner</strong><p>Organizing them by urgency and dependency.</p></div></article>
-              <article><span>G</span><div><strong>Gmail agent</strong><p>Using processed inbox context from Supabase.</p></div></article>
-            </div>
-            <div class="conversation-block">
-              <p class="section-label">Conversation</p>
-              <div class="messages" id="messages"></div>
+
+            <div class="work-run-content" id="workRunContent">
+              <!-- Empty state placeholder when no job is selected -->
+              <div id="workEmptyPlaceholder" style="padding:40px 20px;text-align:center;color:var(--muted);">
+                <i class="fas fa-robot" style="font-size:2rem;margin-bottom:12px;opacity:0.5;"></i>
+                <p>Select a work task from the left to inspect prepared materials.</p>
+              </div>
+
+              <!-- Top Primary Card: KYLE PREPARED (Above the fold) -->
+              <div class="work-prepared-card" id="workPreparedCard" style="display:none;">
+                <div class="prepared-header">
+                  <span class="prepared-tag"><i class="fas fa-sparkles"></i> KYLE PREPARED</span>
+                  <small id="workDraftBadge" class="draft-badge"></small>
+                </div>
+
+                <!-- Policy Verdict / Eligibility Banner -->
+                <div class="policy-banner" id="workPolicyBanner">
+                  <div class="policy-banner-header">
+                    <span class="policy-badge" id="workPolicyBadge">SAFETY POLICY</span>
+                    <span class="policy-category" id="workPolicyCategory">Checking...</span>
+                  </div>
+                  <p class="policy-explanation" id="workPolicyExplanation">Evaluating auto-send eligibility...</p>
+                </div>
+
+                <!-- Auto-Send Countdown Bar (visible during countdown) -->
+                <div class="countdown-card" id="workCountdownCard" style="display:none;">
+                  <div class="countdown-info">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <i class="fas fa-clock fa-spin" style="color:var(--accent);"></i>
+                      <strong>AUTO-SEND APPROVED BY POLICY</strong>
+                    </div>
+                    <span class="countdown-timer-text" id="countdownTimerText">Sending in 20s…</span>
+                  </div>
+                  <div class="countdown-progress-track">
+                    <div class="countdown-progress-bar" id="countdownProgressBar"></div>
+                  </div>
+                  <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+                    <button class="secondary-btn compact-btn" id="workCancelCountdownBtn" type="button" style="color:#ef4444;border-color:rgba(239,68,68,0.3);">
+                      <i class="fas fa-ban"></i> Cancel Auto-Send
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Reply Editor -->
+                <div class="work-reply-box">
+                  <label class="reply-label" for="workReplyText">Reply Draft</label>
+                  <textarea class="work-reply-preview" id="workReplyText" rows="6" placeholder="Prepared reply will appear here..."></textarea>
+                  
+                  <!-- Primary Action Bar directly below reply -->
+                  <div class="work-action-row">
+                    <div class="left-actions">
+                      <button class="secondary-btn" id="workSaveDraftBtn" type="button" title="Save changes to draft without sending">
+                        <i class="fas fa-floppy-disk"></i> Save edit
+                      </button>
+                      <button class="secondary-btn" id="workRerunBtn" type="button" title="Re-analyze and regenerate">
+                        <i class="fas fa-rotate-right"></i> Rerun
+                      </button>
+                    </div>
+                    <div class="right-actions">
+                      <button class="primary-btn" id="workApproveBtn" type="button">
+                        <i class="fas fa-paper-plane"></i> Approve &amp; Send
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Generated Workspace Files -->
+                <div class="work-files-box" id="workArtifactsSection">
+                  <label class="reply-label">Generated Workspace Files</label>
+                  <div class="work-artifacts-list" id="workArtifactsList"></div>
+                </div>
+              </div>
+
+              <!-- Collapsible Secondary Sections (Below the fold) -->
+              <div class="work-collapsibles-group" id="workCollapsiblesGroup" style="display:none;">
+                <!-- Collapsible 1: What Kyle did -->
+                <details class="work-collapsible" id="workStepsDetails" open>
+                  <summary class="work-summary">
+                    <span class="summary-left">
+                      <i class="fas fa-chevron-right chevron-icon"></i>
+                      <strong id="workStepsSummaryTitle">What Kyle did (5 steps)</strong>
+                    </span>
+                    <small class="summary-badge" id="workStepsStatusBadge">Complete</small>
+                  </summary>
+                  <div class="collapsible-body">
+                    <div class="agent-timeline" id="agentTimeline"></div>
+                  </div>
+                </details>
+
+                <!-- Collapsible 2: Source email -->
+                <details class="work-collapsible" id="workSourceDetails">
+                  <summary class="work-summary">
+                    <span class="summary-left">
+                      <i class="fas fa-chevron-right chevron-icon"></i>
+                      <strong>Source email</strong>
+                    </span>
+                    <small class="summary-badge" id="workSourceSubjectBadge">Subject</small>
+                  </summary>
+                  <div class="collapsible-body">
+                    <div class="work-source-card" id="workSourceCard">
+                      <p><strong id="workSourceSenderFull">Sender</strong> · <span id="workSourceSubjectFull">Subject</span></p>
+                      <p class="source-snippet" id="workSourceSnippet" style="margin-top:6px;font-size:0.85rem;color:var(--text);"></p>
+                      <small id="workSourceMeta" style="color:var(--muted);display:block;margin-top:4px;"></small>
+                    </div>
+                  </div>
+                </details>
+              </div>
             </div>
           </section>
         </div>
@@ -204,7 +317,80 @@
           <article><div><h2>Google profile</h2><p>Your signed-in name and profile picture are used in this workspace.</p></div><span>Current session</span></article>
           <article><div><h2>Processed inbox cache</h2><p>Supabase is used first. Gmail is checked for changes only when needed, and new information replaces stale processed context.</p></div><span id="cacheSettingsStatus">Checking</span></article>
           <article><div><h2>Cache policy</h2><p id="cachePolicyText">Checking cache policy...</p></div><span>Automatic</span></article>
-          <article><div><h2>Kyle voice</h2><p>Browser speech recognition handles voice input and browser text-to-speech reads Kyle's response.</p></div><span>Browser voice</span></article>
+          <article class="settings-privacy-article">
+            <div style="width:100%;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+                <div>
+                  <h2>Two-Plane Privacy Architecture</h2>
+                  <p>Strict separation between your in-browser Gmail display and autonomous AI processing.</p>
+                </div>
+                <span class="badge-tag" style="padding:4px 8px;font-size:0.75rem;background:rgba(16,185,129,0.15);color:#10b981;border-radius:6px;"><i class="fas fa-shield-check"></i> Local Gate Active</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;">
+                <div style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">
+                  <strong style="color:var(--text);font-size:0.85rem;"><i class="fas fa-desktop" style="color:#0ea5e9;margin-right:6px;"></i> Display Plane (Browser RAM)</strong>
+                  <p style="margin:6px 0 0;font-size:0.78rem;color:var(--muted);line-height:1.4;">All authorized emails are rendered in your browser so you never miss messages. Central database mailbox retention is completely prohibited.</p>
+                </div>
+                <div style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">
+                  <strong style="color:var(--text);font-size:0.85rem;"><i class="fas fa-brain" style="color:#a855f7;margin-right:6px;"></i> AI / Work Plane (Privacy Gated)</strong>
+                  <p style="margin:6px 0 0;font-size:0.78rem;color:var(--muted);line-height:1.4;">A deterministic local Privacy Gate screens out financial alerts, OTPs, and sensitive emails before any model (Gemini / LM Studio) or Work Agent is called.</p>
+                </div>
+              </div>
+            </div>
+          </article>
+          <article class="settings-autopilot-article">
+
+            <div style="width:100%;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+                <div>
+                  <h2>Work Agent Autopilot</h2>
+                  <p>Configure automatic email preparation and safety-gated dispatch.</p>
+                </div>
+                <span class="badge-tag" id="autopilotStatusTag" style="padding:4px 8px;font-size:0.75rem;background:rgba(255,255,255,0.08);border-radius:6px;">Safe replies only</span>
+              </div>
+              
+              <div class="settings-autopilot-grid" style="display:flex;flex-direction:column;gap:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div>
+                    <strong>Automatic preparation</strong>
+                    <p style="margin:0;font-size:0.8rem;color:var(--muted);">Analyze inbound actionable emails and stage useful workspace materials.</p>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="settingAutoPrep" checked><span></span></label>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div>
+                    <strong>Create Gmail drafts</strong>
+                    <p style="margin:0;font-size:0.8rem;color:var(--muted);">Stage prepared replies as real Gmail drafts tied to the original thread.</p>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="settingCreateDrafts" checked><span></span></label>
+                </div>
+
+                <div style="padding-top:4px;">
+                  <p style="font-weight:600;font-size:0.85rem;margin:4px 0 8px;">Autopilot autonomy level</p>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label class="autopilot-radio-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:0.85rem;">
+                      <input type="radio" name="autoSendMode" value="off" style="margin-top:3px;">
+                      <span><strong>Off</strong> — Kyle acts only when asked.</span>
+                    </label>
+                    <label class="autopilot-radio-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:0.85rem;">
+                      <input type="radio" name="autoSendMode" value="prepare" style="margin-top:3px;">
+                      <span><strong>Prepare only</strong> — Automatically summarize actionable mail, create checklists, research, create files, and draft replies. No sends.</span>
+                    </label>
+                    <label class="autopilot-radio-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:0.85rem;">
+                      <input type="radio" name="autoSendMode" value="safe_replies" checked style="margin-top:3px;">
+                      <span><strong>Safe replies (Recommended)</strong> — Everything above plus routine acknowledgements auto-send after a 20s cancelable countdown. Commitments, files, and assignments wait for approval.</span>
+                    </label>
+                    <label class="autopilot-radio-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:0.85rem;">
+                      <input type="radio" name="autoSendMode" value="full_prepare" style="margin-top:3px;">
+                      <span><strong>Full preparation</strong> — Automatically research, generate reports, create PDF/DOCX, prepare attachments, and create Gmail drafts. Substantive commitments held for review.</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </article>
+
           <article class="settings-danger-row">
             <div><h2>Sign out</h2><p>Remove the local Google session. Supabase history is retained, but the dashboard cannot access it while signed out.</p></div>
             <button class="logout-btn" id="logoutBtn" type="button"><i class="fas fa-arrow-right-from-bracket"></i> Sign out</button>
@@ -247,19 +433,19 @@
     </section>
   </div>
 
-  <script src="./mailmate-objects.js?v=11"></script>
-  <script src="./mailmate-context.js?v=11"></script>
-  <script src="./kyle-referents.js?v=11"></script>
-  <script src="./kyle-state.js?v=11"></script>
-  <script src="./kyle-policy.js?v=11"></script>
-  <script src="./kyle-observation.js?v=11"></script>
-  <script src="./kyle-motion.js?v=11"></script>
-  <script src="./kyle-tools.js?v=11"></script>
-  <script src="./kyle-executor.js?v=11"></script>
-  <script src="./kyle-planner.js?v=11"></script>
-  <script src="./kyle-audio.js?v=11"></script>
-  <script src="./kyle-ui.js?v=11"></script>
-  <script src="./kyle.js?v=11"></script>
-  <script src="./dashboard.js?v=11"></script>
+  <script src="./mailmate-objects.js?v=15"></script>
+  <script src="./mailmate-context.js?v=15"></script>
+  <script src="./kyle-referents.js?v=15"></script>
+  <script src="./kyle-state.js?v=15"></script>
+  <script src="./kyle-policy.js?v=15"></script>
+  <script src="./kyle-observation.js?v=15"></script>
+  <script src="./kyle-motion.js?v=15"></script>
+  <script src="./kyle-tools.js?v=15"></script>
+  <script src="./kyle-executor.js?v=15"></script>
+  <script src="./kyle-planner.js?v=15"></script>
+  <script src="./kyle-audio.js?v=15"></script>
+  <script src="./kyle-ui.js?v=15"></script>
+  <script src="./kyle.js?v=15"></script>
+  <script src="./dashboard.js?v=15"></script>
 </body>
 </html>

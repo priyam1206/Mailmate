@@ -3,8 +3,15 @@ import google.generativeai as genai
 import json
 import datetime
 from services.google_service import get_calendar_events, build, get_credentials
+from services.privacy_gate import PrivacyGate
 
 def get_dashboard_overview(threads):
+    # Enforce Privacy Gate: Sensitive threads (bank alerts, OTPs, promotions) NEVER reach Gemini
+    safe_threads = PrivacyGate.filter_threads_for_ai(threads or [])
+    shielded_count = len(threads or []) - len(safe_threads)
+    if shielded_count > 0:
+        print(f"[PrivacyGate] Shielded {shielded_count} sensitive/private thread(s) from Gemini AI analysis.")
+
     genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
     model = genai.GenerativeModel('gemini-3.5-flash-lite', generation_config={"response_mime_type": "application/json"})
 
@@ -21,15 +28,19 @@ RULES:
 2. If latest message in thread is 'outbound' and has no reply, it usually means waiting_on_others, unless a task assigned to 'me' is still incomplete.
 3. Ignore promotional/reddit emails.
 Threads:
-{json.dumps(threads)}
+{json.dumps(safe_threads)}
 """
     try:
         res = model.generate_content(prompt)
-        return json.loads(res.text)
+        parsed = json.loads(res.text)
+        # Ensure total email metric accurately reflects all visible emails on the Display Plane
+        if "metrics" in parsed:
+            parsed["metrics"]["emails"] = len(threads or [])
+        return parsed
     except Exception as e:
         print("Gemini error:", e)
         return {
-            "metrics": {"emails": len(threads), "important": 0, "actions": 0},
+            "metrics": {"emails": len(threads or []), "important": 0, "actions": 0},
             "needs_attention": [],
             "waiting_on_others": [],
             "ai_insight": "Error analyzing emails."
@@ -76,7 +87,8 @@ def generate_kyle_agent_reply(message, compact_context):
 Reply like a person speaking, in one or two short sentences and at most 40 words.
 No markdown, bullets, headings, or technical narration.
 The app has already resolved words like this, that, and it. Treat the resolved object as authoritative.
-Never claim an email was sent or data was deleted. If an editor was opened, say it is open for review.
+Never claim an email was sent or data was deleted. If an editor or draft was created, say it is waiting for your review in the Work tab.
+If the user asks what you prepared, what tasks exist, or asks about work, refer to the work items waiting for review in compact context (mention the sender or task and that the response draft/checklist is waiting for approval in the Work tab).
 
 Compact context: {json.dumps(compact_context, ensure_ascii=False)}
 User: {message}

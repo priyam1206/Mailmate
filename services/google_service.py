@@ -14,11 +14,23 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / 'api.env')
+
 CREDENTIALS_FILE = BASE_DIR / 'data' / 'google_credentials.json'
 TOKEN_URI = 'https://oauth2.googleapis.com/token'
 
-# gmail.modify includes Gmail read access and is required for moving messages to Trash.
+class GmailInsufficientPermissionError(RuntimeError):
+    """Raised when Gmail API returns 403 due to missing gmail.modify or write scopes."""
+    def __init__(self, message="Google account needs reconnection to grant Gmail draft & send permissions (gmail.modify)."):
+        super().__init__(message)
+        self.status_code = 403
+        self.code = "insufficient_scopes"
+        self.reconnect_url = "/auth/google"
+
+# gmail.modify includes Gmail read access and is required for moving messages to Trash and creating/sending drafts.
 # Existing users with an older gmail.readonly token must reconnect Google once.
 SCOPES = [
     'openid',
@@ -27,6 +39,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/calendar',
 ]
+
 
 
 def _parse_expiry(value):
@@ -42,15 +55,44 @@ def _parse_expiry(value):
 
 
 def get_google_config():
+    client_id = os.getenv('GOOGLE_CLIENT_ID')
+    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+    if (not client_id or not client_secret) and CREDENTIALS_FILE.exists():
+        try:
+            d = json.loads(CREDENTIALS_FILE.read_text(encoding='utf-8'))
+            client_id = client_id or d.get('client_id')
+            client_secret = client_secret or d.get('client_secret')
+        except Exception:
+            pass
     return {
         'web': {
-            'client_id': os.getenv('GOOGLE_CLIENT_ID'),
-            'client_secret': os.getenv('GOOGLE_CLIENT_SECRET'),
+            'client_id': client_id,
+            'client_secret': client_secret,
             'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
             'token_uri': TOKEN_URI,
             'redirect_uris': [os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')],
         }
     }
+
+
+def get_gmail_permissions():
+    """Returns whether the active credentials have write/draft/send scopes."""
+    creds = get_credentials()
+    if not creds:
+        return {'connected': False, 'can_write': False, 'scopes': []}
+    scopes = set(creds.scopes or [])
+    can_write = bool(scopes.intersection({
+        'https://mail.google.com/',
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/gmail.compose',
+        'https://www.googleapis.com/auth/gmail.send'
+    }))
+    return {
+        'connected': True,
+        'can_write': can_write,
+        'scopes': sorted(list(scopes))
+    }
+
 
 
 def get_credentials():
@@ -469,3 +511,102 @@ def get_gmail_threads():
         })
 
     return results, emails
+
+
+def create_gmail_draft(to, subject, body, thread_id=None, in_reply_to=None):
+    """Create an actual Gmail draft tied to a thread so it appears in Gmail and can be reviewed."""
+    from email.message import EmailMessage
+    creds = get_credentials()
+    if not creds:
+        raise RuntimeError("Google account not connected")
+    service = build('gmail', 'v1', credentials=creds)
+
+    msg = EmailMessage()
+    msg.set_content(body or '')
+    msg['To'] = to or ''
+    msg['Subject'] = subject or 'Re: Update'
+    if in_reply_to:
+        msg['In-Reply-To'] = in_reply_to
+        msg['References'] = in_reply_to
+
+    encoded_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+    body_payload = {
+        'message': {
+            'raw': encoded_message
+        }
+    }
+    if thread_id:
+        body_payload['message']['threadId'] = thread_id
+
+    try:
+        draft = service.users().drafts().create(userId='me', body=body_payload).execute()
+        return {
+            'id': draft.get('id'),
+            'message_id': (draft.get('message') or {}).get('id'),
+            'thread_id': (draft.get('message') or {}).get('threadId') or thread_id
+        }
+    except HttpError as err:
+        if err.resp.status == 403 or 'insufficient' in str(err).lower():
+            raise GmailInsufficientPermissionError()
+        raise err
+
+
+def update_gmail_draft(draft_id, to, subject, body, thread_id=None, in_reply_to=None):
+    """Update an existing Gmail draft with new or edited content before sending."""
+    from email.message import EmailMessage
+    creds = get_credentials()
+    if not creds:
+        raise RuntimeError("Google account not connected")
+    service = build('gmail', 'v1', credentials=creds)
+
+    msg = EmailMessage()
+    msg.set_content(body or '')
+    msg['To'] = to or ''
+    msg['Subject'] = subject or 'Re: Update'
+    if in_reply_to:
+        msg['In-Reply-To'] = in_reply_to
+        msg['References'] = in_reply_to
+
+    encoded_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+    body_payload = {
+        'id': draft_id,
+        'message': {
+            'raw': encoded_message
+        }
+    }
+    if thread_id:
+        body_payload['message']['threadId'] = thread_id
+
+    try:
+        draft = service.users().drafts().update(userId='me', id=draft_id, body=body_payload).execute()
+        return {
+            'id': draft.get('id'),
+            'message_id': (draft.get('message') or {}).get('id'),
+            'thread_id': (draft.get('message') or {}).get('threadId') or thread_id
+        }
+    except HttpError as err:
+        if err.resp.status == 403 or 'insufficient' in str(err).lower():
+            raise GmailInsufficientPermissionError()
+        raise err
+
+
+def send_gmail_draft(draft_id):
+    """Send an exact existing draft after explicit human approval."""
+    creds = get_credentials()
+    if not creds:
+        raise RuntimeError("Google account not connected")
+    service = build('gmail', 'v1', credentials=creds)
+    try:
+        sent = service.users().drafts().send(userId='me', body={'id': draft_id}).execute()
+        return {
+            'id': sent.get('id'),
+            'thread_id': sent.get('threadId'),
+            'labels': sent.get('labelIds', [])
+        }
+    except HttpError as err:
+        if err.resp.status == 403 or 'insufficient' in str(err).lower():
+            raise GmailInsufficientPermissionError()
+        raise err
+
+
+

@@ -1328,3 +1328,393 @@ h2 { font-size: 1rem; }
   cursor: wait;
   transform: none;
 }
+
+/* =========================================================
+   Work Agent & Human-in-the-Loop Approval UI
+   ========================================================= */
+.work-run-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.work-source-card {
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.work-source-card p {
+  margin: 4px 0 2px 0;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.work-reply-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.work-reply-preview {
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text);
+  resize: vertical;
+  outline: none;
+  transition: border-color 150ms ease;
+}
+
+.work-reply-preview:focus {
+  border-color: var(--text-accent);
+}
+
+.work-artifacts-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Primary Above-the-Fold Prepared Card */
+.work-prepared-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.prepared-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.prepared-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.draft-badge {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* Policy Verdict Banner */
+.policy-banner {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.policy-banner.low-risk {
+  border-color: rgba(30, 160, 80, 0.35);
+  background: rgba(30, 160, 80, 0.06);
+}
+
+.policy-banner.requires-approval {
+  border-color: rgba(220, 150, 30, 0.35);
+  background: rgba(220, 150, 30, 0.06);
+}
+
+.policy-banner.auto-sent {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.policy-banner-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.policy-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.policy-banner.low-risk .policy-badge {
+  background: rgba(30, 160, 80, 0.2);
+  color: #22c55e;
+}
+
+.policy-banner.requires-approval .policy-badge {
+  background: rgba(220, 150, 30, 0.2);
+  color: #f59e0b;
+}
+
+.policy-category {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.policy-explanation {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+/* 20-Second Countdown Card */
+.countdown-card {
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(220, 150, 30, 0.4);
+  background: rgba(220, 150, 30, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.countdown-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+}
+
+.countdown-timer-text {
+  font-weight: 700;
+  color: #f59e0b;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown-progress-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.countdown-progress-bar {
+  height: 100%;
+  width: 100%;
+  background: #f59e0b;
+  transition: width 1s linear;
+}
+
+/* Reply Editor Box & Action Row */
+.work-reply-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reply-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.work-action-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.work-action-row .left-actions,
+.work-action-row .right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Workspace Files Box */
+.work-files-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.work-artifacts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.work-artifact-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.84rem;
+}
+
+.work-artifact-item .artifact-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+/* Collapsible Disclosure Sections */
+.work-collapsibles-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.work-collapsible {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.work-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 0.85rem;
+}
+
+.work-summary::-webkit-details-marker {
+  display: none;
+}
+
+.work-summary .summary-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.work-summary .chevron-icon {
+  font-size: 0.7rem;
+  color: var(--muted);
+  transition: transform 0.18s ease;
+}
+
+.work-collapsible[open] .work-summary .chevron-icon {
+  transform: rotate(90deg);
+}
+
+.work-summary .summary-badge {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.collapsible-body {
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.work-deadline-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(220, 150, 30, 0.15);
+  color: #d97706;
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+
+/* Run Status Badges */
+.run-status.badge-queued { background: rgba(140, 140, 140, 0.12); color: var(--muted); }
+.run-status.badge-analyzing,
+.run-status.badge-preparing { background: rgba(50, 120, 220, 0.12); color: #3b82f6; }
+.run-status.badge-draft_ready { background: rgba(168, 85, 247, 0.12); color: #a855f7; }
+.run-status.badge-auto_send_countdown { background: rgba(245, 158, 11, 0.18); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }
+.run-status.badge-waiting_approval { background: rgba(220, 150, 30, 0.15); color: #b87810; }
+.run-status.badge-sending { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.run-status.badge-sent,
+.run-status.badge-approved_sent { background: rgba(30, 160, 80, 0.15); color: #1e8e48; }
+.run-status.badge-cancelled { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
+.run-status.badge-failed { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
+
+/* Two-Plane Privacy Gate Styles */
+.privacy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.privacy-pill.private {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.privacy-pill.work-active {
+  background: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.privacy-pill.ai-safe {
+  background: rgba(14, 165, 233, 0.12);
+  color: #7dd3fc;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+}
+
+.email-privacy-card {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.email-privacy-card.private {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #fecaca;
+}
+.email-privacy-card.safe {
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  color: #bae6fd;
+}
+.email-privacy-card.work {
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  color: #e9d5ff;
+}
+
+
+

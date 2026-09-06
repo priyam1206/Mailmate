@@ -26,10 +26,20 @@ load_dotenv(BASE_DIR / 'api.env')
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
-from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message
+from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.supabase_cache_service import supabase_cache
+from services.work_agent_service import work_agent_service
+from services.whisper_service import whisper_service
+from services.privacy_gate import PrivacyGate
+
+
+# Kick off local Whisper model preparation in background
+try:
+    whisper_service.initialize()
+except Exception as _w_err:
+    print(f"[Whisper] Background init notice: {_w_err}")
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-secret-key-123')
@@ -187,6 +197,8 @@ def health():
         "elevenLabsConfigured": bool(os.getenv('ELEVENLABS_API_KEY')),
         "calendar": calendar_access_status(),
         "calendarReadWrite": calendar_access_status().get("writable", False),
+        "gmailWrite": get_gmail_permissions().get("can_write", False),
+        "gmailPermissions": get_gmail_permissions(),
         "appTimezone": APP_TIMEZONE,
         "voiceInput": "browser-speech-recognition",
         "staticFiles": {
@@ -554,17 +566,34 @@ def _build_live_dashboard(profile, user_row, force_ai=False):
     processed_age = _cache_age_seconds(cached, 'processed_at')
     reprocess_due = processed_age is None or processed_age >= CACHE_REPROCESS_SECONDS
 
-    if supabase_id:
-        supabase_cache.save_emails(supabase_id, emails)
+    # Two-Plane Architecture: Annotate all emails with Privacy Gate for Display Plane
+    for email in emails:
+        email['privacy_gate'] = PrivacyGate.evaluate(email)
+
+    ai_shielded = sum(1 for e in emails if not e.get('privacy_gate', {}).get('ai_allowed', True))
+    work_active = sum(1 for e in emails if e.get('privacy_gate', {}).get('work_agent_allowed', False))
+    privacy_summary = {
+        "display_plane_total": len(emails),
+        "ai_allowed_count": len(emails) - ai_shielded,
+        "ai_shielded_count": ai_shielded,
+        "work_active_count": work_active,
+        "central_retention": "disabled (browser-ram-only)"
+    }
+
+    # Central mailbox retention is PROHIBITED (Gmail -> database = prohibited).
+    # Raw emails remain transient in browser RAM only.
 
     if cached and same_source and not force_ai and not reprocess_due:
         supabase_cache.mark_checked(supabase_id)
         response = _cached_response(cached, profile, user_row)
         response['cache_revalidated'] = True
+        response['emails'] = emails
+        response['privacy_summary'] = privacy_summary
         return response
 
     overview = get_dashboard_overview(threads)
     overview['emails'] = emails
+    overview['privacy_summary'] = privacy_summary
     overview['user'] = profile
     overview['user_id'] = profile.get('email') or profile.get('id') or ''
     overview['cached'] = False
@@ -574,14 +603,17 @@ def _build_live_dashboard(profile, user_row, force_ai=False):
 
     if supabase_id:
         reprocess_after = (_utc_now() + timedelta(seconds=CACHE_REPROCESS_SECONDS)).isoformat()
+        # Save derived dashboard state only; never store raw mailbox content in remote tables
+        cacheable_payload = dict(overview)
+        cacheable_payload['emails'] = []
         rich_saved = supabase_cache.save_processed_context(
-            supabase_id, overview, fingerprint, reprocess_after
+            supabase_id, cacheable_payload, fingerprint, reprocess_after
         )
-        supabase_cache.save_legacy_snapshot(supabase_id, overview)
         overview['cache_mode'] = 'processed-context' if rich_saved else 'legacy-cache'
         overview['supabase_user_id'] = supabase_id
 
     return overview
+
 
 
 def _refresh_user_in_background(profile, user_row):
@@ -635,12 +667,226 @@ def dashboard_overview():
                     app.logger.debug('Live Gmail prune skipped: %s', prune_exc)
                 response['background_refresh_started'] = started
                 response['ai_calendar_sync'] = _reconcile_ai_calendar(response, profile=profile, force=False)
+
+                # Ensure Privacy Gate metadata is attached to all Display Plane emails
+                emails = response.get('emails') or []
+                for email in emails:
+                    if 'privacy_gate' not in email:
+                        email['privacy_gate'] = PrivacyGate.evaluate(email)
+                ai_shielded = sum(1 for e in emails if not (e.get('privacy_gate') or {}).get('ai_allowed', True))
+                work_active = sum(1 for e in emails if (e.get('privacy_gate') or {}).get('work_agent_allowed', False))
+                response['privacy_summary'] = {
+                    "display_plane_total": len(emails),
+                    "ai_allowed_count": len(emails) - ai_shielded,
+                    "ai_shielded_count": ai_shielded,
+                    "work_active_count": work_active,
+                    "central_retention": "disabled (browser-ram-only)"
+                }
+
+                user_id = profile.get('email') or profile.get('id')
+
+                try:
+                    threading.Thread(target=work_agent_service.sync_and_enqueue, args=(user_id, response), daemon=True).start()
+                except Exception as sync_exc:
+                    app.logger.debug('Work agent sync skipped: %s', sync_exc)
                 return jsonify(response)
 
-        return jsonify(_build_live_dashboard(profile, user_row, force_ai=force))
+        live_payload = _build_live_dashboard(profile, user_row, force_ai=force)
+        user_id = profile.get('email') or profile.get('id')
+        try:
+            threading.Thread(target=work_agent_service.sync_and_enqueue, args=(user_id, live_payload), daemon=True).start()
+        except Exception as sync_exc:
+            app.logger.debug('Work agent sync skipped: %s', sync_exc)
+        return jsonify(live_payload)
     except Exception as exc:
         app.logger.exception('Dashboard processing failed')
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route('/api/work/jobs', methods=['GET'])
+def list_work_jobs():
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id')
+    jobs = work_agent_service.list_jobs(user_id)
+    return jsonify(jobs)
+
+
+@app.route('/api/work/jobs/<job_id>', methods=['GET'])
+def get_work_job(job_id):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id')
+    job = work_agent_service.get_job(job_id, user_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
+
+
+@app.route('/api/work/jobs/<job_id>/run', methods=['POST'])
+def run_work_job(job_id):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id')
+    job = work_agent_service.run_job(job_id, user_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
+
+
+@app.route('/api/work/jobs/<job_id>/cancel', methods=['POST'])
+def cancel_work_job(job_id):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id')
+    job = work_agent_service.cancel_job(job_id, user_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
+
+
+@app.route('/api/work/jobs/<job_id>/approve', methods=['POST'])
+def approve_work_job(job_id):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id')
+    data = request.get_json(silent=True) or {}
+    edited_reply = data.get('reply')
+    try:
+        job = work_agent_service.approve_job(job_id, user_id, edited_reply=edited_reply)
+        return jsonify({"ok": True, "job": job})
+    except GmailInsufficientPermissionError as exc:
+        app.logger.warning("Gmail approval permission error: %s", exc)
+        return jsonify({
+            "ok": False,
+            "error": "Google account needs reconnection to grant Gmail draft & send permissions (gmail.modify).",
+            "code": "insufficient_scopes",
+            "reconnect_url": "/auth/google"
+        }), 403
+    except Exception as e:
+        app.logger.exception("Job approval failed")
+        err_str = str(e).lower()
+        if "insufficient" in err_str or "permission" in err_str or "403" in err_str:
+            return jsonify({
+                "ok": False,
+                "error": "Google account needs reconnection to grant Gmail draft & send permissions (gmail.modify).",
+                "code": "insufficient_scopes",
+                "reconnect_url": "/auth/google"
+            }), 403
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/work/settings', methods=['GET', 'POST'])
+def work_settings():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        settings = work_agent_service.update_settings(data)
+        return jsonify({"ok": True, "settings": settings})
+    return jsonify(work_agent_service.get_settings())
+
+
+@app.route('/api/work/jobs/<job_id>/cancel-countdown', methods=['POST'])
+def cancel_work_countdown(job_id):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id')
+    job = work_agent_service.cancel_countdown(job_id, user_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify({"ok": True, "job": job})
+
+
+@app.route('/api/work/jobs/<job_id>/save-draft', methods=['POST'])
+def save_work_draft(job_id):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id')
+    data = request.get_json(silent=True) or {}
+    edited_reply = data.get('reply', '')
+    try:
+        job = work_agent_service.save_draft(job_id, user_id, edited_reply)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify({"ok": True, "job": job})
+    except GmailInsufficientPermissionError as exc:
+        app.logger.warning("Gmail save-draft permission error: %s", exc)
+        return jsonify({
+            "ok": False,
+            "error": "Google account needs reconnection to grant Gmail draft & send permissions (gmail.modify).",
+            "code": "insufficient_scopes",
+            "reconnect_url": "/auth/google"
+        }), 403
+    except Exception as e:
+        app.logger.exception("Save draft failed")
+        err_str = str(e).lower()
+        if "insufficient" in err_str or "permission" in err_str or "403" in err_str:
+            return jsonify({
+                "ok": False,
+                "error": "Google account needs reconnection to grant Gmail draft & send permissions (gmail.modify).",
+                "code": "insufficient_scopes",
+                "reconnect_url": "/auth/google"
+            }), 403
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+@app.route('/api/work/jobs/<job_id>/artifacts/<filename>', methods=['GET'])
+def get_work_artifact(job_id, filename):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    job_dir = BASE_DIR / 'workspaces' / job_id
+    artifact_path = job_dir / filename
+    if not artifact_path.is_file():
+        abort(404)
+    return send_from_directory(str(job_dir), filename)
+
+
+@app.route('/api/stt/status', methods=['GET'])
+def stt_status():
+    return jsonify(whisper_service.get_status())
+
+
+@app.route('/api/stt/init', methods=['POST'])
+def stt_init():
+    whisper_service.initialize()
+    return jsonify({"message": "Whisper initialization started", "status": whisper_service.get_status()})
+
+
+@app.route('/api/stt/transcribe', methods=['POST'])
+def stt_transcribe():
+    file = request.files.get('audio') or request.files.get('file')
+    if not file or file.filename == '':
+        return jsonify({"error": "No audio file provided"}), 400
+
+    import tempfile
+    suffix = Path(file.filename).suffix or '.webm'
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        file.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        result = whisper_service.transcribe(tmp_path)
+        return jsonify(result)
+    except Exception as e:
+        if str(e) == "whisper_model_loading":
+            return jsonify({"error": "Whisper model is still loading"}), 503
+        app.logger.warning(f"Whisper transcription failed: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 @app.route('/api/cache/status')
@@ -1066,7 +1312,26 @@ def _compact_context(context):
             "conflict": event.get('conflict'),
         })
 
-    return {"tasks": tasks, "calendar": calendar_events}
+    work_items = []
+    jobs = context.get('workJobs')
+    if jobs is None:
+        user_id = context.get('user_id') or 'default'
+        try:
+            jobs = work_agent_service.list_jobs(user_id)
+        except Exception:
+            jobs = []
+
+    for job in (jobs or [])[:4]:
+        work_items.append({
+            "id": job.get('id'),
+            "title": job.get('title'),
+            "status": job.get('status'),
+            "sender": (job.get('source') or {}).get('sender'),
+            "subject": (job.get('source') or {}).get('subject'),
+            "artifacts": [a.get('name') for a in (job.get('artifacts') or [])]
+        })
+
+    return {"tasks": tasks, "calendar": calendar_events, "work_items": work_items}
 
 
 def _compact_voice(text, max_chars=190):
@@ -1205,7 +1470,7 @@ def _infer_agent_actions(message, resolved, context=None):
     pages = [
         ('calendar', r'\b(open|go to|show)\s+(my\s+)?calendar\b'),
         ('inbox', r'\b(open|go to|show)\s+(my\s+)?inbox\b'),
-        ('work', r'\b(open|go to|show)\s+(my\s+)?work\b'),
+        ('work', r'\b(?:(open|go to|show)\s+(?:my\s+)?work|what did you prepare|what have you prepared|prepared work|review work)\b'),
         ('overview', r'\b(open|go to|show)\s+(the\s+)?overview\b'),
         ('status', r'\b(open|go to|show)\s+(the\s+)?status\b'),
     ]

@@ -73,6 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
     registerStaticObjects();
     initCalendarControls();
     setProfile();
+    bindAutopilotSettings();
+    loadWorkSettings();
 
     // Paint the last same-session snapshot immediately, then refresh network data.
     hydrateSessionSnapshot();
@@ -190,10 +192,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.Kyle?.setContext({
       ...(state.data || {}),
       calendarEvents: state.calendarEvents,
+      workJobs: workJobs,
       health: state.health,
       currentPage: name
     });
     if (name === 'calendar') refreshCalendar(false);
+    if (name === 'work') renderWork(state.data);
     console.log('[Mailmate] navigation', name);
   }
 
@@ -256,6 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderStatus();
       renderIntegrations();
       renderCacheSettings();
+      renderWorkPermissions();
       window.Kyle?.setContext({
         ...(state.data || {}),
         calendarEvents: state.calendarEvents,
@@ -266,6 +271,17 @@ document.addEventListener('DOMContentLoaded', () => {
       addError('Health check failed: ' + error.message);
     }
   }
+
+  function renderWorkPermissions() {
+    const banner = $('workPermissionBanner');
+    if (!banner) return;
+    if (state.health && state.health.gmailWrite === false) {
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
 
   function renderCacheSettings() {
     const status = $('cacheSettingsStatus');
@@ -412,6 +428,58 @@ document.addEventListener('DOMContentLoaded', () => {
     renderWork(data);
   }
 
+  function privacyPillHtml(gate) {
+    if (!gate) return '';
+    if (gate.work_agent_allowed) {
+      return `<span class="privacy-pill work-active" title="Actionable: Work Agent active"><i class="fas fa-robot"></i> Work Active</span>`;
+    }
+    if (gate.ai_allowed === false) {
+      return `<span class="privacy-pill private" title="Private: Excluded from AI &amp; Work Agent (${escapeHtml(gate.reason || gate.label || 'Sensitive')})"><i class="fas fa-shield-halved"></i> Private</span>`;
+    }
+    return `<span class="privacy-pill ai-safe" title="Safe for local AI overview"><i class="fas fa-eye"></i> AI Safe</span>`;
+  }
+
+  function privacyDetailBox(gate) {
+    if (!gate) return '';
+    if (gate.ai_allowed === false) {
+      return `
+        <div class="email-privacy-card private">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i class="fas fa-shield-halved" style="font-size:1.1rem;color:#f87171;"></i>
+            <div>
+              <strong>Display Plane Only</strong> · Excluded from AI &amp; Work Agent
+              <p style="margin:2px 0 0;font-size:0.75rem;opacity:0.85;">${escapeHtml(gate.reason || 'Contains financial, security, or sensitive information.')}</p>
+            </div>
+          </div>
+          <span style="font-size:0.72rem;background:rgba(239,68,68,0.2);padding:2px 8px;border-radius:6px;white-space:nowrap;">No AI Transmission</span>
+        </div>`;
+    }
+    if (gate.work_agent_allowed) {
+      return `
+        <div class="email-privacy-card work">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i class="fas fa-robot" style="font-size:1.1rem;color:#c084fc;"></i>
+            <div>
+              <strong>Actionable Task Plane</strong> · Work Agent active
+              <p style="margin:2px 0 0;font-size:0.75rem;opacity:0.85;">${escapeHtml(gate.reason || 'Coursework or project deliverable.')}</p>
+            </div>
+          </div>
+          <span style="font-size:0.72rem;background:rgba(168,85,247,0.2);padding:2px 8px;border-radius:6px;white-space:nowrap;">Autonomous Prep</span>
+        </div>`;
+    }
+    return `
+      <div class="email-privacy-card safe">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <i class="fas fa-circle-check" style="font-size:1.1rem;color:#38bdf8;"></i>
+          <div>
+            <strong>General Communication</strong> · Safe for local AI overview
+            <p style="margin:2px 0 0;font-size:0.75rem;opacity:0.85;">${escapeHtml(gate.reason || 'Direct correspondence; suitable for contextual summarization.')}</p>
+          </div>
+        </div>
+        <span style="font-size:0.72rem;background:rgba(14,165,233,0.2);padding:2px 8px;border-radius:6px;white-space:nowrap;">AI Safe</span>
+      </div>`;
+  }
+
   function renderEmails(emails) {
     window.MailmateObjects?.unregisterType('email');
     const filtered = emails.filter(email => {
@@ -429,7 +497,10 @@ document.addEventListener('DOMContentLoaded', () => {
           <article class="email-item ${selected ? 'is-selected' : ''} ${email.is_read === false ? 'is-unread' : ''} ${isImportant(email) ? 'is-important' : ''}" data-index="${index}" data-kyle-type="email" data-kyle-id="${escapeHtml(emailKey(email))}" data-kyle-label="${escapeHtml(email.subject || 'No subject')}">
             <span class="email-marker"></span>
             <div class="email-copy">
-              <p class="email-sender">${escapeHtml(senderName(email.sender))}</p>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">
+                <p class="email-sender">${escapeHtml(senderName(email.sender))}</p>
+                ${privacyPillHtml(email.privacy_gate)}
+              </div>
               <p class="email-subject">${escapeHtml(email.subject || 'No subject')}</p>
               <p class="email-preview">${escapeHtml(email.snippet || 'No preview available.')}</p>
             </div>
@@ -517,10 +588,14 @@ document.addEventListener('DOMContentLoaded', () => {
       <header class="email-detail-header">
         <div class="email-detail-title-row">
           <p class="section-label">${isImportant(email) ? 'Needs attention' : 'Message'}</p>
-          <button class="email-trash-btn" id="emailTrashBtn" type="button" title="Move this message to Gmail Trash"><i class="far fa-trash-can"></i> Trash</button>
+          <div style="display:flex;align-items:center;gap:8px;">
+            ${privacyPillHtml(email.privacy_gate)}
+            <button class="email-trash-btn" id="emailTrashBtn" type="button" title="Move this message to Gmail Trash"><i class="far fa-trash-can"></i> Trash</button>
+          </div>
         </div>
         <h2>${escapeHtml(email.subject || 'No subject')}</h2>
         <div class="email-detail-meta"><span>${escapeHtml(email.sender || 'Unknown sender')}</span><time>${escapeHtml(formatDate(email.date || email.timestamp, true))}</time></div>
+        ${privacyDetailBox(email.privacy_gate)}
       </header>
       <div class="email-body" ${loading ? 'aria-busy="true"' : ''}>${loading ? '<span class="email-loading">Loading full message...</span>' : escapeHtml(email.body || email.snippet || 'This message has no readable text body.')}</div>`;
     $('emailTrashBtn')?.addEventListener('click', () => trashEmail(email));
@@ -532,6 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, els.emailDetail);
     window.MailmateContext?.open(reference);
   }
+
 
   async function trashEmail(email) {
     const id = String(emailKey(email) || '');
@@ -579,39 +655,553 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 
-  function renderWork(data) {
-    const attention = data.needs_attention || [];
-    const actions = attention.slice(0, 6).map((item, index) => ({
-      title: item.subject || item.title || conciseActionTitle(item.description || item.reason) || (index === 0 ? 'Do this first' : 'Next task'),
-      body: item.description || item.reason || item.subject || 'Review this item.'
-    }));
-    els.workCount.textContent = `${actions.length} run${actions.length === 1 ? '' : 's'}`;
-    els.workList.innerHTML = actions.length
-      ? actions.map((action, index) => `<article class="work-item ${index === 0 ? 'active' : ''}" data-index="${index}" data-kyle-type="work-item" data-kyle-id="work-${index}" data-kyle-label="${escapeHtml(action.title)}"><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(action.body)}</p></article>`).join('')
-      : '<article class="work-item active"><strong>No work runs yet</strong><p>Actionable Gmail threads will appear here.</p></article>';
+  let workJobs = [];
+  let selectedJobId = null;
+  let countdownTimerInterval = null;
 
-    [...els.workList.querySelectorAll('.work-item[data-index]')].forEach(item => {
-      const action = actions[Number(item.dataset.index)];
-      const reference = { type: 'work-item', id: item.dataset.kyleId, label: action.title };
-      window.MailmateObjects?.register({ ...reference, page: 'work', metadata: { description: action.body } }, item);
+  function cleanJobTitle(title, subject = '') {
+    const raw = title || subject || 'Work Task';
+    let cleaned = raw.replace(/^(?:assignment|task|follow-?up|re|fwd|todo)[\s:]+/i, '').trim();
+    if (!cleaned || cleaned.toLowerCase() === 'no subject') {
+      cleaned = (subject && subject.toLowerCase() !== 'no subject') ? subject : 'DA Submission';
+    }
+    cleaned = cleaned.replace(/^(?:assignment|task|follow-?up|re|fwd|todo)[\s:]+/i, '').trim();
+    if (!cleaned) cleaned = 'DA Submission';
+
+    const acronyms = new Set(['da', 'os', 'ai', 'stt', 'tts', 'api', 'db', 'ui', 'ux', 'ml', 'llm', 'cse', 'ece', 'vit']);
+    return cleaned.split(/\s+/).map(w => {
+      const low = w.toLowerCase().replace(/[^\w]/g, '');
+      if (acronyms.has(low)) return w.replace(/[a-zA-Z]+/g, low.toUpperCase());
+      if (w === w.toUpperCase() && w.length > 1) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    }).join(' ');
+  }
+
+  function formatRelativeDeadline(isoString) {
+    if (!isoString) return 'No deadline set';
+    try {
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return isoString;
+      const now = new Date();
+      const diffMs = date.getTime() - now.getTime();
+      const diffMins = Math.round(diffMs / 60000);
+
+      const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const isToday = date.toDateString() === now.toDateString();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const isTomorrow = date.toDateString() === tomorrow.toDateString();
+
+      if (diffMins > 0 && diffMins <= 60) {
+        return `Due in ${diffMins} min`;
+      }
+      if (isToday) {
+        return `Today · ${timeStr}`;
+      }
+      if (isTomorrow) {
+        return `Tomorrow · ${timeStr}`;
+      }
+      const dayStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      return `${dayStr} · ${timeStr}`;
+    } catch (_) {
+      return isoString;
+    }
+  }
+
+  async function renderWork(data) {
+    try {
+      const res = await fetch(`${API_BASE}/api/work/jobs`);
+      if (res.ok) {
+        workJobs = await res.json();
+      }
+    } catch (e) {
+      console.warn('Failed to load work jobs:', e);
+    }
+
+    if (!workJobs || workJobs.length === 0) {
+      const attention = data?.needs_attention || [];
+      els.workCount.textContent = `${attention.length} runs`;
+      if (attention.length === 0) {
+        els.workList.innerHTML = '<article class="work-item active"><strong>No work tasks yet</strong><p>Actionable Gmail threads will appear here.</p></article>';
+        const emptyPl = $('workEmptyPlaceholder');
+        if (emptyPl) emptyPl.style.display = 'block';
+        const prepCard = $('workPreparedCard');
+        if (prepCard) prepCard.style.display = 'none';
+        const colls = $('workCollapsiblesGroup');
+        if (colls) colls.style.display = 'none';
+        return;
+      }
+    }
+
+    els.workCount.textContent = `${workJobs.length} run${workJobs.length === 1 ? '' : 's'}`;
+
+    if (!selectedJobId && workJobs.length > 0) {
+      selectedJobId = workJobs[0].id;
+    }
+
+    els.workList.innerHTML = workJobs.map((job, idx) => {
+      const isSel = job.id === selectedJobId;
+      const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
+      const statusClass = `badge-${job.status}`;
+      const statusLabel = job.status === 'waiting_approval' ? 'Ready for review' :
+                          job.status === 'auto_send_countdown' ? 'Auto-sending in 20s' :
+                          job.status === 'preparing' || job.status === 'analyzing' || job.status === 'working' ? 'Working...' :
+                          job.status === 'sent' || job.status === 'approved_sent' ? 'Sent via Gmail' :
+                          job.status === 'cancelled' ? 'Cancelled' : 'Queued';
+      const senderDisplay = (job.source?.sender || '').split('<')[0].trim();
+      return `
+        <article class="work-item ${isSel ? 'active' : ''}" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <strong>${escapeHtml(displayTitle)}</strong>
+            <span class="run-status ${statusClass}" style="font-size:0.68rem;padding:2px 6px;">${statusLabel}</span>
+          </div>
+          <p>${escapeHtml(senderDisplay ? senderDisplay + ' · ' : '')}${escapeHtml(job.source?.snippet || job.source?.subject || 'Preparation work')}</p>
+        </article>
+      `;
+    }).join('');
+
+    [...els.workList.querySelectorAll('.work-item[data-job-id]')].forEach(item => {
+      const jId = item.dataset.jobId;
+      const job = workJobs.find(j => j.id === jId);
+      if (job) {
+        const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
+        window.MailmateObjects?.register({
+          type: 'work-item',
+          id: job.id,
+          label: displayTitle,
+          page: 'work',
+          metadata: {
+            status: job.status,
+            sender: job.source?.sender,
+            subject: job.source?.subject
+          }
+        }, item);
+      }
       item.addEventListener('click', () => {
-        window.MailmateContext?.select(reference);
-        window.MailmateContext?.open(reference);
-        [...els.workList.querySelectorAll('.work-item')].forEach(row => row.classList.toggle('active', row === item));
-        els.runTitle.textContent = action.title;
-        els.agentTimeline.innerHTML = `
-        <article><span>K</span><div><strong>Kyle</strong><p>${escapeHtml(action.body)}</p></div></article>
-        <article><span>P</span><div><strong>Planner</strong><p>Prepared a short review and response workflow.</p></div></article>
-        <article><span>G</span><div><strong>Gmail agent</strong><p>Linked the original message context without reprocessing unrelated mail.</p></div></article>`;
+        selectedJobId = item.dataset.jobId;
+        renderWork(data);
       });
     });
+
+    window.Kyle?.setContext({
+      ...(state.data || {}),
+      calendarEvents: state.calendarEvents,
+      workJobs: workJobs,
+      health: state.health,
+      currentPage: state.currentPage
+    });
+
+    const activeJob = workJobs.find(j => j.id === selectedJobId) || workJobs[0];
+    if (activeJob) {
+      renderJobInspector(activeJob);
+    }
   }
+
+  function renderJobInspector(job) {
+    if (countdownTimerInterval) {
+      clearInterval(countdownTimerInterval);
+      countdownTimerInterval = null;
+    }
+
+    const titleEl = $('runTitle');
+    const subMetaEl = $('workSubMeta');
+    const sourceSenderEl = $('workSourceSender');
+    const deadlineBadgeEl = $('workDeadlineBadge');
+    const statusEl = $('workRunStatus');
+    const emptyPlaceholder = $('workEmptyPlaceholder');
+    const preparedCard = $('workPreparedCard');
+    const collapsiblesGroup = $('workCollapsiblesGroup');
+
+    const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
+    if (titleEl) titleEl.textContent = displayTitle;
+
+    const senderDisplay = (job.source?.sender || 'Unknown').split('<')[0].trim();
+    if (sourceSenderEl) sourceSenderEl.textContent = senderDisplay;
+    if (deadlineBadgeEl) deadlineBadgeEl.textContent = formatRelativeDeadline(job.source?.deadline);
+    if (subMetaEl) subMetaEl.style.display = 'block';
+
+    if (statusEl) {
+      statusEl.className = `run-status badge-${job.status}`;
+      statusEl.textContent = job.status === 'waiting_approval' ? 'Ready for review' :
+                             job.status === 'auto_send_countdown' ? 'Auto-sending…' :
+                             job.status === 'preparing' || job.status === 'analyzing' || job.status === 'working' ? 'Working...' :
+                             job.status === 'sent' || job.status === 'approved_sent' ? 'Sent via Gmail' :
+                             job.status === 'cancelled' ? 'Cancelled' : 'Queued';
+    }
+
+    if (emptyPlaceholder) emptyPlaceholder.style.display = 'none';
+    if (preparedCard) preparedCard.style.display = 'flex';
+    if (collapsiblesGroup) collapsiblesGroup.style.display = 'flex';
+
+    // 1. Policy Banner
+    const policyBanner = $('workPolicyBanner');
+    const policyBadge = $('workPolicyBadge');
+    const policyCat = $('workPolicyCategory');
+    const policyExpl = $('workPolicyExplanation');
+
+    if (policyBanner) {
+      const isSent = job.status === 'sent' || job.status === 'approved_sent';
+      const isCountdown = job.status === 'auto_send_countdown';
+      const verdict = job.policy_verdict || {};
+
+      if (isSent) {
+        policyBanner.className = 'policy-banner auto-sent';
+        if (policyBadge) policyBadge.textContent = 'DISPATCHED';
+        if (policyCat) policyCat.textContent = 'Sent via Gmail';
+        const wasAuto = (job.steps || []).some(s => s.auto_sent || s.label?.includes('automatically'));
+        if (policyExpl) policyExpl.textContent = wasAuto ? 'Sent automatically via Safe Acknowledgement Rule.' : 'Approved and sent via Gmail.';
+      } else if (isCountdown || verdict.auto_send_allowed) {
+        policyBanner.className = 'policy-banner low-risk';
+        if (policyBadge) policyBadge.textContent = 'LOW RISK';
+        if (policyCat) policyCat.textContent = 'Auto-send eligible';
+        if (policyExpl) policyExpl.textContent = verdict.explanation || 'Low risk · Simple acknowledgement · No attachment · No commitment · Known sender';
+      } else {
+        policyBanner.className = 'policy-banner requires-approval';
+        if (policyBadge) policyBadge.textContent = 'HUMAN APPROVAL REQUIRED';
+        if (policyCat) policyCat.textContent = (verdict.category || 'Review needed').replace(/_/g, ' ');
+        if (policyExpl) policyExpl.textContent = verdict.explanation || 'Contains commitments or generated attachments that require human review.';
+      }
+    }
+
+    // 2. Countdown Card
+    const countdownCard = $('workCountdownCard');
+    const countdownTimerText = $('countdownTimerText');
+    const countdownProgressBar = $('countdownProgressBar');
+    const cancelCountdownBtn = $('workCancelCountdownBtn');
+
+    if (job.status === 'auto_send_countdown' && countdownCard) {
+      countdownCard.style.display = 'block';
+      const sendAt = job.countdown?.auto_send_at ? new Date(job.countdown.auto_send_at).getTime() : Date.now() + 20000;
+      const duration = job.countdown?.duration || 20;
+
+      const updateTicker = () => {
+        const remainingMs = sendAt - Date.now();
+        const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+        if (countdownTimerText) countdownTimerText.textContent = `Sending in ${remainingSec}s…`;
+        if (countdownProgressBar) countdownProgressBar.style.width = `${Math.min(100, Math.max(0, (remainingSec / duration) * 100))}%`;
+        if (remainingSec <= 0) {
+          clearInterval(countdownTimerInterval);
+          countdownTimerInterval = null;
+          if (countdownTimerText) countdownTimerText.textContent = 'Dispatching via Gmail…';
+          setTimeout(() => renderWork(state.data), 1800);
+        }
+      };
+      updateTicker();
+      countdownTimerInterval = setInterval(updateTicker, 1000);
+
+      if (cancelCountdownBtn) {
+        cancelCountdownBtn.disabled = false;
+        cancelCountdownBtn.onclick = async () => {
+          clearInterval(countdownTimerInterval);
+          countdownTimerInterval = null;
+          cancelCountdownBtn.disabled = true;
+          try {
+            await fetch(`${API_BASE}/api/work/jobs/${encodeURIComponent(job.id)}/cancel-countdown`, { method: 'POST' });
+            await renderWork(state.data);
+          } catch (err) {
+            console.warn('Cancel countdown failed:', err);
+          }
+        };
+      }
+    } else if (countdownCard) {
+      countdownCard.style.display = 'none';
+    }
+
+    // 3. Reply Editor & Draft Badge
+    const replyText = $('workReplyText');
+    const draftBadge = $('workDraftBadge');
+    if (replyText) {
+      replyText.value = job.output?.suggested_reply || (job.reply_draft || {}).body || '';
+      replyText.disabled = (job.status === 'sent' || job.status === 'approved_sent');
+    }
+    if (draftBadge) {
+      draftBadge.innerHTML = job.output?.gmail_draft_id
+        ? `<span style="color:#1e8e48;"><i class="fas fa-check-circle"></i> Gmail Draft Staged</span>`
+        : '<span>Local draft ready</span>';
+    }
+
+    // 4. Action Buttons
+    const saveDraftBtn = $('workSaveDraftBtn');
+    if (saveDraftBtn) {
+      saveDraftBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent');
+      saveDraftBtn.onclick = async () => {
+        saveDraftBtn.disabled = true;
+        saveDraftBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        try {
+          const res = await fetch(`${API_BASE}/api/work/jobs/${encodeURIComponent(job.id)}/save-draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reply: replyText.value })
+          });
+          if (res.ok) {
+            saveDraftBtn.innerHTML = '<i class="fas fa-check"></i> Saved';
+            setTimeout(() => {
+              saveDraftBtn.disabled = false;
+              saveDraftBtn.innerHTML = '<i class="fas fa-floppy-disk"></i> Save edit';
+            }, 1400);
+            await renderWork(state.data);
+          } else {
+            const json = await res.json().catch(() => ({}));
+            const errMsg = json.error || res.statusText || 'Save failed';
+            if (res.status === 403 || json.code === 'insufficient_scopes' || errMsg.includes('insufficient') || errMsg.includes('Permission')) {
+              if (confirm('Google draft & send permissions (gmail.modify) are required to sync drafts with Gmail.\n\nYour current session only has read permissions. Would you like to reconnect Google now to grant permissions?')) {
+                window.location.href = '/auth/google';
+                return;
+              }
+            } else {
+              alert('Save error: ' + errMsg);
+            }
+            saveDraftBtn.disabled = false;
+            saveDraftBtn.innerHTML = '<i class="fas fa-floppy-disk"></i> Save edit';
+          }
+        } catch (err) {
+          alert('Save error: ' + err.message);
+          saveDraftBtn.disabled = false;
+          saveDraftBtn.innerHTML = '<i class="fas fa-floppy-disk"></i> Save edit';
+        }
+      };
+    }
+
+    const rerunBtn = $('workRerunBtn');
+    if (rerunBtn) {
+      rerunBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent');
+      rerunBtn.onclick = async () => {
+        rerunBtn.disabled = true;
+        rerunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rerunning...';
+        try {
+          await fetch(`${API_BASE}/api/work/jobs/${encodeURIComponent(job.id)}/run`, { method: 'POST' });
+          await renderWork(state.data);
+        } catch (_) {
+          rerunBtn.disabled = false;
+          rerunBtn.innerHTML = '<i class="fas fa-rotate-right"></i> Rerun';
+        }
+      };
+    }
+
+    const approveBtn = $('workApproveBtn');
+    if (approveBtn) {
+      if (job.status === 'sent' || job.status === 'approved_sent') {
+        approveBtn.disabled = true;
+        approveBtn.innerHTML = '<i class="fas fa-check-double"></i> Sent via Gmail';
+      } else {
+        approveBtn.disabled = false;
+        approveBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Approve &amp; Send';
+        approveBtn.onclick = async () => {
+          approveBtn.disabled = true;
+          approveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending via Gmail...';
+          try {
+            const res = await fetch(`${API_BASE}/api/work/jobs/${encodeURIComponent(job.id)}/approve`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reply: replyText ? replyText.value : undefined })
+            });
+            const json = await res.json();
+            if (res.ok) {
+              await renderWork(state.data);
+            } else {
+              const errMsg = json.error || res.statusText || 'Approval failed';
+              if (res.status === 403 || json.code === 'insufficient_scopes' || errMsg.includes('insufficient') || errMsg.includes('Permission')) {
+                if (confirm('Google draft & send permissions (gmail.modify) are required to approve and send replies via Gmail.\n\nYour current Google login only has read permissions. Would you like to reconnect Google now to grant draft & send permissions?')) {
+                  window.location.href = '/auth/google';
+                  return;
+                }
+              } else {
+                alert('Approval failed: ' + errMsg);
+              }
+              approveBtn.disabled = false;
+              approveBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Approve &amp; Send';
+              await renderWork(state.data);
+            }
+          } catch (err) {
+            alert('Network error: ' + err.message);
+            approveBtn.disabled = false;
+            approveBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Approve &amp; Send';
+          }
+        };
+      }
+    }
+
+
+    // 5. Generated Workspace Files
+    const artifactsSection = $('workArtifactsSection');
+    const artifactsList = $('workArtifactsList');
+    if (artifactsSection && artifactsList) {
+      const artifacts = job.artifacts || [];
+      if (artifacts.length > 0) {
+        artifactsSection.style.display = 'flex';
+        artifactsList.innerHTML = artifacts.map(art => {
+          const isDocx = art.name?.endsWith('.docx');
+          const isMd = art.name?.endsWith('.md');
+          const isPdf = art.name?.endsWith('.pdf');
+          const isFile = art.type === 'file';
+          const icon = isDocx ? '<i class="fas fa-file-word" style="color:#2563eb;"></i>' :
+                       isPdf ? '<i class="fas fa-file-pdf" style="color:#ef4444;"></i>' :
+                       isMd ? '<i class="fas fa-file-lines" style="color:#0ea5e9;"></i>' :
+                       isFile ? '<i class="fas fa-file"></i>' : '<i class="fas fa-envelope"></i>';
+          const action = isFile
+            ? `<a href="/api/work/jobs/${encodeURIComponent(job.id)}/artifacts/${encodeURIComponent(art.name)}" target="_blank" class="secondary-btn" style="padding:4px 8px;font-size:0.75rem;"><i class="fas fa-download"></i> View / Download</a>`
+            : `<span style="color:var(--muted);font-size:0.75rem;">Synced with Gmail</span>`;
+          return `
+            <div class="work-artifact-item">
+              <div class="artifact-title">${icon} <span>${escapeHtml(art.name)}</span></div>
+              ${action}
+            </div>
+          `;
+        }).join('');
+      } else {
+        artifactsSection.style.display = 'none';
+      }
+    }
+
+    // 6. Collapsible: What Kyle did (Timeline)
+    const stepsSummaryTitle = $('workStepsSummaryTitle');
+    const stepsStatusBadge = $('workStepsStatusBadge');
+    const timeline = $('agentTimeline');
+    const steps = job.steps || [];
+
+    if (stepsSummaryTitle) stepsSummaryTitle.textContent = `What Kyle did (${steps.length} steps)`;
+    if (stepsStatusBadge) {
+      stepsStatusBadge.textContent = (job.status === 'sent' || job.status === 'approved_sent') ? 'Complete' :
+                                     job.status === 'auto_send_countdown' ? 'Countdown active' : 'Ready for review';
+    }
+    if (timeline) {
+      timeline.innerHTML = steps.map(s => {
+        const isDone = s.status === 'done';
+        const isCountdown = s.status === 'active';
+        const isWaiting = s.status === 'pending' || s.status === 'waiting_approval';
+        const isErr = s.status === 'error';
+        const icon = isDone ? '<i class="fas fa-check" style="color:#1e8e48;"></i>' :
+                     isCountdown ? '<i class="fas fa-clock fa-spin" style="color:#f59e0b;"></i>' :
+                     isWaiting ? '<i class="far fa-clock" style="color:#b87810;"></i>' :
+                     isErr ? '<i class="fas fa-triangle-exclamation" style="color:#ef4444;"></i>' :
+                     '<i class="fas fa-circle-notch fa-spin"></i>';
+
+        const stepLabel = s.action ? `[${s.action}] ${s.thought || s.label || ''}` : (s.label || s.type);
+        let stepDetail = isDone ? 'Completed successfully' : isCountdown ? 'Auto-send countdown running' : isWaiting ? 'Awaiting human review' : 'In progress';
+        if (s.observation) {
+          if (s.observation.ok) {
+            stepDetail = s.observation.summary || s.observation.name || (s.observation.results ? `Found ${s.observation.results_count} sources` : 'Completed successfully');
+          } else {
+            stepDetail = s.observation.error || s.observation.reason || 'Action blocked or failed';
+          }
+        }
+        return `
+          <article>
+            <span>${icon}</span>
+            <div>
+              <strong>${escapeHtml(stepLabel)}</strong>
+              <p>${escapeHtml(stepDetail)}</p>
+            </div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    // 7. Collapsible: Source Email Card
+    const sourceSenderFull = $('workSourceSenderFull');
+    const sourceSubjectFull = $('workSourceSubjectFull');
+    const sourceSnippet = $('workSourceSnippet');
+    const sourceMeta = $('workSourceMeta');
+    const sourceSubjectBadge = $('workSourceSubjectBadge');
+
+    if (sourceSenderFull) sourceSenderFull.textContent = job.source?.sender || 'Unknown sender';
+    if (sourceSubjectFull) sourceSubjectFull.textContent = job.source?.subject || 'No subject';
+    if (sourceSubjectBadge) sourceSubjectBadge.textContent = (job.source?.subject || 'Email').slice(0, 24);
+    if (sourceSnippet) sourceSnippet.textContent = job.source?.snippet || 'No snippet available.';
+    if (sourceMeta) {
+      sourceMeta.textContent = job.source?.deadline ? `Deadline: ${job.source.deadline}` : 'Inbound Gmail thread';
+    }
+  }
+
+  // Autopilot Settings Management
+  async function loadWorkSettings() {
+    try {
+      const res = await fetch(`${API_BASE}/api/work/settings`);
+      if (res.ok) {
+        const settings = await res.json();
+        const autoPrepEl = $('settingAutoPrep');
+        const createDraftsEl = $('settingCreateDrafts');
+        const statusTag = $('autopilotStatusTag');
+
+        if (autoPrepEl) autoPrepEl.checked = settings.auto_prep !== false;
+        if (createDraftsEl) createDraftsEl.checked = settings.create_gmail_drafts !== false;
+
+        const modeRadios = document.querySelectorAll('input[name="autoSendMode"]');
+        modeRadios.forEach(r => {
+          r.checked = r.value === (settings.auto_send_mode || 'safe_replies');
+        });
+
+        if (statusTag) {
+          const modeMap = {
+            off: 'Off',
+            prepare: 'Prepare only',
+            safe_replies: 'Safe replies only',
+            full_prepare: 'Full preparation',
+            never: 'Prepare only',
+            safe_only: 'Safe replies only',
+            trusted_only: 'Trusted contacts only',
+            custom: 'Custom rules'
+          };
+          statusTag.textContent = modeMap[settings.auto_send_mode] || 'Safe replies only';
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load work settings:', e);
+    }
+  }
+
+  function bindAutopilotSettings() {
+    const autoPrepEl = $('settingAutoPrep');
+    const createDraftsEl = $('settingCreateDrafts');
+    const modeRadios = document.querySelectorAll('input[name="autoSendMode"]');
+
+    const saveSettings = async () => {
+      let selectedMode = 'safe_replies';
+      modeRadios.forEach(r => { if (r.checked) selectedMode = r.value; });
+
+      const payload = {
+        auto_prep: autoPrepEl ? autoPrepEl.checked : true,
+        create_gmail_drafts: createDraftsEl ? createDraftsEl.checked : true,
+        auto_send_mode: selectedMode
+      };
+
+      try {
+        await fetch(`${API_BASE}/api/work/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const statusTag = $('autopilotStatusTag');
+        if (statusTag) {
+          const modeMap = {
+            off: 'Off',
+            prepare: 'Prepare only',
+            safe_replies: 'Safe replies only',
+            full_prepare: 'Full preparation',
+            never: 'Prepare only',
+            safe_only: 'Safe replies only',
+            trusted_only: 'Trusted contacts only',
+            custom: 'Custom rules'
+          };
+          statusTag.textContent = modeMap[selectedMode] || 'Safe replies only';
+        }
+      } catch (e) {
+        console.warn('Failed to save autopilot settings:', e);
+      }
+    };
+
+    autoPrepEl?.addEventListener('change', saveSettings);
+    createDraftsEl?.addEventListener('change', saveSettings);
+    modeRadios.forEach(r => r.addEventListener('change', saveSettings));
+  }
+
 
   function renderStatus() {
     const h = state.health || {};
     const rows = [
       ['Google OAuth', h.googleClientConfigured],
-      ['Gmail session', h.gmailAuthenticated || Boolean(state.userId)],
+      ['Gmail read session', h.gmailAuthenticated || Boolean(state.userId)],
+      ['Gmail draft & send permission', h.gmailWrite],
       ['Google Calendar read/write', h.calendarReadWrite],
       ['Gemini', h.geminiConfigured],
       ['Supabase cache', h.supabaseConfigured],
@@ -625,7 +1215,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderIntegrations() {
     const h = state.health || {};
     const rows = [
-      ['Google Gmail', h.googleClientConfigured],
+      ['Google Gmail (Draft & Send)', h.gmailWrite],
       ['Google Calendar', h.calendarReadWrite],
       ['Gemini', h.geminiConfigured],
       ['Supabase', h.supabaseConfigured],
@@ -634,6 +1224,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     els.integrationList.innerHTML = rows.map(([label, ok]) => `<li data-status="${ok ? 'Connected' : 'Unavailable'}"><strong>${escapeHtml(label)}</strong></li>`).join('');
   }
+
 
   function clearSteps() {
     [...els.processList.querySelectorAll('li')].forEach(li => li.classList.remove('active', 'done'));

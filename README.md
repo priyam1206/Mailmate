@@ -1,25 +1,73 @@
 # Mailmate - Team CIPHERSQUAD
 
-Mailmate is a Gmail intelligence workspace built for Code2Create 7.0. It signs users in with Google, fetches their recent Gmail, stores processed context in Supabase, uses Gemini to identify priorities and actions, and provides the optional Kyle browser voice assistant.
+Mailmate is a proactive Gmail intelligence & autonomous work preparation workspace built for Code2Create 7.0.
+
+> **“Mailmate displays user-authorized Gmail data transiently, but does not centrally retain mailbox content. Before any AI or autonomous processing, a local privacy gate blocks sensitive and irrelevant messages and passes only the minimum required context.”**
+
+---
+
+## Two-Plane Security Architecture
+
+Mailmate enforces a strict boundary between user email viewing and machine intelligence:
+
+```text
+                         Gmail
+                           │
+                           ▼
+                 ┌──────────────────┐
+                 │ DISPLAY PLANE    │
+                 │                  │
+                 │ All authorized   │
+                 │ Gmail content    │
+                 │ can be shown     │
+                 │ in browser RAM   │
+                 └────────┬─────────┘
+                          │
+                    Privacy Gate
+                          │
+                only required + safe
+                          ▼
+                 ┌──────────────────┐
+                 │ AI / WORK PLANE  │
+                 │                  │
+                 │ Kyle             │
+                 │ LM Studio        │
+                 │ Gemini fallback  │
+                 │ Work Agent       │
+                 │ Auto-drafts      │
+                 └──────────────────┘
+```
+
+### Boundary Enforcement Rules
+- `Gmail → browser`: Allowed display (transient in browser RAM only; no emails hidden from user).
+- `Gmail → disk/database`: **Prohibited** (zero central mailbox retention; only minimal derived task state is stored).
+- `Gmail → AI / Gemini / LM Studio`: **Gate required** (sensitive, financial, and security emails blocked).
+- `Gmail → Work Agent`: **Gate required** (only actionable academic/work tasks qualify).
+- `Gmail → auto-send`: **Gate + AutoSendPolicy required** (routine acknowledgements only, 20s cancelable countdown).
+
+---
 
 ## Features
 
-- Google OAuth with each user's Google name and profile picture
-- Real Gmail fetching with compact Inbox and message detail views
-- Gemini summaries, priorities, blockers, and natural spoken replies
-- Supabase caching for users, OAuth tokens, emails, insights, tasks, and actions
-- Kyle text chat on every dashboard page
-- Browser speech recognition and browser text-to-speech; ElevenLabs and Whisper are not required
-- Overview, Inbox, Work, Automations, Status, Integrations, and Settings views
+- **Google OAuth with Gmail modify & Calendar access**
+- **Transient In-Memory Inbox**: Full Gmail viewing with zero central mailbox storage
+- **Deterministic Local Privacy Gate**: Screens out banking, OTPs, and personal records before AI
+- **Proactive Work Agent**: Autonomously prepares checklists (`.md`, `.docx`) and response drafts
+- **Autopilot Safety Engine (`AutoSendPolicy`)**: 20-second cancelable auto-send countdown for routine acknowledgements only
+- **Local CUDA-Accelerated Whisper STT & Kyle Browser Voice Assistant**
+- **Overview, Inbox, Work, Calendar, Automations, Status, Integrations, and Settings views**
+
+---
 
 ## Requirements
 
-- Node.js 18 or newer
-- A Google Cloud project with Gmail API enabled
+- Python 3.10 or newer & Node.js 18 or newer
+- A Google Cloud project with Gmail API and Google Calendar API enabled
 - A Google OAuth 2.0 Web application client
 - A Gemini API key
-- A Supabase project for shared persistence (recommended)
-- Chrome or another browser that supports the Web Speech API for Kyle voice input
+- (Optional) NVIDIA GPU with CUDA for local Whisper STT acceleration
+
+---
 
 ## Install And Run
 
@@ -30,39 +78,21 @@ git clone https://github.com/sphereofrupayan/CipherSquad.git
 cd CipherSquad
 ```
 
-Install dependencies:
-
-```bash
-npm install
-```
-
-Create your local environment file.
-
-Windows Command Prompt:
+Create your local environment file:
 
 ```bat
 copy api.env.example api.env
 ```
 
-PowerShell:
-
-```powershell
-Copy-Item api.env.example api.env
-```
-
-macOS or Linux:
+Start the application:
 
 ```bash
-cp api.env.example api.env
+py app.py
 ```
 
-Fill in `api.env`, then start the app:
+Open [http://localhost:5000](http://localhost:5000), choose **Continue with Google**, and grant Gmail and Calendar access.
 
-```bash
-npm start
-```
-
-Open [http://localhost:5000](http://localhost:5000), choose **Continue with Google**, and allow Gmail and Calendar access. Mailmate uses Gmail modify access to mark opened messages as read and to support user-approved message actions.
+---
 
 ## Environment Variables
 
@@ -87,7 +117,7 @@ GMAIL_FETCH_LIMIT=20
 GMAIL_QUERY=newer_than:30d
 ```
 
-Recommended for shared persistence:
+Recommended for shared persistence (derived state only):
 
 ```env
 SUPABASE_URL=https://your-project.supabase.co
@@ -96,73 +126,18 @@ SUPABASE_SECRET_KEY=your_supabase_service_role_key
 SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
 ```
 
-ElevenLabs variables remain in the example only for future integration. The current Kyle implementation uses `SpeechRecognition`/`webkitSpeechRecognition` and `window.speechSynthesis` in the browser; it does not initialize or call Whisper.
+---
 
-## Google OAuth Setup
+## Kyle Voice Assistant
 
-1. Open Google Cloud Console and select the project used by this app.
-2. Enable **Gmail API** under **APIs & Services > Library**.
-3. Configure the OAuth consent screen under **Google Auth Platform**.
-4. Create an **OAuth client ID** with application type **Web application**.
-5. Add this Authorized redirect URI exactly:
+- Local speech-to-text via CUDA-accelerated `faster-whisper` (`small` model).
+- Automatic fallback to browser `webkitSpeechRecognition`.
+- Kyle's voice responses spoken via browser speech synthesis.
 
-```text
-http://localhost:5000/auth/google/callback
-```
-
-6. Put the client ID and client secret into `api.env`.
-7. While publishing status is **Testing**, add every teammate and judge under **Google Auth Platform > Audience > Test users**.
-
-Users who are not listed as test users cannot sign in until the OAuth app is published. If Google reports `redirect_uri_mismatch`, confirm the URI, protocol, port, and path match exactly and restart the server after changing `api.env`.
-
-## Supabase Setup
-
-1. Create or open the Supabase project.
-2. Open **SQL Editor**.
-3. Run the complete [`supabase_schema.sql`](./supabase_schema.sql) file once.
-4. Add the project URL and keys to `api.env`.
-5. Restart the server.
-
-Without Supabase variables, the app can use an in-memory Gmail session for a single local demo. Restarting the server clears that fallback session.
-
-## Kyle Voice
-
-- Hover over the Kyle orb in the bottom-right corner to open the text prompt.
-- Click the orb to start or stop browser speech recognition.
-- Kyle's Gemini response is spoken using the browser's built-in voice.
-- Use the small speaker icon on the orb to mute or unmute speech.
-- If voice recognition is unavailable, text input continues to work.
-- Microphone access is used only while Kyle is listening or monitoring for an interruption.
-
-## Useful Checks
-
-Backend health:
-
-```text
-http://localhost:5000/api/health
-```
-
-Expected local pages:
-
-- Landing page: `http://localhost:5000/`
-- Dashboard: `http://localhost:5000/dashboard.html`
-- Google login: `http://localhost:5000/auth/google`
+---
 
 ## Troubleshooting
 
-- **Google access blocked:** add the Gmail account as an OAuth test user or publish the consent screen.
-- **No emails appear:** reconnect Google, then use Refresh on Overview and inspect the Status page.
-- **Opened mail stays unread:** reconnect Google once to grant the current `gmail.modify` scope; older saved tokens may contain only `gmail.readonly`.
-- **Authentication failed after a restart:** verify `GOOGLE_CLIENT_SECRET`, the callback URI, and Supabase token storage.
-- **Kyle cannot hear you:** use Chrome, allow microphone access, and check Browser speech recognition on Status.
-- **Gemini falls back:** verify `GEMINI_API_KEY` and `GEMINI_MODEL`, then restart the server.
-- **Supabase errors:** run `supabase_schema.sql` and verify the project URL and server-side secret key.
-
-## Security
-
-- `api.env`, `.env`, logs, and `node_modules` are ignored by Git.
-- Do not paste live Google, Gemini, Supabase, or voice-provider secrets into issues or commits.
-- Rotate any credential that has been posted publicly or shared with people outside the team.
-- Prefer a password manager or encrypted secret-sharing channel when distributing the completed `api.env`.
-
-The previous dashboard implementation is preserved under [`backup-current-dashboard`](./backup-current-dashboard/) for reference.
+- **Google access blocked:** Add the Gmail account as an OAuth test user or publish the consent screen.
+- **Insufficient Permissions / 403 on Drafts:** Reconnect Google at `http://localhost:5000/auth/google` to grant `gmail.modify` permissions. Older tokens may contain only `gmail.readonly`.
+- **Kyle voice input:** Ensure microphone permissions are granted in Chrome.
