@@ -139,8 +139,23 @@
         return;
       }
       resultPanel.classList.add('is-visible');
-      resultPanel.innerHTML = `<strong>${escapeHtml(title)}</strong>${items.slice(0, 4).map((item, index) => `
-        <button type="button" data-result="${index + 1}">${escapeHtml(item.subject || item.reason || 'Open item')}</button>
+      resultPanel.innerHTML = `<strong>${escapeHtml(title)}</strong>${items.slice(0, 5).map((item, index) => `
+        <button type="button" data-result="${index + 1}">${escapeHtml(item.subject || item.reason || item.title || 'Open item')}</button>
+      `).join('')}`;
+    }
+
+    function renderBrief(title, items) {
+      if (!items || !items.length) {
+        resultPanel.classList.remove('is-visible');
+        resultPanel.innerHTML = '';
+        return;
+      }
+      resultPanel.classList.add('is-visible');
+      resultPanel.innerHTML = `<strong>${escapeHtml(title || 'Kyle')}</strong>${items.slice(0, 6).map(item => `
+        <div class="kyle-brief-item ${item.conflict ? 'conflict' : ''}">
+          <strong>${escapeHtml(item.title || 'Item')}</strong>
+          <small>${escapeHtml(item.meta || '')}</small>
+        </div>
       `).join('')}`;
     }
 
@@ -165,12 +180,16 @@
 
     window.addEventListener('kyle:state', event => setState(event.detail.state));
     window.addEventListener('kyle:message', event => appendMessage(event.detail.role, event.detail.text));
+    window.addEventListener('harness:kyle-brief', event => {
+      const detail = event.detail || {};
+      renderBrief(detail.title || 'Kyle', detail.items || []);
+    });
 
     drawCloud(0, 0);
     setState(store.current);
     setMuted(store.muted);
 
-    return { bind, setAmplitude, setLiveText, setMuted, renderResults };
+    return { bind, setAmplitude, setLiveText, setMuted, renderResults, renderBrief };
   }
 
   function escapeHtml(value) {

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css">
+  <link rel="stylesheet" href="./dashboard.css?v=6">
 </head>
 <body>
   <div class="app-shell">
@@ -21,6 +21,7 @@
         <button class="nav-tab active" type="button" data-tab="overview"><i class="fas fa-table-cells-large"></i><span>Overview</span></button>
         <button class="nav-tab" type="button" data-tab="inbox"><i class="fas fa-inbox"></i><span>Inbox</span></button>
         <button class="nav-tab" type="button" data-tab="work"><i class="fas fa-diagram-project"></i><span>Work</span></button>
+        <button class="nav-tab" type="button" data-tab="calendar"><i class="fas fa-calendar"></i><span>Calendar</span></button>
         <button class="nav-tab" type="button" data-tab="automations"><i class="fas fa-bolt"></i><span>Automations</span></button>
         <button class="nav-tab" type="button" data-tab="status"><i class="fas fa-signal"></i><span>Status</span></button>
         <span class="nav-divider"></span>
@@ -38,7 +39,7 @@
         </div>
         <div class="profile">
           <span id="profileName">User</span>
-          <img id="profilePic" src="https://ui-avatars.com/api/?name=User&background=111111&color=ffffff" alt="User">
+          <img id="profilePic" referrerpolicy="no-referrer" decoding="async" src="https://ui-avatars.com/api/?name=User&background=111111&color=ffffff" alt="User">
         </div>
       </header>
 
@@ -59,6 +60,10 @@
         <section class="workspace-section">
           <div class="section-heading"><p class="section-label">Needs attention</p><span id="attentionBadge">--</span></div>
           <ul class="attention-list" id="attentionList"><li>Waiting for analysis.</li></ul>
+        </section>
+        <section class="workspace-section">
+          <div class="section-heading"><p class="section-label">Waiting on others</p><span id="waitingBadge">--</span></div>
+          <ul class="attention-list" id="waitingList"><li>None.</li></ul>
         </section>
         <section class="workspace-section">
           <div class="section-heading"><p class="section-label">Working now</p><span>Agent activity</span></div>
@@ -114,6 +119,37 @@
         </div>
       </section>
 
+      <section class="tab-panel" id="tab-calendar">
+        <div class="calendar-toolbar">
+          <div class="calendar-nav">
+            <button class="secondary-btn compact-btn" id="calendarTodayBtn" type="button">Today</button>
+            <button class="icon-btn plain-icon" id="calendarPrevBtn" type="button" aria-label="Previous week"><i class="fas fa-chevron-left"></i></button>
+            <button class="icon-btn plain-icon" id="calendarNextBtn" type="button" aria-label="Next week"><i class="fas fa-chevron-right"></i></button>
+            <strong id="calendarRangeLabel">This week</strong>
+          </div>
+          <div class="calendar-actions">
+            <span class="calendar-sync-state" id="calendarSyncState"><span></span> Syncing</span>
+            <button class="btn btn-primary" id="newCalendarEventBtn" type="button"><i class="fas fa-plus"></i> New event</button>
+          </div>
+        </div>
+
+        <div class="calendar-alert" id="calendarConflictAlert" hidden>
+          <i class="fas fa-triangle-exclamation"></i>
+          <span id="calendarConflictText">Schedule clash detected.</span>
+        </div>
+
+        <div class="calendar-legend" aria-label="Calendar legend">
+          <span><i class="legend-dot google"></i> Google Calendar</span>
+          <span><i class="legend-dot deadline"></i> Email deadline</span>
+          <span><i class="legend-dot conflict"></i> Clash</span>
+        </div>
+
+        <div class="week-calendar-shell">
+          <div class="calendar-all-day" id="calendarAllDay"></div>
+          <div class="week-calendar" id="calendarGrid" aria-label="Weekly calendar"></div>
+        </div>
+      </section>
+
       <section class="tab-panel" id="tab-automations">
         <div class="page-action-row">
           <p>Scheduled agents keep watch without reprocessing your whole inbox.</p>
@@ -166,17 +202,56 @@
       <section class="tab-panel" id="tab-settings">
         <section class="settings-list">
           <article><div><h2>Google profile</h2><p>Your signed-in name and profile picture are used in this workspace.</p></div><span>Current session</span></article>
-          <article><div><h2>Processed inbox cache</h2><p>Supabase context is checked before Gmail is refreshed.</p></div><span>Enabled</span></article>
-          <article><div><h2>Kyle voice</h2><p>Browser speech recognition and browser text-to-speech are active for this demo.</p></div><span>Browser fallback</span></article>
+          <article><div><h2>Processed inbox cache</h2><p>Supabase is used first. Gmail is checked for changes only when needed, and new information replaces stale processed context.</p></div><span id="cacheSettingsStatus">Checking</span></article>
+          <article><div><h2>Cache policy</h2><p id="cachePolicyText">Checking cache policy...</p></div><span>Automatic</span></article>
+          <article><div><h2>Kyle voice</h2><p>Local Whisper handles speech-to-text; the browser remains the fallback and current TTS output.</p></div><span>Local-first</span></article>
+          <article class="settings-danger-row">
+            <div><h2>Sign out</h2><p>Remove the local Google session. Supabase history is retained, but the dashboard cannot access it while signed out.</p></div>
+            <button class="logout-btn" id="logoutBtn" type="button"><i class="fas fa-arrow-right-from-bracket"></i> Sign out</button>
+          </article>
         </section>
+      </section>
       </section>
     </main>
   </div>
-  <script src="./kyle-state.js"></script>
-  <script src="./kyle-tools.js"></script>
-  <script src="./kyle-audio.js"></script>
-  <script src="./kyle-ui.js"></script>
-  <script src="./kyle.js"></script>
-  <script src="./dashboard.js"></script>
+
+  <div class="calendar-modal-backdrop" id="calendarModal" hidden>
+    <section class="calendar-modal" role="dialog" aria-modal="true" aria-labelledby="calendarModalTitle">
+      <header>
+        <div>
+          <p class="section-label">Google Calendar</p>
+          <h2 id="calendarModalTitle">New event</h2>
+        </div>
+        <button class="icon-btn plain-icon" id="calendarModalClose" type="button" aria-label="Close"><i class="fas fa-xmark"></i></button>
+      </header>
+
+      <form id="calendarEventForm">
+        <input type="hidden" id="calendarEventId">
+        <label>Title<input id="calendarEventTitle" type="text" required maxlength="160" placeholder="C2C checkpoint"></label>
+        <div class="calendar-form-grid">
+          <label>Date<input id="calendarEventDate" type="date" required></label>
+          <label>Start<input id="calendarEventStart" type="time" required></label>
+          <label>End<input id="calendarEventEnd" type="time" required></label>
+        </div>
+        <label>Location<input id="calendarEventLocation" type="text" maxlength="240" placeholder="Optional"></label>
+        <label>Description<textarea id="calendarEventDescription" rows="4" maxlength="1500" placeholder="Optional notes"></textarea></label>
+
+        <div class="calendar-modal-footer">
+          <button class="danger-text-btn" id="calendarDeleteEventBtn" type="button" hidden>Delete</button>
+          <div>
+            <button class="secondary-btn" id="calendarCancelBtn" type="button">Cancel</button>
+            <button class="btn btn-primary" type="submit">Save to Google Calendar</button>
+          </div>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <script src="./kyle-state.js?v=6"></script>
+  <script src="./kyle-tools.js?v=6"></script>
+  <script src="./kyle-audio.js?v=6"></script>
+  <script src="./kyle-ui.js?v=6"></script>
+  <script src="./kyle.js?v=6"></script>
+  <script src="./dashboard.js?v=6"></script>
 </body>
 </html>

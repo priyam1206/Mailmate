@@ -17,3 +17,8 @@ assets/videos/
 
 # Archived/imported copies kept locally for reference
 CipherSquad-main*/
+
+models/
+data/
+__pycache__/
+*.pyc
