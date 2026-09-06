@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const oauth2Client = require('../config/google');
+const { createOAuthClient } = require('../config/google');
 
 function decodeBody(data) {
   if (!data) return '';
@@ -41,6 +41,7 @@ function extractMessageBody(payload) {
 }
 
 async function fetchUserEmails(tokens) {
+  const oauth2Client = createOAuthClient();
   oauth2Client.setCredentials(tokens);
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   const maxResults = Number(process.env.GMAIL_FETCH_LIMIT || 20);

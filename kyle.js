@@ -235,17 +235,31 @@
 
     store.addMessage('user', cleanPrompt);
     ui.setLiveText(cleanPrompt);
-    runLocalAction(cleanPrompt);
+    const resolution = window.KyleReferents?.resolvePrompt(cleanPrompt) || {
+      hasReference: false,
+      references: [],
+      unresolved: false
+    };
+
+    if (resolution.unresolved) {
+      const clarification = resolution.clarification || 'Which item do you mean? Select it and ask me again.';
+      store.addMessage('kyle', clarification);
+      ui.setLiveText(clarification, 5200);
+      speak(clarification, run);
+      return;
+    }
 
     try {
       store.set(store.states.THINKING);
-      const response = await fetch(`${API_BASE}/api/kyle/chat`, {
+      const response = await fetch(`${API_BASE}/api/kyle/agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: cleanPrompt,
           userId: getUserId(),
           context: store.context,
+          uiContext: window.MailmateContext?.snapshot?.() || {},
+          resolvedReferences: resolution.references,
           selectedCalendarEventId: window.AgentCalendar?.getSelectedEventId?.() || null
         })
       });
@@ -257,6 +271,10 @@
 
       if (run !== activeRun) return;
 
+      const toolResults = await window.KyleTools?.execute?.(data.actions || []);
+      if (toolResults?.some(result => !result.ok)) {
+        console.warn('[Kyle Agent] some UI actions could not run', toolResults);
+      }
       applyCommand(data.command);
       if (data.brief?.items?.length) {
         ui.renderBrief(data.brief.title || 'Kyle', data.brief.items);

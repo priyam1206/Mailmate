@@ -3,10 +3,11 @@ const cors = require('cors');
 const { google } = require('googleapis');
 const { GoogleGenAI } = require('@google/genai');
 const path = require('path');
+const os = require('os');
 require('dotenv').config({ path: path.join(__dirname, 'api.env') });
 require('dotenv').config();
 
-const oauth2Client = require('./config/google');
+const { createOAuthClient } = require('./config/google');
 const { fetchUserEmails } = require('./services/gmailService');
 const { analyzeEmailsWithAI } = require('./services/aiService');
 const {
@@ -28,14 +29,30 @@ const {
 } = require('./services/supabaseService');
 
 const app = express();
-const PORT = Number(process.env.PORT || 8000);
-const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
+const PORT = Number(process.env.PORT || 5000);
+const HOST = process.env.HOST || '0.0.0.0';
+const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '');
+const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || APP_BASE_URL)
+  .split(',')
+  .map(origin => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
 const SUPABASE_ENABLED = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY);
 
 let localTokens = null;
 let localProfile = null;
 
-app.use(cors({ origin: true, credentials: true }));
+app.disable('x-powered-by');
+app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+app.use(cors({
+  credentials: true,
+  origin(origin, callback) {
+    if (!origin || ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes(origin.replace(/\/$/, ''))) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Origin is not allowed by ALLOWED_ORIGINS'));
+  }
+}));
 app.use(express.json({ limit: '25mb' }));
 app.get(['/api.env', '/.env'], (_req, res) => {
   res.status(404).send('Not found');
@@ -43,6 +60,14 @@ app.get(['/api.env', '/.env'], (_req, res) => {
 
 // Serve static frontend files from the project root
 app.use(express.static(__dirname));
+
+function getRequestBaseUrl(req) {
+  return APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+}
+
+function getGoogleRedirectUri(req) {
+  return process.env.GOOGLE_REDIRECT_URI || `${getRequestBaseUrl(req)}/auth/google/callback`;
+}
 
 function hasElevenLabsApiKey() {
   return Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_API_KEY.startsWith('sk_'));
@@ -62,6 +87,141 @@ function compactKyleContext(context) {
     needs_attention: (context?.needs_attention || []).slice(0, 8),
     emails
   };
+}
+
+function cleanAgentText(value, max = 240) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function compactKyleReference(reference) {
+  const type = cleanAgentText(reference?.type, 48);
+  const id = cleanAgentText(reference?.id, 180);
+  if (!type || !id) return null;
+  const metadata = Object.fromEntries(Object.entries(reference?.metadata || {})
+    .filter(([, value]) => value != null && value !== '')
+    .slice(0, 8)
+    .map(([name, value]) => [cleanAgentText(name, 48), cleanAgentText(value)]));
+  return {
+    type,
+    id,
+    label: cleanAgentText(reference?.label || id),
+    page: cleanAgentText(reference?.page, 48),
+    metadata
+  };
+}
+
+function compactKyleUiContext(context = {}) {
+  const reference = value => compactKyleReference(value);
+  return {
+    page: cleanAgentText(context.page || 'overview', 48),
+    selected: reference(context.selected),
+    open: reference(context.open),
+    hovered: reference(context.hovered),
+    focused: reference(context.focused),
+    lastClicked: reference(context.lastClicked),
+    selectedText: cleanAgentText(context.selectedText, 280),
+    selectedTextSource: reference(context.selectedTextSource),
+    references: {
+      lastMentioned: reference(context.references?.lastMentioned),
+      lastOpened: reference(context.references?.lastOpened),
+      lastCreated: reference(context.references?.lastCreated),
+      lastModified: reference(context.references?.lastModified),
+      lastManipulated: reference(context.references?.lastManipulated)
+    },
+    visibleObjects: (context.visibleObjects || []).slice(0, 12).map(reference).filter(Boolean)
+  };
+}
+
+function knownKyleReferences(uiContext, resolvedReferences) {
+  const candidates = [
+    uiContext.selected,
+    uiContext.open,
+    uiContext.hovered,
+    uiContext.focused,
+    uiContext.lastClicked,
+    uiContext.selectedTextSource,
+    ...Object.values(uiContext.references || {}),
+    ...(uiContext.visibleObjects || []),
+    ...(resolvedReferences || []).map(compactKyleReference)
+  ].filter(Boolean);
+  return new Map(candidates.map(reference => [`${reference.type}:${reference.id}`, reference]));
+}
+
+function sanitizeKyleAction(action, knownReferences) {
+  const tool = cleanAgentText(action?.tool, 64);
+  const args = action?.args || {};
+  const pages = new Set(['overview', 'inbox', 'work', 'calendar', 'automations', 'status', 'integrations', 'settings']);
+  const filters = new Set(['all', 'important', 'action', 'unread']);
+  if (tool === 'navigation.open' && pages.has(args.page)) return { tool, args: { page: args.page } };
+  if (tool === 'inbox.set_filter' && filters.has(args.filter)) return { tool, args: { filter: args.filter } };
+  if (tool === 'ui.toast') {
+    const message = cleanAgentText(args.message, 180);
+    return message ? { tool, args: { message } } : null;
+  }
+
+  const expectedTypes = {
+    'inbox.open_email': 'email',
+    'calendar.open_event': 'calendar-event',
+    'work.focus': 'work-item',
+    'ui.highlight': null,
+    'ui.scroll_to': null
+  };
+  if (!(tool in expectedTypes)) return null;
+
+  const reference = compactKyleReference(args.reference || args);
+  if (!reference) return null;
+  if (expectedTypes[tool] && reference.type !== expectedTypes[tool]) return null;
+  const known = knownReferences.get(`${reference.type}:${reference.id}`);
+  return known ? { tool, args: { reference: known } } : null;
+}
+
+function inferKyleActions(message, references) {
+  const text = message.toLowerCase();
+  const reference = references[0] || null;
+  const actions = [];
+  const pageMatches = [
+    ['calendar', /\b(open|go to|show)\s+(my\s+)?calendar\b/],
+    ['inbox', /\b(open|go to|show)\s+(my\s+)?inbox\b/],
+    ['work', /\b(open|go to|show)\s+(my\s+)?work\b/],
+    ['overview', /\b(open|go to|show)\s+(the\s+)?overview\b/],
+    ['status', /\b(open|go to|show)\s+(the\s+)?status\b/]
+  ];
+  const page = pageMatches.find(([, pattern]) => pattern.test(text))?.[0];
+  if (page) actions.push({ tool: 'navigation.open', args: { page } });
+
+  const filter = /\bunread\b/.test(text) ? 'unread'
+    : /\bimportant\b/.test(text) ? 'important'
+      : /\b(requires action|action items?)\b/.test(text) ? 'action'
+        : null;
+  if (filter && /\b(show|filter|open|find)\b/.test(text)) actions.push({ tool: 'inbox.set_filter', args: { filter } });
+
+  if (reference?.type === 'email' && /\b(open|show|read|reply|respond)\b/.test(text)) {
+    actions.push({ tool: 'inbox.open_email', args: { reference } });
+  } else if (reference?.type === 'calendar-event' && /\b(open|show|edit|move|reschedule|change)\b/.test(text)) {
+    actions.push({ tool: 'calendar.open_event', args: { reference } });
+  } else if (reference?.type === 'work-item' && /\b(open|show|do|work|focus)\b/.test(text)) {
+    actions.push({ tool: 'work.focus', args: { reference } });
+  }
+
+  if (reference && /\b(where|which|highlight|point)\b/.test(text)) {
+    actions.push({ tool: 'ui.scroll_to', args: { reference } });
+    actions.push({ tool: 'ui.highlight', args: { reference } });
+  }
+  return actions;
+}
+
+function parseKyleJson(value) {
+  const text = String(value || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(text.slice(start, end + 1)); } catch (_) {}
+    }
+    return null;
+  }
 }
 
 function normalizeCachedDashboard(cached, emails = []) {
@@ -128,7 +288,8 @@ async function safeAnalyzeEmails(emails) {
   }
 }
 
-async function fetchGoogleProfile(tokens) {
+async function fetchGoogleProfile(tokens, redirectUri) {
+  const oauth2Client = createOAuthClient(redirectUri);
   oauth2Client.setCredentials(tokens);
   const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
   const { data } = await oauth2.userinfo.get();
@@ -269,7 +430,7 @@ app.post('/api/transcribe', async (req, res) => {
   }
 });
 
-app.post('/api/kyle/chat', async (req, res) => {
+async function handleKyleAgent(req, res) {
   const message = String(req.body?.message || '').trim();
   if (!message) {
     res.status(400).json({ error: 'message is required' });
@@ -277,41 +438,74 @@ app.post('/api/kyle/chat', async (req, res) => {
   }
 
   const context = compactKyleContext(req.body?.context || {});
-  const fallbackReply = `I am with you. I can see ${context.metrics.emails || 0} scanned emails and ${context.metrics.actions || 0} possible actions. I would start with the most urgent dependency, then draft the shortest useful reply.`;
+  const uiContext = compactKyleUiContext(req.body?.uiContext || {});
+  const resolvedReferences = (req.body?.resolvedReferences || []).slice(0, 4).map(compactKyleReference).filter(Boolean);
+  const knownReferences = knownKyleReferences(uiContext, resolvedReferences);
+  const deterministicActions = inferKyleActions(message, resolvedReferences)
+    .map(action => sanitizeKyleAction(action, knownReferences))
+    .filter(Boolean);
+  const resolved = resolvedReferences[0];
+  const fallbackReply = resolved
+    ? `I know you mean ${resolved.label}. ${deterministicActions.length ? 'I have opened the right place for it.' : 'What would you like me to do with it?'}`
+    : `I am with you. I can see ${context.metrics.emails || 0} scanned emails and ${context.metrics.actions || 0} possible actions. What should we handle first?`;
 
   if (!process.env.GEMINI_API_KEY) {
-    res.json({ reply: fallbackReply, mode: 'fallback' });
+    res.json({ reply: fallbackReply, actions: deterministicActions, mode: 'fallback' });
     return;
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt = `
-You are Kyle, a calm voice assistant inside CipherSquad Agent Harness.
+You are Kyle, the calm operating agent inside Mailmate.
 You are speaking out loud, not writing a report.
 Answer like a person in 1 to 3 short spoken sentences.
 Use contractions naturally. Avoid bullets, markdown, headings, tables, and long lists.
 Use the Gmail/workflow context when available.
-Never claim you sent an email or completed an irreversible action. Offer the next step or a draft instead.
+Return only valid JSON with this shape: {"reply":"spoken response","actions":[{"tool":"tool.name","args":{}}]}.
+Allowed tools are navigation.open, inbox.set_filter, inbox.open_email, calendar.open_event, work.focus, ui.highlight, ui.scroll_to, and ui.toast.
+Use only exact IDs from Resolved references or UI context. Never invent IDs, CSS selectors, JavaScript, or new tool names.
+Never send email, delete data, or complete an irreversible action. For reply, move, reschedule, or edit requests, open the exact object so the user can review it.
+The phrase this, that, or it has already been resolved locally. Treat Resolved references as authoritative.
 
 User request:
 ${message}
 
 Current Gmail/workflow context:
 ${JSON.stringify(context)}
+
+Compact UI context:
+${JSON.stringify(uiContext)}
+
+Resolved references:
+${JSON.stringify(resolvedReferences)}
+
+Actions already inferred locally (do not repeat them):
+${JSON.stringify(deterministicActions)}
 `;
 
     const response = await ai.models.generateContent({
       model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
-      contents: prompt
+      contents: prompt,
+      config: { responseMimeType: 'application/json' }
     });
-
-    res.json({ reply: (response.text || fallbackReply).trim(), mode: 'gemini' });
+    const parsed = parseKyleJson(response.text);
+    const modelActions = (parsed?.actions || [])
+      .slice(0, 4)
+      .map(action => sanitizeKyleAction(action, knownReferences))
+      .filter(Boolean);
+    const actions = [...deterministicActions, ...modelActions]
+      .filter((action, index, all) => all.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(action)) === index)
+      .slice(0, 5);
+    res.json({ reply: cleanAgentText(parsed?.reply || fallbackReply, 520), actions, mode: 'gemini' });
   } catch (error) {
-    console.error('Kyle Gemini chat failed:', error.message || error);
-    res.json({ reply: fallbackReply, mode: 'fallback' });
+    console.error('Kyle Gemini agent failed:', error.message || error);
+    res.json({ reply: fallbackReply, actions: deterministicActions, mode: 'fallback' });
   }
-});
+}
+
+app.post('/api/kyle/agent', handleKyleAgent);
+app.post('/api/kyle/chat', handleKyleAgent);
 
 // ─────────────────────────────────────────────
 // AUTH ROUTES
@@ -319,6 +513,11 @@ ${JSON.stringify(context)}
 
 // Route 1: Redirect user to Google OAuth page
 app.get('/auth/google', (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    res.status(503).send('Google OAuth is not configured on this backend.');
+    return;
+  }
+  const oauth2Client = createOAuthClient(getGoogleRedirectUri(req));
   const scopes = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -335,8 +534,9 @@ app.get('/auth/google', (req, res) => {
 // Route 2: OAuth Callback — persist user & tokens to Supabase
 app.get('/auth/google/callback', async (req, res) => {
   const { code, error } = req.query;
+  const frontendUrl = getRequestBaseUrl(req);
   if (error) {
-    res.redirect(`${FRONTEND_URL}/index.html?auth_error=${encodeURIComponent(error)}`);
+    res.redirect(`${frontendUrl}/index.html?auth_error=${encodeURIComponent(error)}`);
     return;
   }
   if (!code) {
@@ -345,16 +545,18 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 
   try {
+    const redirectUri = getGoogleRedirectUri(req);
+    const oauth2Client = createOAuthClient(redirectUri);
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
     // Get user profile from Google
-    const profile = await fetchGoogleProfile(tokens);
+    const profile = await fetchGoogleProfile(tokens, redirectUri);
 
     if (!SUPABASE_ENABLED) {
       localTokens = tokens;
       localProfile = profile;
-      res.redirect(`${FRONTEND_URL}/dashboard.html?connected=true&userId=${encodeURIComponent(getLocalUserId())}&name=${encodeURIComponent(profile.name || profile.email || '')}&picture=${encodeURIComponent(profile.picture || '')}`);
+      res.redirect(`${frontendUrl}/dashboard.html?connected=true&userId=${encodeURIComponent(getLocalUserId())}&name=${encodeURIComponent(profile.name || profile.email || '')}&picture=${encodeURIComponent(profile.picture || '')}`);
       return;
     }
 
@@ -369,7 +571,7 @@ app.get('/auth/google/callback', async (req, res) => {
     });
 
     // Redirect to frontend with userId
-    res.redirect(`${FRONTEND_URL}/dashboard.html?connected=true&userId=${user.id}&name=${encodeURIComponent(user.name || '')}&picture=${encodeURIComponent(profile.picture || '')}`);
+    res.redirect(`${frontendUrl}/dashboard.html?connected=true&userId=${user.id}&name=${encodeURIComponent(user.name || '')}&picture=${encodeURIComponent(profile.picture || '')}`);
   } catch (error) {
     console.error('Error during OAuth callback:', error.message || error);
     res.status(500).send('Authentication failed');
@@ -612,6 +814,23 @@ app.patch('/api/agent/action/:actionId', async (req, res) => {
 // START SERVER
 // ─────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`CipherSquad backend running on http://localhost:${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`[Harness] backend listening on http://localhost:${PORT}`);
+  if (HOST === '0.0.0.0' || HOST === '::') {
+    const addresses = Object.values(os.networkInterfaces())
+      .flat()
+      .filter(address => address && address.family === 'IPv4' && !address.internal)
+      .map(address => `http://${address.address}:${PORT}`);
+    if (addresses.length) console.log(`[Harness] LAN access: ${addresses.join(', ')}`);
+  }
 });
+
+function shutdown(signal) {
+  console.log(`[Harness] ${signal} received, closing server`);
+  server.close(() => process.exit(0));
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+module.exports = { app, server };

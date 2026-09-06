@@ -558,8 +558,34 @@ h2 { font-size: 1rem; }
 .kyle-result-panel.is-visible { display: grid; gap: 7px; }
 .kyle-result-panel button { padding: 8px 10px; border: 0; border-radius: 5px; color: var(--dark-text); background: var(--sidebar-hover); text-align: left; cursor: pointer; }
 
+.kyle-focus {
+  animation: kyleFocus 700ms ease 2;
+  outline: 2px solid rgba(20, 20, 18, 0.72);
+  outline-offset: 3px;
+}
+
+.kyle-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 1100;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 11px 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--dark-text);
+  background: var(--sidebar);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 10px);
+  transition: opacity 180ms ease, transform 220ms ease;
+}
+.kyle-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
 @keyframes pageIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulseDot { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes kyleFocus { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(0.88); } }
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 76px minmax(0, 1fr); }

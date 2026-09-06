@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function boot() {
     hydrateReturnParams();
     bindEvents();
+    registerStaticObjects();
     initCalendarControls();
     setProfile();
     await loadHealth();
@@ -116,12 +117,30 @@ document.addEventListener('DOMContentLoaded', () => {
       state.selectedEmailId = emailKey(email);
       renderEmails(state.data?.emails || []);
       showTab('inbox');
+      const reference = emailReference(email);
+      window.MailmateContext?.select(reference);
+      window.MailmateContext?.open(reference);
     });
 
     window.addEventListener('harness:error', event => {
       addError(event.detail?.message || 'Unknown Kyle error.');
       renderStatus();
     });
+  }
+
+  function registerStaticObjects() {
+    els.tabs.forEach(tab => window.MailmateObjects?.register({
+      type: 'page',
+      id: tab.dataset.tab,
+      label: tab.textContent.trim(),
+      page: tab.dataset.tab
+    }, tab));
+    els.filters.forEach(filter => window.MailmateObjects?.register({
+      type: 'inbox-filter',
+      id: filter.dataset.filter,
+      label: filter.textContent.trim(),
+      page: 'inbox'
+    }, filter));
   }
 
   function showTab(name) {
@@ -132,6 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.title = `Agent Harness - ${copy[0]}`;
     els.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
     els.panels.forEach(panel => panel.classList.toggle('active', panel.id === `tab-${name}`));
+    window.MailmateContext?.setPage(name);
     window.Kyle?.setContext({
       ...(state.data || {}),
       calendarEvents: state.calendarEvents,
@@ -321,10 +341,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const attention = data.needs_attention || [];
     els.attentionList.innerHTML = attention.length
-      ? attention.slice(0, 5).map(item => {
+      ? attention.slice(0, 5).map((item, index) => {
           const title = item.subject || item.title || conciseActionTitle(item.description || item.reason) || 'Your task';
           const deadline = item.deadline ? `<small>${escapeHtml(item.deadline)}</small>` : '';
-          return `<li><strong>${escapeHtml(title)}</strong><span>${escapeHtml(item.description || item.reason || 'Needs follow-up')}</span>${deadline}</li>`;
+          return `<li data-kyle-type="work-item" data-kyle-id="attention-${index}" data-kyle-label="${escapeHtml(title)}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(item.description || item.reason || 'Needs follow-up')}</span>${deadline}</li>`;
         }).join('')
       : '<li><strong>Inbox clear</strong><span>No urgent dependencies detected in this scan.</span></li>';
 
@@ -334,8 +354,16 @@ document.addEventListener('DOMContentLoaded', () => {
       deadline: item.deadline || ''
     }));
     els.actionList.innerHTML = actions.length
-      ? actions.map((action, index) => `<article><span class="status-dot"></span><div><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(action.body)}</p></div><small>${escapeHtml(action.deadline || (index ? 'Next' : 'Now'))}</small></article>`).join('')
+      ? actions.map((action, index) => `<article data-kyle-type="work-item" data-kyle-id="suggested-${index}" data-kyle-label="${escapeHtml(action.title)}"><span class="status-dot"></span><div><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(action.body)}</p></div><small>${escapeHtml(action.deadline || (index ? 'Next' : 'Now'))}</small></article>`).join('')
       : '<article><span class="status-dot"></span><div><strong>Nothing urgent</strong><p>No action is currently blocking you.</p></div><small>Clear</small></article>';
+
+    [...els.attentionList.querySelectorAll('[data-kyle-id]'), ...els.actionList.querySelectorAll('[data-kyle-id]')]
+      .forEach(element => window.MailmateObjects?.register({
+        type: element.dataset.kyleType,
+        id: element.dataset.kyleId,
+        label: element.dataset.kyleLabel,
+        page: 'overview'
+      }, element));
 
     renderUpcomingFromContext();
 
@@ -344,6 +372,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderEmails(emails) {
+    window.MailmateObjects?.unregisterType('email');
     const filtered = emails.filter(email => {
       if (state.inboxFilter === 'important') return isImportant(email);
       if (state.inboxFilter === 'action') return /action|required|approval|deadline|due|waiting|review|urgent/i.test(`${email.subject || ''} ${email.snippet || ''}`);
@@ -356,7 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ? filtered.slice(0, 40).map((email, index) => {
         const selected = state.selectedEmailId && state.selectedEmailId === emailKey(email);
         return `
-          <article class="email-item ${selected ? 'is-selected' : ''} ${email.is_read === false ? 'is-unread' : ''} ${isImportant(email) ? 'is-important' : ''}" data-index="${index}">
+          <article class="email-item ${selected ? 'is-selected' : ''} ${email.is_read === false ? 'is-unread' : ''} ${isImportant(email) ? 'is-important' : ''}" data-index="${index}" data-kyle-type="email" data-kyle-id="${escapeHtml(emailKey(email))}" data-kyle-label="${escapeHtml(email.subject || 'No subject')}">
             <span class="email-marker"></span>
             <div class="email-copy">
               <p class="email-sender">${escapeHtml(senderName(email.sender))}</p>
@@ -369,9 +398,23 @@ document.addEventListener('DOMContentLoaded', () => {
       : '<div class="empty-detail"><i class="far fa-envelope"></i><p>No messages match this filter.</p></div>';
 
     [...els.emailList.querySelectorAll('.email-item[data-index]')].forEach(item => {
+      const email = filtered[Number(item.dataset.index)];
+      window.MailmateObjects?.register({
+        ...emailReference(email),
+        page: 'inbox',
+        metadata: {
+          sender: email.sender,
+          subject: email.subject,
+          date: email.date || email.timestamp,
+          unread: email.is_read === false,
+          important: isImportant(email)
+        }
+      }, item);
       item.addEventListener('click', () => {
-        const email = filtered[Number(item.dataset.index)];
         state.selectedEmailId = emailKey(email);
+        const reference = emailReference(email);
+        window.MailmateContext?.select(reference);
+        window.MailmateContext?.open(reference);
         renderEmails(emails);
       });
     });
@@ -392,6 +435,13 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="email-detail-meta"><span>${escapeHtml(email.sender || 'Unknown sender')}</span><time>${escapeHtml(formatDate(email.date || email.timestamp, true))}</time></div>
       </header>
       <div class="email-body">${escapeHtml(email.body || email.snippet || 'This message has no readable text body.')}</div>`;
+    const reference = emailReference(email);
+    window.MailmateObjects?.register({
+      ...reference,
+      page: 'inbox',
+      metadata: { sender: email.sender, subject: email.subject, date: email.date || email.timestamp }
+    }, els.emailDetail);
+    window.MailmateContext?.open(reference);
   }
 
   function renderWork(data) {
@@ -402,18 +452,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     els.workCount.textContent = `${actions.length} run${actions.length === 1 ? '' : 's'}`;
     els.workList.innerHTML = actions.length
-      ? actions.map((action, index) => `<article class="work-item ${index === 0 ? 'active' : ''}" data-index="${index}"><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(action.body)}</p></article>`).join('')
+      ? actions.map((action, index) => `<article class="work-item ${index === 0 ? 'active' : ''}" data-index="${index}" data-kyle-type="work-item" data-kyle-id="work-${index}" data-kyle-label="${escapeHtml(action.title)}"><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(action.body)}</p></article>`).join('')
       : '<article class="work-item active"><strong>No work runs yet</strong><p>Actionable Gmail threads will appear here.</p></article>';
 
-    [...els.workList.querySelectorAll('.work-item[data-index]')].forEach(item => item.addEventListener('click', () => {
+    [...els.workList.querySelectorAll('.work-item[data-index]')].forEach(item => {
       const action = actions[Number(item.dataset.index)];
-      [...els.workList.querySelectorAll('.work-item')].forEach(row => row.classList.toggle('active', row === item));
-      els.runTitle.textContent = action.title;
-      els.agentTimeline.innerHTML = `
+      const reference = { type: 'work-item', id: item.dataset.kyleId, label: action.title };
+      window.MailmateObjects?.register({ ...reference, page: 'work', metadata: { description: action.body } }, item);
+      item.addEventListener('click', () => {
+        window.MailmateContext?.select(reference);
+        window.MailmateContext?.open(reference);
+        [...els.workList.querySelectorAll('.work-item')].forEach(row => row.classList.toggle('active', row === item));
+        els.runTitle.textContent = action.title;
+        els.agentTimeline.innerHTML = `
         <article><span>K</span><div><strong>Kyle</strong><p>${escapeHtml(action.body)}</p></div></article>
         <article><span>P</span><div><strong>Planner</strong><p>Prepared a short review and response workflow.</p></div></article>
         <article><span>G</span><div><strong>Gmail agent</strong><p>Linked the original message context without reprocessing unrelated mail.</p></div></article>`;
-    }));
+      });
+    });
   }
 
   function renderStatus() {
@@ -465,6 +521,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function emailKey(email) {
     return email?.id || email?.gmail_id || email?.subject || null;
+  }
+
+  function emailReference(email) {
+    return {
+      type: 'email',
+      id: String(emailKey(email) || ''),
+      label: email?.subject || 'No subject'
+    };
   }
 
   function isImportant(email) {
@@ -790,7 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="calendar-all-day-events">
             ${dayItems.map(event => `
-              <button class="calendar-allday-chip ${eventTypeClass(event)} urgency-${eventUrgency(event)} ${event.conflict ? 'conflict' : ''}" type="button" data-calendar-event="${escapeHtml(event.id)}" title="${escapeHtml(event.deadline_label || event.title)}">
+              <button class="calendar-allday-chip ${eventTypeClass(event)} urgency-${eventUrgency(event)} ${event.conflict ? 'conflict' : ''}" type="button" data-calendar-event="${escapeHtml(event.id)}" data-kyle-type="calendar-event" data-kyle-id="${escapeHtml(event.id)}" data-kyle-label="${escapeHtml(event.title)}" title="${escapeHtml(event.deadline_label || event.title)}">
                 ${escapeHtml(event.title)}
               </button>`).join('')}
           </div>
@@ -867,7 +931,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ].filter(Boolean).join(' ');
 
         blocks += `
-          <button class="${classes}" type="button" data-calendar-event="${escapeHtml(event.id)}" style="top:${top}px;height:${height}px" title="${escapeHtml(event.title)}">
+          <button class="${classes}" type="button" data-calendar-event="${escapeHtml(event.id)}" data-kyle-type="calendar-event" data-kyle-id="${escapeHtml(event.id)}" data-kyle-label="${escapeHtml(event.title)}" style="top:${top}px;height:${height}px" title="${escapeHtml(event.title)}">
             <strong>${event.source === 'ai' ? '<span class="calendar-ai-mark">AI</span> ' : ''}${escapeHtml(event.title)}</strong>
             <small>${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${event.conflict ? ' · CLASH' : event.source === 'ai' ? ' · AUTO' : ''}</small>
           </button>`;
@@ -891,9 +955,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function bindCalendarEventClicks(root, items) {
     root.querySelectorAll('[data-calendar-event]').forEach(button => {
+      const event = items.find(item => String(item.id) === button.dataset.calendarEvent);
+      if (event) window.MailmateObjects?.register({
+        type: 'calendar-event',
+        id: String(event.id),
+        label: event.title || 'Calendar event',
+        page: 'calendar',
+        metadata: {
+          start: event.start,
+          end: event.end,
+          source: event.source,
+          conflict: event.conflict
+        }
+      }, button);
       button.addEventListener('click', () => {
-        const event = items.find(item => String(item.id) === button.dataset.calendarEvent);
         if (!event) return;
+        const reference = { type: 'calendar-event', id: String(event.id), label: event.title || 'Calendar event' };
+        window.MailmateContext?.select(reference);
+        window.MailmateContext?.open(reference);
         state.calendarSelectedEventId = event.source === 'deadline' ? null : event.id;
         if (event.source === 'deadline') {
           showDeadlineInKyle(event);
@@ -944,6 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('calendarEventDescription').value = event?.description || '';
     $('calendarDeleteEventBtn').hidden = !event;
     state.calendarSelectedEventId = event?.id || null;
+    if (event) window.MailmateContext?.open({ type: 'calendar-event', id: String(event.id), label: event.title || 'Calendar event' });
     modal.hidden = false;
     setTimeout(() => $('calendarEventTitle')?.focus(), 20);
   }
