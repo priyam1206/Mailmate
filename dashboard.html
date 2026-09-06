@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=12">
+  <link rel="stylesheet" href="./dashboard.css?v=16">
 </head>
 <body>
   <div class="app-shell">
@@ -57,24 +57,30 @@
           <div><strong id="actionCount">--</strong><span>active work</span></div>
           <div><strong id="emailCount">--</strong><span>recent emails</span></div>
         </div>
-        <section class="workspace-section">
-          <div class="section-heading"><p class="section-label">Needs attention</p><span id="attentionBadge">--</span></div>
-          <ul class="attention-list" id="attentionList"><li>Waiting for analysis.</li></ul>
-        </section>
-        <section class="workspace-section">
-          <div class="section-heading"><p class="section-label">Waiting on others</p><span id="waitingBadge">--</span></div>
-          <ul class="attention-list" id="waitingList"><li>None.</li></ul>
-        </section>
-        <section class="workspace-section">
-          <div class="section-heading"><p class="section-label">Working now</p><span>Agent activity</span></div>
-          <div class="work-now-list" id="actionList">
-            <article><span class="status-dot"></span><div><strong>Reviewing recent Gmail</strong><p>Finding work, blockers, and deadlines.</p></div><small>Starting</small></article>
+        <div class="overview-grid">
+          <div class="overview-col-primary">
+            <section class="workspace-section">
+              <div class="section-heading"><p class="section-label">Needs attention</p><span id="attentionBadge">--</span></div>
+              <ul class="attention-list" id="attentionList"><li>Waiting for analysis.</li></ul>
+            </section>
+            <section class="workspace-section">
+              <div class="section-heading"><p class="section-label">Waiting on others</p><span id="waitingBadge">--</span></div>
+              <ul class="attention-list" id="waitingList"><li>None.</li></ul>
+            </section>
           </div>
-        </section>
-        <section class="workspace-section">
-          <div class="section-heading"><p class="section-label">Upcoming</p><span>From your inbox</span></div>
-          <div class="upcoming-list" id="upcomingList"><p>Upcoming deadlines will appear after Gmail analysis.</p></div>
-        </section>
+          <div class="overview-col-secondary">
+            <section class="workspace-section">
+              <div class="section-heading"><p class="section-label">Working now</p><span>Agent activity</span></div>
+              <div class="work-now-list" id="actionList">
+                <article><span class="status-dot"></span><div><strong>Reviewing recent Gmail</strong><p>Finding work, blockers, and deadlines.</p></div><small>Starting</small></article>
+              </div>
+            </section>
+            <section class="workspace-section">
+              <div class="section-heading"><p class="section-label">Upcoming</p><span>From your inbox</span></div>
+              <div class="upcoming-list" id="upcomingList"><p>Upcoming deadlines will appear after Gmail analysis.</p></div>
+            </section>
+          </div>
+        </div>
       </section>
 
       <section class="tab-panel" id="tab-inbox">
@@ -397,7 +403,6 @@
           </article>
         </section>
       </section>
-      </section>
     </main>
   </div>
 
@@ -433,19 +438,19 @@
     </section>
   </div>
 
-  <script src="./mailmate-objects.js?v=15"></script>
-  <script src="./mailmate-context.js?v=15"></script>
-  <script src="./kyle-referents.js?v=15"></script>
-  <script src="./kyle-state.js?v=15"></script>
-  <script src="./kyle-policy.js?v=15"></script>
-  <script src="./kyle-observation.js?v=15"></script>
-  <script src="./kyle-motion.js?v=15"></script>
-  <script src="./kyle-tools.js?v=15"></script>
-  <script src="./kyle-executor.js?v=15"></script>
-  <script src="./kyle-planner.js?v=15"></script>
-  <script src="./kyle-audio.js?v=15"></script>
-  <script src="./kyle-ui.js?v=15"></script>
-  <script src="./kyle.js?v=15"></script>
-  <script src="./dashboard.js?v=15"></script>
+  <script src="./mailmate-objects.js?v=16"></script>
+  <script src="./mailmate-context.js?v=16"></script>
+  <script src="./kyle-referents.js?v=16"></script>
+  <script src="./kyle-state.js?v=16"></script>
+  <script src="./kyle-policy.js?v=16"></script>
+  <script src="./kyle-observation.js?v=16"></script>
+  <script src="./kyle-motion.js?v=16"></script>
+  <script src="./kyle-tools.js?v=16"></script>
+  <script src="./kyle-executor.js?v=16"></script>
+  <script src="./kyle-planner.js?v=16"></script>
+  <script src="./kyle-audio.js?v=16"></script>
+  <script src="./kyle-ui.js?v=16"></script>
+  <script src="./kyle.js?v=16"></script>
+  <script src="./dashboard.js?v=16"></script>
 </body>
 </html>
