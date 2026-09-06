@@ -1,2 +1,19 @@
-node_modules/  
-.env 
+node_modules/
+
+# Local secrets and machine-specific configuration
+api.env
+.env
+.env.*
+!.env.example
+
+# Logs and generated output
+*.log
+npm-debug.log*
+elevenlabs-test.mp3
+api.txt
+
+# Too large for normal GitHub pushes; use Git LFS if the full video is needed
+assets/videos/
+
+# Archived/imported copy kept locally for reference
+CipherSquad-main, 532 UPDATE - open and update current codebase here/

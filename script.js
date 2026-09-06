@@ -1,39 +1,78 @@
+const googleConfig = {
+  clientId: '',
+  backendAuthUrl: '/auth/google',
+  envLoaded: false,
+  envError: ''
+};
+
+const GOOGLE_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/gmail.readonly'
+].join(' ');
+
 document.addEventListener('DOMContentLoaded', () => {
   const logoCanvas = document.getElementById('dotLogo');
   const logoContext = logoCanvas.getContext('2d');
   const logoDots = [];
   const pointer = { x: -2000, y: -2000 };
+  const appState = {
+    tokenClient: null,
+    accessToken: '',
+    profile: null,
+    messages: []
+  };
 
-  const currentTime = document.getElementById('currentTime');
-  const timeFormatter = new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit'
-  });
+  const demoMessages = [
+    {
+      id: 'demo-1',
+      from: 'Kartikay',
+      email: 'kartikay@ciphersquad.dev',
+      subject: 'Client Portal v2 deployment blocked',
+      time: '10:42 AM',
+      snippet: "Backend API is complete, but deployment cannot begin until Sreyanko approves the database schema.",
+      body: "Backend API is complete, but deployment cannot begin until Sreyanko approves the database schema.\n\nI can deploy as soon as the approval lands."
+    },
+    {
+      id: 'demo-2',
+      from: 'Sreyanko',
+      email: 'sreyanko@ciphersquad.dev',
+      subject: 'Re: Client Portal v2 deployment blocked',
+      time: '11:08 AM',
+      snippet: "I'll review it by Monday.",
+      body: "I'll review the database schema by Monday. If anything looks risky, I will mark changes in the doc."
+    },
+    {
+      id: 'demo-3',
+      from: 'Priyam',
+      email: 'priyam@ciphersquad.dev',
+      subject: 'Frontend integration timeline',
+      time: '11:31 AM',
+      snippet: "Frontend integration needs the deployed API. We need everything ready before Wednesday's client demo.",
+      body: "Frontend integration needs the deployed API. We need everything ready before Wednesday's client demo."
+    },
+    {
+      id: 'demo-4',
+      from: 'Kartikay',
+      email: 'kartikay@ciphersquad.dev',
+      subject: 'Still waiting on schema approval',
+      time: '12:12 PM',
+      snippet: 'Still waiting for schema approval.',
+      body: 'Still waiting for schema approval. This is now blocking deployment and pushing frontend integration closer to the demo.'
+    }
+  ];
 
-  function updateTime() {
-    if (currentTime) currentTime.textContent = timeFormatter.format(new Date());
-  }
-
-  updateTime();
-  window.setInterval(updateTime, 1000);
-
-  // Universal portable image fallback resolver: works in any directory structure
   document.querySelectorAll('img').forEach(img => {
     img.addEventListener('error', function () {
       if (this.dataset.fallbackTried) return;
       this.dataset.fallbackTried = '1';
       const currentSrc = this.getAttribute('src') || '';
       const filename = currentSrc.split('/').pop();
-      if (currentSrc.includes('assets/')) {
-        this.src = './' + filename;
-      } else {
-        this.src = './assets/images/' + filename;
-      }
+      this.src = currentSrc.includes('assets/') ? './' + filename : './assets/images/' + filename;
     });
   });
 
-  // Video autoplay handling with error fallback
   const bgVideo = document.getElementById('bgVideo');
   const videoFallbackBg = document.getElementById('videoFallbackBg');
 
@@ -53,12 +92,10 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
     bgVideo.addEventListener('error', () => {
-      // If video file cannot be found or decoded on another computer, fallback background displays cleanly
       if (videoFallbackBg) videoFallbackBg.style.display = 'block';
     });
   }
 
-  // Ambient background particles
   const particlesContainer = document.getElementById('particles');
   const PARTICLE_COUNT = 30;
   for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -69,37 +106,32 @@ document.addEventListener('DOMContentLoaded', () => {
     p.style.height = `${size}px`;
     p.style.left = `${Math.random() * 100}vw`;
     p.style.top = `${Math.random() * 100}vh`;
-    p.style.background = '#ff7597';
+    p.style.background = '#ffffff';
     p.style.opacity = `${Math.random() * 0.45 + 0.15}`;
     particlesContainer.appendChild(p);
 
-    const duration = Math.random() * 7000 + 4000;
-    const keyframes = [
+    p.animate([
       { transform: 'translate(0, 0)', opacity: p.style.opacity },
       { transform: `translate(${(Math.random() - 0.5) * 120}px, -${Math.random() * 180 + 80}px)`, opacity: 0 }
-    ];
-    p.animate(keyframes, {
-      duration: duration,
+    ], {
+      duration: Math.random() * 7000 + 4000,
       iterations: Infinity,
       delay: Math.random() * 3000
     });
   }
 
-  // Scroll tracking & smooth scattering physics
   let targetScatter = 0;
   let currentScatter = 0;
 
   function updateScroll() {
     const scrollDistance = window.innerHeight * 0.85;
-    const progress = Math.min(1, Math.max(0, window.scrollY / scrollDistance));
-    targetScatter = progress;
+    targetScatter = Math.min(1, Math.max(0, window.scrollY / scrollDistance));
   }
 
   window.addEventListener('scroll', updateScroll, { passive: true });
   window.addEventListener('wheel', () => requestAnimationFrame(updateScroll), { passive: true });
   window.addEventListener('touchmove', () => requestAnimationFrame(updateScroll), { passive: true });
 
-  // Canvas dot logo creation (centered dead middle on landing)
   function buildLogo() {
     const scale = window.devicePixelRatio || 1;
     const width = window.innerWidth;
@@ -120,10 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sampleCanvas.height = height;
     const sampleCtx = sampleCanvas.getContext('2d');
 
-    // Dead center horizontally and vertically
     const centerX = width / 2;
     const centerY = height / 2;
-
     const fontSize = Math.min(width / 7.2, height * 0.22, 170);
     sampleCtx.font = `800 ${fontSize}px "Space Grotesk", sans-serif`;
     sampleCtx.textAlign = 'center';
@@ -134,30 +164,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const pixels = sampleCtx.getImageData(0, 0, width, height).data;
     const targets = [];
     const step = width < 700 ? 3 : 4;
-
     const startY = Math.max(0, Math.floor(centerY - fontSize));
     const endY = Math.min(height, Math.ceil(centerY + fontSize));
 
     for (let y = startY; y < endY; y += step) {
       for (let x = 0; x < width; x += step) {
         const pixelIndex = (y * width + x) * 4;
-        if (pixels[pixelIndex + 3] > 70) {
-          targets.push({ x, y });
-        }
+        if (pixels[pixelIndex + 3] > 70) targets.push({ x, y });
       }
     }
 
     const maxScreenDist = Math.hypot(width, height);
-
     logoDots.length = 0;
     targets.forEach((target, index) => {
-      // Omnidirectional 360-degree trajectory to scatter across full screen
       const angle = Math.random() * Math.PI * 2;
       const dist = (Math.random() * 0.85 + 0.45) * maxScreenDist * 0.75;
-
-      const scatterX = Math.cos(angle) * dist;
-      const scatterY = Math.sin(angle) * dist;
-
       const initAngle = Math.random() * Math.PI * 2;
       const initDist = Math.random() * 200 + 60;
 
@@ -166,45 +187,38 @@ document.addEventListener('DOMContentLoaded', () => {
         y: target.y + Math.sin(initAngle) * initDist,
         baseX: target.x,
         baseY: target.y,
-        scatterX: scatterX,
-        scatterY: scatterY,
+        scatterX: Math.cos(angle) * dist,
+        scatterY: Math.sin(angle) * dist,
         delay: (index % 150) * 3,
         size: Math.random() * 0.5 + 1.45
       });
     });
   }
 
-  // Tubelight Flicker & Glitch State Machine
   let glitchActive = false;
   let glitchIntensity = 0;
   let nextGlitchTime = Date.now() + 1400;
   let glitchEndTime = 0;
-  let glitchMode = 0; // 0 = white surge, 1 = hot pink buzz, 2 = alternating flicker
-
-  const pinkColors = ['#ff7597', '#ff507a', '#ff3366', '#f472b6', '#fda4af'];
+  let glitchMode = 0;
+  const chromeColors = ['#ffffff', '#f8fafc', '#e2e8f0', '#cbd5e1', '#94a3b8'];
 
   function updateTubelightGlitch(now) {
     if (!glitchActive && now >= nextGlitchTime) {
       glitchActive = true;
       glitchIntensity = Math.random() * 0.7 + 0.3;
       glitchMode = Math.floor(Math.random() * 3);
-      // Fast neon voltage stutter (100ms - 280ms)
-      const duration = Math.random() * 180 + 100;
-      glitchEndTime = now + duration;
+      glitchEndTime = now + Math.random() * 180 + 100;
     } else if (glitchActive) {
       if (now >= glitchEndTime) {
         glitchActive = false;
-        // Next glitch burst in 1.8s to 4.2s
         nextGlitchTime = now + Math.random() * 2600 + 1800;
         glitchIntensity = 0;
       } else {
-        // High frequency voltage jitter during burst
         glitchIntensity = Math.random() > 0.35 ? Math.random() * 0.9 + 0.1 : 0.05;
       }
     }
   }
 
-  // Animation Loop
   let startTime = null;
   const videoOverlay = document.getElementById('videoOverlay');
 
@@ -212,70 +226,48 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!startTime) startTime = time;
     const elapsed = time - startTime;
     const now = Date.now();
-
     const width = window.innerWidth;
     const height = window.innerHeight;
     logoContext.clearRect(0, 0, width, height);
 
-    // Update neon tubelight glitch
     updateTubelightGlitch(now);
-
-    // Smooth scroll interpolation (silky lerp)
     currentScatter += (targetScatter - currentScatter) * 0.085;
 
-    // Background transition: Hidden on landing, blurred video & pink atmosphere on scroll
     const videoOpacity = Math.min(1, Math.max(0, (currentScatter - 0.1) / 0.65));
-    if (bgVideo) {
-      bgVideo.style.opacity = videoOpacity;
-    }
-    if (videoFallbackBg) {
-      videoFallbackBg.style.opacity = videoOpacity;
-    }
-    if (videoOverlay) {
-      const overlayOpacity = Math.min(1, Math.max(0, (currentScatter - 0.08) / 0.7));
-      videoOverlay.style.opacity = overlayOpacity;
-    }
+    if (bgVideo) bgVideo.style.opacity = videoOpacity;
+    if (videoFallbackBg) videoFallbackBg.style.opacity = videoOpacity;
+    if (videoOverlay) videoOverlay.style.opacity = Math.min(1, Math.max(0, (currentScatter - 0.08) / 0.7));
 
-    // Dynamic Tubelight Canvas Drop-Shadow Glitch
     if (currentScatter < 0.25) {
       if (glitchActive && glitchIntensity > 0.2) {
-        const glowColor = glitchMode === 1 ? 'rgba(255, 51, 102, 0.9)' : 'rgba(255, 117, 151, 0.85)';
+        const glowColor = glitchMode === 1 ? 'rgba(255, 255, 255, 0.95)' : 'rgba(226, 232, 240, 0.9)';
         const blurSize = 20 + glitchIntensity * 30;
-        logoCanvas.style.filter = `drop-shadow(0 0 ${blurSize}px ${glowColor}) drop-shadow(0 0 ${blurSize * 2}px rgba(244, 114, 182, 0.6))`;
+        logoCanvas.style.filter = `drop-shadow(0 0 ${blurSize}px ${glowColor}) drop-shadow(0 0 ${blurSize * 2}px rgba(255, 255, 255, 0.5))`;
       } else {
-        logoCanvas.style.filter = 'drop-shadow(0 0 16px rgba(255, 117, 151, 0.55)) drop-shadow(0 0 38px rgba(244, 114, 182, 0.25))';
+        logoCanvas.style.filter = 'drop-shadow(0 0 16px rgba(255, 255, 255, 0.6)) drop-shadow(0 0 38px rgba(255, 255, 255, 0.3))';
       }
     }
 
-    // Fade out scroll prompt as user begins scrolling
     const scrollPrompt = document.getElementById('scrollPrompt');
-    if (scrollPrompt) {
-      scrollPrompt.style.opacity = Math.max(0, 0.85 - currentScatter * 3.5);
-    }
+    if (scrollPrompt) scrollPrompt.style.opacity = Math.max(0, 0.85 - currentScatter * 3.5);
 
-    // Smoothly rise and reveal the Google Auth Login Card
     const authContainer = document.getElementById('authContainer');
-    if (authContainer) {
+    if (authContainer && !document.body.classList.contains('app-active')) {
       const authProgress = Math.max(0, Math.min(1, (currentScatter - 0.32) / 0.68));
       authContainer.style.opacity = authProgress;
       authContainer.style.transform = `translate(-50%, calc(-50% + ${(1 - authProgress) * 45}px)) scale(${0.92 + authProgress * 0.08})`;
       authContainer.style.pointerEvents = authProgress > 0.65 ? 'auto' : 'none';
     }
 
-    // Dot particles rendering & tubelight color logic
     for (let i = 0; i < logoDots.length; i++) {
       const dot = logoDots[i];
-      
       const entryProgress = Math.max(0, Math.min(1, (elapsed - dot.delay) / 600));
-
       const targetX = dot.baseX + dot.scatterX * currentScatter;
       const targetY = dot.baseY + dot.scatterY * currentScatter;
-
       const springRate = 0.085 * (0.3 + entryProgress * 0.7);
       dot.x += (targetX - dot.x) * springRate;
       dot.y += (targetY - dot.y) * springRate;
 
-      // Subtle mouse repulsion ONLY when at the very top (zero scroll)
       if (currentScatter < 0.04) {
         const dist = Math.hypot(dot.x - pointer.x, dot.y - pointer.y);
         if (dist < 65) {
@@ -285,31 +277,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // Fade out completely across screen as currentScatter approaches 1
       const fade = Math.max(0, 1 - currentScatter * 1.15);
       let alpha = fade * (0.35 + entryProgress * 0.65);
       if (alpha <= 0.005) continue;
 
-      // Tubelight Color Glitching: shifts between electric white and hot neon sakura pink
       let dotColor = '#ffffff';
-
       if (glitchActive) {
-        // Voltage dip: slight random opacity pulse
-        alpha *= (0.6 + glitchIntensity * 0.4);
-
-        if (glitchMode === 1) {
-          // Hot pink neon surge
-          dotColor = pinkColors[i % pinkColors.length];
-        } else if (glitchMode === 2) {
-          // Alternating electric strobe
-          dotColor = (i % 3 === 0) ? pinkColors[i % pinkColors.length] : '#ffffff';
-        } else {
-          // Intense white flash with occasional hot pink spark
-          dotColor = (i % 7 === 0) ? '#ff507a' : '#ffffff';
-        }
+        alpha *= 0.6 + glitchIntensity * 0.4;
+        if (glitchMode === 1) dotColor = chromeColors[i % chromeColors.length];
+        else if (glitchMode === 2) dotColor = i % 3 === 0 ? chromeColors[i % chromeColors.length] : '#ffffff';
+        else dotColor = i % 7 === 0 ? '#94a3b8' : '#ffffff';
       } else {
-        // Normal state: crisp glowing white with occasional subtle rose tint
-        dotColor = (i % 8 === 0) ? '#fbcfe8' : '#ffffff';
+        dotColor = i % 8 === 0 ? '#cbd5e1' : '#ffffff';
       }
 
       logoContext.fillStyle = dotColor;
@@ -323,8 +302,279 @@ document.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(animateLogo);
   }
 
-  // Pointer interactions (full-screen window coordinates)
-  const handlePointer = (event) => {
+  function escapeHtml(value = '') {
+    return value.replace(/[&<>"']/g, char => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    }[char]));
+  }
+
+  function decodeBase64Url(value = '') {
+    const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), '=');
+    return decodeURIComponent(escape(atob(padded)).split('').map(char => {
+      return `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`;
+    }).join(''));
+  }
+
+  function getHeader(payload, name) {
+    return payload?.headers?.find(header => header.name.toLowerCase() === name.toLowerCase())?.value || '';
+  }
+
+  function extractSender(fromHeader = '') {
+    const match = fromHeader.match(/^(.*?)\s*<(.+?)>$/);
+    if (!match) return { name: fromHeader || 'Unknown sender', email: '' };
+    return { name: match[1].replaceAll('"', '').trim(), email: match[2] };
+  }
+
+  function getPlainBody(payload) {
+    if (!payload) return '';
+    if (payload.mimeType === 'text/plain' && payload.body?.data) return decodeBase64Url(payload.body.data);
+    const parts = payload.parts || [];
+    for (const part of parts) {
+      const body = getPlainBody(part);
+      if (body) return body;
+    }
+    return '';
+  }
+
+  async function googleFetch(url) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${appState.accessToken}` }
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `Google API failed with ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async function loadGoogleProfile() {
+    const profile = await googleFetch('https://www.googleapis.com/oauth2/v3/userinfo');
+    appState.profile = profile;
+    document.getElementById('profileName').textContent = profile.name || 'Google User';
+    document.getElementById('profileEmail').textContent = profile.email || 'Connected Workspace';
+    if (profile.picture) document.getElementById('profilePhoto').src = profile.picture;
+  }
+
+  async function loadInbox() {
+    const messageList = document.getElementById('messageList');
+    messageList.innerHTML = '<div class="loading-row">Loading Gmail messages...</div>';
+
+    const list = await googleFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=8&q=newer_than:30d');
+    const ids = list.messages || [];
+    if (!ids.length) {
+      appState.messages = demoMessages;
+      renderMessages(demoMessages, true);
+      return;
+    }
+
+    const messages = await Promise.all(ids.map(async item => {
+      const message = await googleFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.id}?format=full`);
+      const from = extractSender(getHeader(message.payload, 'From'));
+      const subject = getHeader(message.payload, 'Subject') || '(No subject)';
+      const date = getHeader(message.payload, 'Date');
+      const sentAt = date ? new Date(date) : null;
+
+      return {
+        id: message.id,
+        from: from.name,
+        email: from.email,
+        subject,
+        time: sentAt && !Number.isNaN(sentAt.getTime())
+          ? sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : '',
+        snippet: message.snippet || '',
+        body: getPlainBody(message.payload) || message.snippet || ''
+      };
+    }));
+
+    appState.messages = messages;
+    renderMessages(messages);
+  }
+
+  function renderMessages(messages, isDemoFallback = false) {
+    const messageList = document.getElementById('messageList');
+    document.getElementById('inboxCount').textContent = messages.length;
+    messageList.innerHTML = '';
+
+    if (isDemoFallback) {
+      const notice = document.createElement('div');
+      notice.className = 'loading-row';
+      notice.textContent = 'No recent Gmail messages found, showing demo workflow thread.';
+      messageList.appendChild(notice);
+    }
+
+    messages.forEach((message, index) => {
+      const button = document.createElement('button');
+      button.className = `message-card${index === 0 ? ' is-active' : ''}`;
+      button.type = 'button';
+      button.innerHTML = `
+        <span class="sender-avatar">${escapeHtml((message.from || '?').trim().charAt(0).toUpperCase())}</span>
+        <span class="message-copy">
+          <strong>${escapeHtml(message.from)}</strong>
+          <b>${escapeHtml(message.subject)}</b>
+          <small>${escapeHtml(message.snippet)}</small>
+        </span>
+        <time>${escapeHtml(message.time)}</time>
+      `;
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.message-card').forEach(card => card.classList.remove('is-active'));
+        button.classList.add('is-active');
+        renderThread(message);
+      });
+      messageList.appendChild(button);
+    });
+
+    renderThread(messages[0] || demoMessages[0]);
+  }
+
+  function renderThread(message) {
+    document.getElementById('threadTitle').textContent = message.subject;
+    const isProjectThread = /schema|deploy|frontend|client|approval|blocked/i.test(`${message.subject} ${message.snippet} ${message.body}`);
+    document.getElementById('riskPill').textContent = isProjectThread ? 'High Risk' : 'Needs Review';
+    document.getElementById('threadContent').innerHTML = `
+      <div class="thread-meta">
+        <span class="sender-avatar large">${escapeHtml((message.from || '?').trim().charAt(0).toUpperCase())}</span>
+        <div>
+          <strong>${escapeHtml(message.from)}</strong>
+          <span>${escapeHtml(message.email || 'Unknown email')}</span>
+        </div>
+      </div>
+      <p>${escapeHtml(message.body || message.snippet).replace(/\n/g, '<br>')}</p>
+      <div class="analysis-note">
+        <strong>Harness read:</strong>
+        ${isProjectThread
+          ? 'Possible blocker detected. Schema approval is upstream of deployment, integration, and the Wednesday client demo.'
+          : 'Thread imported from Gmail. The analyzer shell is ready for task extraction, dependency mapping, and human-approved actions.'}
+      </div>
+    `;
+  }
+
+  function setAuthStatus(text, kind = '') {
+    const authStatusMsg = document.getElementById('authStatusMsg');
+    authStatusMsg.className = `auth-status-msg ${kind}`.trim();
+    authStatusMsg.textContent = text;
+  }
+
+  function showApp() {
+    document.body.classList.add('app-active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.getElementById('mailApp').classList.add('is-visible');
+    document.getElementById('authContainer').style.pointerEvents = 'none';
+  }
+
+  function parseEnv(text) {
+    return text.split(/\r?\n/).reduce((values, rawLine) => {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) return values;
+      const separatorIndex = line.indexOf('=');
+      if (separatorIndex === -1) return values;
+      const key = line.slice(0, separatorIndex).trim();
+      const value = line.slice(separatorIndex + 1).trim().replace(/^['"]|['"]$/g, '');
+      values[key] = value;
+      return values;
+    }, {});
+  }
+
+  async function loadGoogleConfig() {
+    if (googleConfig.envLoaded) return googleConfig;
+
+    try {
+      const response = await fetch(`/api/config?ts=${Date.now()}`);
+      if (!response.ok) throw new Error(`api.env returned ${response.status}`);
+
+      const config = await response.json();
+      googleConfig.clientId = config.googleClientId || '';
+      googleConfig.backendAuthUrl = config.backendAuthUrl || '/auth/google';
+      googleConfig.envLoaded = true;
+
+      if (!googleConfig.clientId) {
+        googleConfig.envError = 'GOOGLE_CLIENT_ID is missing in api.env.';
+      }
+    } catch (error) {
+      try {
+        const response = await fetch(`./api.env?ts=${Date.now()}`);
+        if (!response.ok) throw new Error(`api.env returned ${response.status}`);
+        const env = parseEnv(await response.text());
+        googleConfig.clientId = env.GOOGLE_CLIENT_ID || '';
+        googleConfig.backendAuthUrl = '/auth/google';
+        googleConfig.envLoaded = true;
+        if (!googleConfig.clientId) googleConfig.envError = 'GOOGLE_CLIENT_ID is missing in api.env.';
+      } catch (fallbackError) {
+        googleConfig.envError = `Could not read Google config: ${fallbackError.message}`;
+        googleConfig.envLoaded = true;
+      }
+    }
+
+    return googleConfig;
+  }
+
+  async function initGoogleAuth() {
+    const googleAuthBtn = document.getElementById('googleAuthBtn');
+    if (!googleAuthBtn) return;
+
+    const config = await loadGoogleConfig();
+    if (!config.clientId) {
+      setAuthStatus(config.envError || 'Google client ID is missing.', 'is-error');
+      return;
+    }
+
+    appState.tokenClient = {
+      requestAccessToken: () => {
+        window.location.href = config.backendAuthUrl || '/auth/google';
+      }
+    };
+  }
+
+  const googleAuthBtn = document.getElementById('googleAuthBtn');
+  if (googleAuthBtn) {
+    googleAuthBtn.addEventListener('click', async () => {
+      if (googleAuthBtn.classList.contains('is-loading')) return;
+      googleAuthBtn.classList.add('is-loading');
+
+      if (!appState.tokenClient) await initGoogleAuth();
+      if (!appState.tokenClient) {
+        googleAuthBtn.classList.remove('is-loading');
+        return;
+      }
+
+      setAuthStatus('Redirecting to Google authorization...');
+      appState.tokenClient.requestAccessToken({ prompt: appState.accessToken ? '' : 'consent' });
+    });
+  }
+
+  document.getElementById('refreshInboxBtn')?.addEventListener('click', async () => {
+    if (!appState.accessToken) return;
+    try {
+      await loadInbox();
+    } catch (error) {
+      console.error(error);
+      renderMessages(demoMessages, true);
+    }
+  });
+
+  document.getElementById('signOutBtn')?.addEventListener('click', () => {
+    if (appState.accessToken && window.google?.accounts?.oauth2) {
+      google.accounts.oauth2.revoke(appState.accessToken);
+    }
+    appState.accessToken = '';
+    appState.profile = null;
+    document.body.classList.remove('app-active');
+    document.getElementById('mailApp').classList.remove('is-visible');
+    setAuthStatus('Disconnected from Google.');
+  });
+
+  document.getElementById('approveActionsBtn')?.addEventListener('click', () => {
+    const approvalStatus = document.getElementById('approvalStatus');
+    approvalStatus.textContent = 'Executed: reminder queued, task created, stakeholder notified, draft prepared.';
+    approvalStatus.classList.add('is-complete');
+  });
+
+  const handlePointer = event => {
     pointer.x = event.clientX;
     pointer.y = event.clientY;
   };
@@ -335,34 +585,10 @@ document.addEventListener('DOMContentLoaded', () => {
     pointer.y = -2000;
   });
 
-  // Interactive Google Auth Button Prototype
-  const googleAuthBtn = document.getElementById('googleAuthBtn');
-  const authStatusMsg = document.getElementById('authStatusMsg');
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(buildLogo);
+  else buildLogo();
 
-  if (googleAuthBtn) {
-    googleAuthBtn.addEventListener('click', () => {
-      if (googleAuthBtn.classList.contains('is-loading')) return;
-
-      googleAuthBtn.classList.add('is-loading');
-      authStatusMsg.className = 'auth-status-msg';
-      authStatusMsg.textContent = 'Connecting to Gmail & Workspace Thread Analyzer...';
-
-      setTimeout(() => {
-        googleAuthBtn.classList.remove('is-loading');
-        authStatusMsg.classList.add('is-success');
-        authStatusMsg.textContent = '✓ Inbox Connected! Agent Harness initialized.';
-      }, 1400);
-    });
-  }
-
-
-  // Load font first so canvas text metrics are crisp
-  if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(buildLogo);
-  } else {
-    buildLogo();
-  }
-
+  window.addEventListener('load', initGoogleAuth);
   requestAnimationFrame(animateLogo);
   window.addEventListener('resize', buildLogo);
 });
