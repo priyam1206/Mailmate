@@ -1794,5 +1794,31 @@ h2 { font-size: 1rem; }
   color: #e9d5ff;
 }
 
+/* Badges for Work Job Statuses */
+.run-status.badge-waiting_approval { background: #d97706; color: #fff; }
+.run-status.badge-auto_send_countdown { background: #eab308; color: #181817; }
+.run-status.badge-working { background: #2563eb; color: #fff; }
+.run-status.badge-queued { background: #64748b; color: #fff; }
+.run-status.badge-sent { background: #16a34a; color: #fff; }
+.run-status.badge-resolved_external { background: #0d9488; color: #fff; }
+.run-status.badge-needs_input { background: #dc2626; color: #fff; }
+.run-status.badge-cancelled { background: #94a3b8; color: #fff; }
+.run-status.badge-failed { background: #ef4444; color: #fff; }
+
+.work-rail-group-header {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 14px 18px 6px;
+  background: transparent;
+  border-top: 1px solid var(--line);
+}
+.work-rail-group-header:first-child {
+  border-top: none;
+  padding-top: 6px;
+}
+
 
 

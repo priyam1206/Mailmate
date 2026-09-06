@@ -27,7 +27,8 @@ class AgentSession:
         max_steps: int = 12,
         max_tool_failures: int = 3,
         max_research_calls: int = 4,
-        max_generated_files: int = 5
+        max_generated_files: int = 5,
+        on_step: Optional[Any] = None
     ):
         self.job_id = job_id
         self.user_id = user_id
@@ -35,6 +36,7 @@ class AgentSession:
         self.source_email = source_email or {}
         self.routing = routing  # "BLOCK" | "LOCAL_ONLY" | "CLOUD_ALLOWED"
         self.autonomy_level = autonomy_level  # "off" | "prepare" | "safe_replies" | "full_prepare"
+        self.on_step = on_step
 
         self.max_steps = max_steps
         self.max_tool_failures = max_tool_failures
@@ -54,6 +56,7 @@ class AgentSession:
         self.summary: str = ""
         self.status: str = "running"
         self.finish_reason: Optional[str] = None
+        self.missing_deliverable: Optional[str] = None
         self.verification_report: Dict[str, Any] = {}
 
     def can_continue(self) -> Tuple[bool, str]:
@@ -96,6 +99,12 @@ class AgentSession:
             elif action.startswith("file.create_"):
                 self.generated_files += 1
 
+        if self.on_step:
+            try:
+                self.on_step(self, step_record)
+            except Exception as cb_err:
+                print(f"[AgentSession] on_step callback error: {cb_err}")
+
     def add_artifact(self, artifact: Dict[str, Any]):
         # Avoid duplicate artifacts by path or name
         path = artifact.get("path") or artifact.get("name")
@@ -104,6 +113,11 @@ class AgentSession:
                 self.artifacts[idx] = artifact
                 return
         self.artifacts.append(artifact)
+        if self.on_step:
+            try:
+                self.on_step(self, None)
+            except Exception as cb_err:
+                print(f"[AgentSession] on_step artifact callback error: {cb_err}")
 
     def add_note(self, note: str):
         n = str(note or "").strip()
@@ -149,6 +163,7 @@ class AgentSession:
             "autonomy_level": self.autonomy_level,
             "status": self.status,
             "finish_reason": self.finish_reason,
+            "missing_deliverable": self.missing_deliverable,
             "step_count": self.step_count,
             "max_steps": self.max_steps,
             "counters": {

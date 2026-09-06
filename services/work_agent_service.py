@@ -9,7 +9,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import requests
 
-from services.google_service import create_gmail_draft, send_gmail_draft, update_gmail_draft, get_gmail_threads
+from services.google_service import (
+    create_gmail_draft,
+    send_gmail_draft,
+    update_gmail_draft,
+    get_gmail_threads,
+    get_gmail_thread,
+    get_gmail_draft,
+    delete_gmail_draft
+)
 from services.auto_send_policy import AutoSendPolicy
 from services.privacy_gate import PrivacyGate
 from services.agent import AgentSession, AgentLoop, PolicyEngine, ToolRegistry, Verifier
@@ -141,12 +149,128 @@ class WorkAgentService:
         digest = hashlib.sha256(f"{user_id}:{message_id}".encode("utf-8")).hexdigest()[:12]
         return f"work_{digest}"
 
-    def list_jobs(self, user_id):
+    def reconcile_jobs_with_gmail(self, user_id=None):
+        """
+        Inspect unresolved WorkJobs tied to Gmail threads.
+        If the authenticated user sent a newer outbound message on the thread,
+        transition the job to 'resolved_external', cancel any auto-send countdown,
+        and safely delete Mailmate's own stale draft if one exists.
+        """
+        reconciled = []
+        with self._lock:
+            jobs = self._read_jobs()
+            unresolved_statuses = {
+                "queued", "reading_context", "planning", "researching",
+                "generating", "drafting_reply", "creating_files",
+                "verifying", "preparing", "working", "waiting_approval",
+                "auto_send_countdown", "needs_input"
+            }
+            changed = False
+            for jid, job in list(jobs.items()):
+                if user_id and job.get("user_id") != user_id:
+                    continue
+                if job.get("status") not in unresolved_statuses:
+                    continue
+
+                source = job.get("source") or {}
+                thread_id = source.get("thread_id")
+                source_msg_id = source.get("message_id")
+                if not thread_id:
+                    continue
+
+                try:
+                    thread_data = get_gmail_thread(thread_id)
+                except Exception as e:
+                    print(f"[WorkAgent] Thread check failed ({thread_id}): {e}")
+                    continue
+
+                if not thread_data or not thread_data.get("messages"):
+                    continue
+
+                messages = thread_data["messages"]
+                # Find index of source inbound message
+                source_index = -1
+                for idx, m in enumerate(messages):
+                    if m.get("id") == source_msg_id or m.get("gmail_id") == source_msg_id:
+                        source_index = idx
+                        break
+
+                later_messages = messages[source_index + 1:] if source_index >= 0 else messages
+                outbound = next((m for m in later_messages if m.get("direction") == "outbound" or m.get("is_sent_by_me")), None)
+
+                if outbound:
+                    print(f"[WorkAgent] Thread {thread_id} already handled externally via Gmail (msg {outbound.get('id')}). Reconciling job {jid}...")
+                    job["status"] = "resolved_external"
+                    job["resolved_at"] = outbound.get("date") or outbound.get("timestamp") or _now()
+                    job["resolved_message_id"] = outbound.get("id")
+                    job["resolution"] = "manual_gmail_reply"
+                    job["updated_at"] = _now()
+                    changed = True
+
+                    # Cancel auto-send countdown if running
+                    if "countdown" in job:
+                        job["countdown"]["cancelled"] = True
+
+                    # Clean up Mailmate's own draft if it was staged but not used
+                    draft_id = (job.get("output") or {}).get("gmail_draft_id")
+                    if draft_id:
+                        try:
+                            existing_draft = get_gmail_draft(draft_id)
+                            if existing_draft:
+                                delete_gmail_draft(draft_id)
+                                job["output"]["draft_stale"] = True
+                                job["output"]["gmail_draft_id"] = None
+                            else:
+                                job["resolution"] = "manual_gmail_reply_sent_draft"
+                        except Exception as d_err:
+                            print(f"[WorkAgent] Draft cleanup notice: {d_err}")
+
+                    # Append history step
+                    if "steps" not in job:
+                        job["steps"] = []
+                    job["steps"].append({
+                        "type": "resolved_external",
+                        "label": "Replied via Gmail (Handled outside Mailmate)",
+                        "status": "done",
+                        "at": _now()
+                    })
+                    reconciled.append(job)
+
+            if changed:
+                self._write_jobs(jobs)
+
+        return reconciled
+
+    def list_jobs(self, user_id, reconcile=True):
+        if reconcile and user_id:
+            try:
+                self.reconcile_jobs_with_gmail(user_id)
+            except Exception as e:
+                print(f"[WorkAgent] Reconciliation notice in list_jobs: {e}")
+
         with self._lock:
             jobs = self._read_jobs()
             user_jobs = [j for j in jobs.values() if j.get("user_id") == user_id]
             user_jobs.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
             return user_jobs
+
+    def get_active_jobs(self, user_id):
+        active_statuses = {
+            "queued", "reading_context", "planning", "researching",
+            "generating", "drafting_reply", "creating_files",
+            "verifying", "preparing", "working"
+        }
+        return [j for j in self.list_jobs(user_id, reconcile=False) if j.get("status") in active_statuses]
+
+    def get_waiting_approval_jobs(self, user_id):
+        return [j for j in self.list_jobs(user_id, reconcile=False) if j.get("status") in {"waiting_approval", "auto_send_countdown"}]
+
+    def get_needs_input_jobs(self, user_id):
+        return [j for j in self.list_jobs(user_id, reconcile=False) if j.get("status") == "needs_input"]
+
+    def get_completed_jobs(self, user_id):
+        completed_statuses = {"sent", "approved_sent", "resolved_external", "cancelled", "failed"}
+        return [j for j in self.list_jobs(user_id, reconcile=False) if j.get("status") in completed_statuses]
 
     def get_job(self, job_id, user_id):
         with self._lock:
@@ -348,6 +472,36 @@ class WorkAgentService:
         if not job:
             raise ValueError("Job not found")
 
+        # Reconcile with Gmail thread before executing send
+        source = job.get("source") or {}
+        thread_id = source.get("thread_id")
+        source_msg_id = source.get("message_id")
+        if thread_id and not auto_sent:
+            try:
+                thread_data = get_gmail_thread(thread_id)
+                if thread_data and thread_data.get("messages"):
+                    msgs = thread_data["messages"]
+                    s_idx = -1
+                    for idx, m in enumerate(msgs):
+                        if m.get("id") == source_msg_id or m.get("gmail_id") == source_msg_id:
+                            s_idx = idx
+                            break
+                    later = msgs[s_idx + 1:] if s_idx >= 0 else msgs
+                    outbound = next((m for m in later if m.get("direction") == "outbound" or m.get("is_sent_by_me")), None)
+                    if outbound:
+                        print(f"[WorkAgent] Aborting send for job {job_id}: thread {thread_id} already has outbound reply {outbound.get('id')}.")
+                        with self._lock:
+                            jobs = self._read_jobs()
+                            if job_id in jobs:
+                                jobs[job_id]["status"] = "resolved_external"
+                                jobs[job_id]["resolution"] = "manual_gmail_reply"
+                                jobs[job_id]["resolved_at"] = outbound.get("date") or _now()
+                                jobs[job_id]["resolved_message_id"] = outbound.get("id")
+                                self._write_jobs(jobs)
+                        return jobs.get(job_id) or job
+            except Exception as e:
+                print(f"[WorkAgent] approve_job reconciliation check notice: {e}")
+
         with self._lock:
             jobs = self._read_jobs()
             if job_id in jobs:
@@ -414,6 +568,24 @@ class WorkAgentService:
                 self._write_jobs(jobs)
                 return jobs[job_id]
 
+    def _on_session_step(self, job_id, session, step_record):
+        """Immediately persists each agent step as it executes."""
+        with self._lock:
+            jobs = self._read_jobs()
+            job = jobs.get(job_id)
+            if not job:
+                return
+            job["status"] = "working"
+            job["steps"] = list(session.steps)
+            job["artifacts"] = list(session.artifacts)
+            if step_record:
+                job["current_step"] = step_record.get("thought") or step_record.get("action") or "Working"
+                job["activity_label"] = step_record.get("action") or "Working"
+                job["step_index"] = session.step_count
+                job["step_count"] = session.step_count
+            job["updated_at"] = _now()
+            self._write_jobs(jobs)
+
     def _execute_job(self, job_id, user_id):
         with self._lock:
             jobs = self._read_jobs()
@@ -447,7 +619,7 @@ class WorkAgentService:
         settings = self.get_settings()
         autonomy_level = settings.get("auto_send_mode", "safe_replies")
 
-        # Step 2: Initialize Bounded Agent Session
+        # Step 2: Initialize Bounded Agent Session with real-time on_step callback
         session = AgentSession(
             job_id=job_id,
             user_id=user_id,
@@ -458,14 +630,37 @@ class WorkAgentService:
             max_steps=12,
             max_tool_failures=3,
             max_research_calls=4,
-            max_generated_files=5
+            max_generated_files=5,
+            on_step=lambda s, step: self._on_session_step(job_id, s, step)
         )
 
         # Step 3: Run Agent Loop
         loop = AgentLoop(session)
         final_session = loop.run()
 
-        # Step 4: Handle model availability / routing pause
+        # Step 4: Handle needs_input (e.g. required specific deliverable like OS PDF is missing)
+        if final_session.status == "needs_input":
+            with self._lock:
+                jobs = self._read_jobs()
+                if job_id in jobs:
+                    j = jobs[job_id]
+                    j["status"] = "needs_input"
+                    j["missing_deliverable"] = final_session.missing_deliverable
+                    j["summary"] = final_session.summary or f"Needs input — required {final_session.missing_deliverable or 'file'} is missing."
+                    j["updated_at"] = _now()
+                    j["steps"] = final_session.steps
+                    j["artifacts"] = final_session.artifacts
+                    j["output"] = {
+                        "summary": j["summary"],
+                        "checklist": final_session.checklist,
+                        "suggested_reply": final_session.reply_draft.get("body") or "",
+                        "gmail_draft_id": None,
+                        "notes": final_session.notes
+                    }
+                    self._write_jobs(jobs)
+            return
+
+        # Step 4.5: Handle model availability / routing pause
         if final_session.status == "waiting_local_model":
             with self._lock:
                 jobs = self._read_jobs()
@@ -487,7 +682,7 @@ class WorkAgentService:
 
         suggested_reply = final_session.reply_draft.get("body") or (
             f"Hi {sender.split('<')[0].strip()},\n\n"
-            f"I received your email regarding '{subject}'. I am reviewing the details now and will have this completed within the requested deadline ({deadline or 'asap'}).\n\n"
+            f"I received your email regarding '{subject}'. I am reviewing the details now.\n\n"
             f"Best regards,\nPriyam"
         )
 
@@ -581,7 +776,7 @@ class WorkAgentService:
                     self._write_jobs(jobs)
 
     def _start_countdown_timer(self, job_id, user_id, expected_send_at, seconds=20):
-        """Launches a background timer that dispatches the draft if not cancelled."""
+        """Launches a background timer that dispatches the draft if not cancelled, with pre-send reconciliation check."""
         def timer_loop():
             time.sleep(seconds)
             with self._lock:
@@ -593,6 +788,42 @@ class WorkAgentService:
                 c = job.get("countdown") or {}
                 if c.get("cancelled") or c.get("auto_send_at") != expected_send_at:
                     return
+
+            # Pre-send reconciliation invariant: verify user hasn't replied manually in Gmail
+            source = job.get("source") or {}
+            thread_id = source.get("thread_id")
+            if thread_id:
+                try:
+                    thread_data = get_gmail_thread(thread_id)
+                    if thread_data and thread_data.get("messages"):
+                        source_msg_id = source.get("message_id")
+                        msgs = thread_data["messages"]
+                        s_idx = next((i for i, m in enumerate(msgs) if m.get("id") == source_msg_id or m.get("gmail_id") == source_msg_id), -1)
+                        later = msgs[s_idx + 1:] if s_idx >= 0 else msgs
+                        outbound = next((m for m in later if m.get("direction") == "outbound" or m.get("is_sent_by_me")), None)
+                        if outbound:
+                            print(f"[WorkAgent] Auto-send aborted: user already replied manually on thread {thread_id}!")
+                            with self._lock:
+                                jobs = self._read_jobs()
+                                if str(job_id) in jobs:
+                                    jobs[str(job_id)]["status"] = "resolved_external"
+                                    jobs[str(job_id)]["resolution"] = "manual_gmail_reply"
+                                    jobs[str(job_id)]["resolved_at"] = outbound.get("date") or _now()
+                                    jobs[str(job_id)]["resolved_message_id"] = outbound.get("id")
+                                    if "countdown" in jobs[str(job_id)]:
+                                        jobs[str(job_id)]["countdown"]["cancelled"] = True
+                                    # Clean up stale Mailmate draft if one was staged
+                                    draft_id = (jobs[str(job_id)].get("output") or {}).get("gmail_draft_id")
+                                    if draft_id:
+                                        try:
+                                            delete_gmail_draft(draft_id)
+                                            jobs[str(job_id)]["output"]["gmail_draft_id"] = None
+                                        except Exception:
+                                            pass
+                                    self._write_jobs(jobs)
+                            return
+                except Exception as check_err:
+                    print(f"[WorkAgent] Pre-send thread check error: {check_err}")
 
             print(f"[WorkAgent] Countdown expired. Auto-sending safe reply for job {job_id}...")
             try:

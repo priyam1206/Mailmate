@@ -609,4 +609,110 @@ def send_gmail_draft(draft_id):
         raise err
 
 
+def get_gmail_thread(thread_id):
+    """
+    Fetch a single Gmail thread with parsed messages, directions, and timestamps.
+    Returns None if not found or credentials missing.
+    """
+    service = _gmail_service()
+    if not service or not thread_id:
+        return None
+    try:
+        profile = service.users().getProfile(userId='me').execute()
+        my_email = str(profile.get('emailAddress') or '').strip().lower()
+    except Exception:
+        my_email = ""
+
+    try:
+        t_data = service.users().threads().get(userId='me', id=thread_id, format='metadata').execute()
+    except Exception as e:
+        print(f"[Gmail] Failed to fetch thread {thread_id}: {e}")
+        return None
+
+    messages = []
+    thread_subject = 'No Subject'
+    for m in t_data.get('messages', []):
+        headers = {str(h.get('name') or ''): str(h.get('value') or '') for h in (m.get('payload') or {}).get('headers', [])}
+        sender_raw = headers.get('From', '')
+        sender_name, sender_email = parseaddr(sender_raw)
+        sender_email = sender_email.lower()
+        subject = headers.get('Subject') or thread_subject
+        if subject and subject != 'No Subject':
+            thread_subject = subject
+        date = headers.get('Date', '')
+        labels = m.get('labelIds', []) or []
+        is_sent_by_me = ('SENT' in labels) or (bool(my_email) and sender_email == my_email)
+        direction = 'outbound' if is_sent_by_me else 'inbound'
+        snippet = m.get('snippet', '') or ''
+        internal_date = m.get('internalDate', '')
+
+        messages.append({
+            'id': m['id'],
+            'gmail_id': m['id'],
+            'thread_id': thread_id,
+            'sender': sender_raw,
+            'from': {'name': sender_name, 'email': sender_email},
+            'to': _address_list(headers.get('To', '')),
+            'subject': subject,
+            'date': date,
+            'internal_date': internal_date,
+            'timestamp': date,
+            'snippet': snippet,
+            'direction': direction,
+            'is_sent_by_me': is_sent_by_me,
+            'labels': labels,
+        })
+
+    return {
+        'thread_id': thread_id,
+        'subject': thread_subject,
+        'messages': messages,
+        'latest_direction': messages[-1]['direction'] if messages else 'inbound',
+    }
+
+
+def get_gmail_draft(draft_id):
+    """Fetch an existing Gmail draft by ID. Returns None if it no longer exists."""
+    creds = get_credentials()
+    if not creds or not draft_id:
+        return None
+    try:
+        service = build('gmail', 'v1', credentials=creds)
+        draft = service.users().drafts().get(userId='me', id=draft_id).execute()
+        return draft
+    except HttpError as err:
+        if err.resp.status == 404:
+            return None
+        print(f"[Gmail] get_gmail_draft error ({draft_id}): {err}")
+        return None
+    except Exception as e:
+        print(f"[Gmail] get_gmail_draft error ({draft_id}): {e}")
+        return None
+
+
+def delete_gmail_draft(draft_id):
+    """
+    Safely delete an exact Mailmate-created Gmail draft.
+    Does nothing if draft does not exist or account is disconnected.
+    """
+    creds = get_credentials()
+    if not creds or not draft_id:
+        return False
+    try:
+        service = build('gmail', 'v1', credentials=creds)
+        service.users().drafts().delete(userId='me', id=draft_id).execute()
+        return True
+    except HttpError as err:
+        if err.resp.status == 404:
+            return True
+        if err.resp.status == 403 or 'insufficient' in str(err).lower():
+            raise GmailInsufficientPermissionError()
+        print(f"[Gmail] delete_gmail_draft error ({draft_id}): {err}")
+        return False
+    except Exception as e:
+        print(f"[Gmail] delete_gmail_draft error ({draft_id}): {e}")
+        return False
+
+
+
 

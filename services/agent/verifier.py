@@ -94,13 +94,22 @@ class Verifier:
         has_reply = bool(session.reply_draft.get("body"))
         has_plan = bool(session.checklist or session.notes)
 
-        is_academic = bool(re.search(
-            r"\b(da|assignment|submission|exam|synopsis|report|project)\b",
-            f"{session.source_email.get('subject', '')} {session.source_email.get('snippet', '')}",
-            re.I
-        ))
+        subj = f"{session.source_email.get('subject', '')} {session.source_email.get('snippet', '')}".lower()
+        needs_pdf = bool(re.search(r"\bpdf\b", subj))
 
         file_artifacts = [a for a in session.artifacts if a.get("type") == "file"]
+
+        if needs_pdf:
+            has_pdf = any(a.get("name", "").lower().endswith(".pdf") for a in file_artifacts)
+            if not has_pdf:
+                return False
+            return has_reply and has_pdf
+
+        is_academic = bool(re.search(
+            r"\b(da|assignment|submission|exam|synopsis|report|project)\b",
+            subj,
+            re.I
+        ))
 
         if is_academic:
             return has_reply and has_plan and len(file_artifacts) >= 1
@@ -113,6 +122,28 @@ class Verifier:
         """
         checks = []
         overall_passed = True
+
+        # Check 0: Requested Deliverable Type Match
+        subj = f"{session.source_email.get('subject', '')} {session.source_email.get('snippet', '')}".lower()
+        needs_pdf = bool(re.search(r"\bpdf\b", subj))
+        file_artifacts = [a for a in session.artifacts if a.get("type") == "file"]
+        if needs_pdf:
+            has_pdf = any(a.get("name", "").lower().endswith(".pdf") for a in file_artifacts)
+            if not has_pdf:
+                checks.append({
+                    "name": "Requested Deliverable Present",
+                    "passed": False,
+                    "detail": "Email explicitly requested a PDF, but no PDF artifact was produced."
+                })
+                overall_passed = False
+                if not session.missing_deliverable:
+                    session.missing_deliverable = "PDF"
+            else:
+                checks.append({
+                    "name": "Requested Deliverable Present",
+                    "passed": True,
+                    "detail": "Requested PDF artifact verified on disk."
+                })
 
         # Check 1: Reply Draft
         body = session.reply_draft.get("body") or ""
@@ -130,21 +161,28 @@ class Verifier:
             })
             overall_passed = False
 
-        # Check 2: Attachment consistency
+        # Check 2: Attachment & Completion Claim Consistency
         claims_attachment = any(re.search(pat, body, re.I) for pat in cls.ATTACHMENT_CLAIM_PATTERNS)
-        file_artifacts = [a for a in session.artifacts if a.get("type") == "file"]
+        claims_completion = bool(re.search(r"\b(i have completed|have completed|already submitted|is attached)\b", body, re.I))
         if claims_attachment and len(file_artifacts) == 0:
             checks.append({
-                "name": "Attachment Claim Alignment",
+                "name": "Claim Alignment",
                 "passed": False,
                 "detail": "Draft claims attachment is included, but no workspace file exists."
             })
             overall_passed = False
+        elif claims_completion and (needs_pdf and not any(a.get("name", "").lower().endswith(".pdf") for a in file_artifacts)):
+            checks.append({
+                "name": "Claim Alignment",
+                "passed": False,
+                "detail": "Draft claims completion, but required deliverable is missing."
+            })
+            overall_passed = False
         else:
             checks.append({
-                "name": "Attachment Claim Alignment",
+                "name": "Claim Alignment",
                 "passed": True,
-                "detail": f"Claims verified ({len(file_artifacts)} files match)." if claims_attachment else "No attachment claims made."
+                "detail": f"Claims verified ({len(file_artifacts)} files match)." if claims_attachment else "No unverified claims made."
             })
 
         # Check 3: File Artifact Integrity

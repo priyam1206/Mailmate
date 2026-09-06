@@ -127,7 +127,10 @@ class AgentLoop:
                 break
 
         # 5. FINAL VERIFY: Audit artifacts, claims, and requirements
-        self.verifier.finalize(self.session)
+        report = self.verifier.finalize(self.session)
+        if self.session.missing_deliverable and not report.get("passed", True):
+            self.session.status = "needs_input"
+            self.session.finish_reason = f"missing_{self.session.missing_deliverable.lower().replace(' ', '_')}"
         return self.session
 
     def _get_plan_decision(self) -> Optional[Dict[str, Any]]:
@@ -166,10 +169,35 @@ class AgentLoop:
         Deterministic state machine fallback if both LLMs are temporarily unresponsive,
         ensuring bounded progress without infinite spinning.
         """
+        import re
         source = self.session.source_email
         subject = source.get("subject", "Task")
         sender = source.get("sender", "Sender")
         clean_sender = sender.split("<")[0].strip()
+        snippet = source.get("snippet", "")
+        combined = f"{subject} {snippet}".lower()
+
+        # Check if the email explicitly requests a specific deliverable like OS PDF, document, slides
+        needs_pdf = bool(re.search(r"\b(pdf|document)\b", combined))
+        has_pdf = any(a.get("name", "").lower().endswith(".pdf") for a in self.session.artifacts)
+
+        if needs_pdf and not has_pdf:
+            topic = "OS PDF" if "os" in combined else "PDF document"
+            self.session.missing_deliverable = topic
+            self.session.status = "needs_input"
+            summary_msg = f"Needs input — which {topic} should be provided to {clean_sender}?"
+            self.session.summary = summary_msg
+            reply_text = (
+                f"Hi {clean_sender},\n\n"
+                f"I received your request regarding '{subject}'. Could you please clarify which {topic} is needed?\n\n"
+                f"Best regards,\nPriyam"
+            )
+            self.session.set_reply(reply_text)
+            return {
+                "thought": f"Specific deliverable required ({topic}) but source file cannot be determined without user input.",
+                "action": "work.finish",
+                "args": {"summary": summary_msg}
+            }
 
         # Phase 1: Checklist
         if not self.session.checklist:
@@ -188,6 +216,7 @@ class AgentLoop:
         # Phase 2: Workspace Artifacts
         file_artifacts = [a for a in self.session.artifacts if a.get("type") == "file"]
         if not file_artifacts:
+            safe_slug = re.sub(r"[^\w]+", "_", subject).strip("_")[:24] or "Task"
             spec = {
                 "title": f"Checklist: {subject}",
                 "sections": [
@@ -200,21 +229,20 @@ class AgentLoop:
                 "thought": "Generate Markdown checklist artifact.",
                 "action": "file.create_markdown",
                 "args": {
-                    "filename": "DA_checklist.md",
+                    "filename": f"{safe_slug}_checklist.md",
                     "spec": spec
                 }
             }
 
         # Phase 3: Prepare draft reply
         if not self.session.reply_draft.get("body"):
-            deadline = source.get("deadline") or "requested date"
             reply_text = (
                 f"Hi {clean_sender},\n\n"
-                f"I received your email regarding '{subject}'. I am reviewing the requirements and preparing the materials now.\n\n"
+                f"I received your email regarding '{subject}'. I am reviewing the details now.\n\n"
                 f"Best regards,\nPriyam"
             )
             return {
-                "thought": "Draft polite acknowledgement reply.",
+                "thought": "Draft polite receipt acknowledgement.",
                 "action": "mail.prepare_reply",
                 "args": {
                     "body": reply_text

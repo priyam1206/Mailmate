@@ -198,6 +198,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     if (name === 'calendar') refreshCalendar(false);
     if (name === 'work') renderWork(state.data);
+    if (name === 'status') renderStatus();
+    updateWorkLivePolling();
     console.log('[Mailmate] navigation', name);
   }
 
@@ -388,6 +390,53 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function renderOverviewWorkingNow() {
+    if (!els.actionList) return;
+    const activeStatuses = new Set([
+      'queued', 'reading_context', 'planning', 'researching',
+      'generating', 'drafting_reply', 'creating_files',
+      'verifying', 'preparing', 'working'
+    ]);
+    const activeJobs = (workJobs || []).filter(j => activeStatuses.has(j.status));
+
+    if (activeJobs.length > 0) {
+      els.actionList.innerHTML = activeJobs.map(job => {
+        const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
+        const latestStep = (job.steps && job.steps.length > 0) ? job.steps[job.steps.length - 1] : null;
+        const stepText = latestStep ? (latestStep.label || latestStep.thought || latestStep.action || 'Executing...') : (job.source?.snippet || 'Agent working...');
+        const badgeText = job.status === 'working' ? 'Working' : job.status.replace(/_/g, ' ');
+        return `
+          <article data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
+            <span class="status-dot"></span>
+            <div>
+              <strong>${escapeHtml(displayTitle)}</strong>
+              <p>${escapeHtml(stepText)}</p>
+            </div>
+            <small style="text-transform:capitalize;">${escapeHtml(badgeText)}</small>
+          </article>
+        `;
+      }).join('');
+    } else {
+      els.actionList.innerHTML = `
+        <article>
+          <span class="status-dot" style="background:#94a3b8;"></span>
+          <div>
+            <strong>No active agent runs</strong>
+            <p>Kyle is on standby. Prepared drafts appear in Work.</p>
+          </div>
+          <small>Standby</small>
+        </article>
+      `;
+    }
+
+    els.actionList.querySelectorAll('[data-kyle-id]').forEach(element => window.MailmateObjects?.register({
+      type: element.dataset.kyleType,
+      id: element.dataset.kyleId,
+      label: element.dataset.kyleLabel,
+      page: 'overview'
+    }, element));
+  }
+
   function renderDashboard(data) {
     const metrics = data.metrics || {};
     els.emailCount.textContent = metrics.emails ?? 0;
@@ -405,16 +454,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('')
       : '<li><strong>Inbox clear</strong><span>No urgent dependencies detected in this scan.</span></li>';
 
-    const actions = attention.slice(0, 4).map((item, index) => ({
-      title: item.subject || item.title || conciseActionTitle(item.description || item.reason) || (index === 0 ? 'Do this first' : 'Next task'),
-      body: item.description || item.reason || 'Review this item.',
-      deadline: item.deadline || ''
-    }));
-    els.actionList.innerHTML = actions.length
-      ? actions.map((action, index) => `<article data-kyle-type="work-item" data-kyle-id="suggested-${index}" data-kyle-label="${escapeHtml(action.title)}"><span class="status-dot"></span><div><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(action.body)}</p></div><small>${escapeHtml(action.deadline || (index ? 'Next' : 'Now'))}</small></article>`).join('')
-      : '<article><span class="status-dot"></span><div><strong>Nothing urgent</strong><p>No action is currently blocking you.</p></div><small>Clear</small></article>';
+    renderOverviewWorkingNow();
 
-    [...els.attentionList.querySelectorAll('[data-kyle-id]'), ...els.actionList.querySelectorAll('[data-kyle-id]')]
+    els.attentionList.querySelectorAll('[data-kyle-id]')
       .forEach(element => window.MailmateObjects?.register({
         type: element.dataset.kyleType,
         id: element.dataset.kyleId,
@@ -708,6 +750,146 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function getJobStatusInfo(status) {
+    switch (status) {
+      case 'waiting_approval':
+        return { label: 'Ready for review', cls: 'badge-waiting_approval' };
+      case 'auto_send_countdown':
+        return { label: 'Auto-sending in 20s', cls: 'badge-auto_send_countdown' };
+      case 'needs_input':
+        return { label: 'Needs input', cls: 'badge-needs_input' };
+      case 'resolved_external':
+        return { label: 'Replied via Gmail', cls: 'badge-resolved_external' };
+      case 'sent':
+      case 'approved_sent':
+        return { label: 'Sent via Gmail', cls: 'badge-sent' };
+      case 'cancelled':
+        return { label: 'Cancelled', cls: 'badge-cancelled' };
+      case 'failed':
+        return { label: 'Failed', cls: 'badge-failed' };
+      case 'preparing':
+      case 'analyzing':
+      case 'working':
+      case 'generating':
+      case 'researching':
+      case 'planning':
+      case 'reading_context':
+      case 'drafting_reply':
+      case 'creating_files':
+      case 'verifying':
+        return { label: 'Working...', cls: 'badge-working' };
+      default:
+        return { label: 'Queued', cls: 'badge-queued' };
+    }
+  }
+
+  let workLivePollTimer = null;
+  function updateWorkLivePolling() {
+    const activeStatuses = new Set([
+      'queued', 'reading_context', 'planning', 'researching',
+      'generating', 'drafting_reply', 'creating_files',
+      'verifying', 'preparing', 'working'
+    ]);
+    const hasActive = (workJobs || []).some(j => activeStatuses.has(j.status));
+    const shouldPoll = hasActive || state.currentPage === 'work';
+
+    if (shouldPoll && !workLivePollTimer) {
+      workLivePollTimer = setInterval(async () => {
+        if (document.hidden) return;
+        try {
+          const res = await fetch(`${API_BASE}/api/work/jobs`);
+          if (res.ok) {
+            workJobs = await res.json();
+            renderOverviewWorkingNow();
+            if (state.currentPage === 'work') {
+              renderWorkRail(workJobs);
+              const inspected = workJobs.find(j => j.id === selectedJobId) || workJobs[0];
+              if (inspected && (!countdownTimerInterval || inspected.status !== 'auto_send_countdown')) {
+                renderJobInspector(inspected);
+              }
+            }
+          }
+        } catch (e) {
+          console.debug('Work live poll notice:', e);
+        }
+      }, 1500);
+    } else if (!shouldPoll && workLivePollTimer) {
+      clearInterval(workLivePollTimer);
+      workLivePollTimer = null;
+    }
+  }
+
+  function renderWorkRail(list) {
+    const activeStatuses = new Set([
+      'queued', 'reading_context', 'planning', 'researching',
+      'generating', 'drafting_reply', 'creating_files',
+      'verifying', 'preparing', 'working'
+    ]);
+    const readyStatuses = new Set(['waiting_approval', 'auto_send_countdown']);
+    const needsInputStatuses = new Set(['needs_input']);
+    const historyStatuses = new Set(['sent', 'approved_sent', 'resolved_external', 'cancelled', 'failed']);
+
+    const activeList = list.filter(j => activeStatuses.has(j.status));
+    const readyList = list.filter(j => readyStatuses.has(j.status));
+    const needsInputList = list.filter(j => needsInputStatuses.has(j.status));
+    const historyList = list.filter(j => historyStatuses.has(j.status));
+
+    function renderJobGroup(groupTitle, groupItems) {
+      if (!groupItems || groupItems.length === 0) return '';
+      const header = `<div class="work-rail-group-header">${escapeHtml(groupTitle)} <span>(${groupItems.length})</span></div>`;
+      const itemsHtml = groupItems.map(job => {
+        const isSel = job.id === selectedJobId;
+        const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
+        const { label: statusLabel, cls: statusClass } = getJobStatusInfo(job.status);
+        const senderDisplay = (job.source?.sender || '').split('<')[0].trim();
+        const latestStep = (job.steps && job.steps.length > 0) ? job.steps[job.steps.length - 1] : null;
+        const stepProgress = activeStatuses.has(job.status) && latestStep ? (latestStep.label || latestStep.thought || latestStep.action || '') : '';
+        const subtitle = stepProgress || ((senderDisplay ? senderDisplay + ' · ' : '') + (job.source?.snippet || job.source?.subject || 'Preparation work'));
+        return `
+          <article class="work-item ${isSel ? 'active' : ''}" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+              <strong>${escapeHtml(displayTitle)}</strong>
+              <span class="run-status ${statusClass}" style="font-size:0.68rem;padding:2px 6px;">${escapeHtml(statusLabel)}</span>
+            </div>
+            <p>${escapeHtml(subtitle)}</p>
+          </article>
+        `;
+      }).join('');
+      return header + itemsHtml;
+    }
+
+    let railHtml = '';
+    if (activeList.length > 0) railHtml += renderJobGroup('Active', activeList);
+    if (readyList.length > 0) railHtml += renderJobGroup('Ready for Review', readyList);
+    if (needsInputList.length > 0) railHtml += renderJobGroup('Needs Input', needsInputList);
+    if (historyList.length > 0) railHtml += renderJobGroup('History', historyList);
+
+    els.workList.innerHTML = railHtml || '<article class="work-item active"><strong>No work tasks yet</strong><p>Actionable Gmail threads will appear here.</p></article>';
+
+    [...els.workList.querySelectorAll('.work-item[data-job-id]')].forEach(item => {
+      const jId = item.dataset.jobId;
+      const job = list.find(j => j.id === jId);
+      if (job) {
+        const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
+        window.MailmateObjects?.register({
+          type: 'work-item',
+          id: job.id,
+          label: displayTitle,
+          page: 'work',
+          metadata: {
+            status: job.status,
+            sender: job.source?.sender,
+            subject: job.source?.subject
+          }
+        }, item);
+      }
+      item.addEventListener('click', () => {
+        selectedJobId = item.dataset.jobId;
+        renderWork(state.data);
+      });
+    });
+  }
+
   async function renderWork(data) {
     try {
       const res = await fetch(`${API_BASE}/api/work/jobs`);
@@ -717,6 +899,9 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       console.warn('Failed to load work jobs:', e);
     }
+
+    renderOverviewWorkingNow();
+    updateWorkLivePolling();
 
     if (!workJobs || workJobs.length === 0) {
       const attention = data?.needs_attention || [];
@@ -735,53 +920,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     els.workCount.textContent = `${workJobs.length} run${workJobs.length === 1 ? '' : 's'}`;
 
-    if (!selectedJobId && workJobs.length > 0) {
-      selectedJobId = workJobs[0].id;
+    if (!selectedJobId || !workJobs.some(j => j.id === selectedJobId)) {
+      const preferredOrder = ['waiting_approval', 'auto_send_countdown', 'needs_input', 'working', 'preparing'];
+      const found = workJobs.find(j => preferredOrder.includes(j.status)) || workJobs[0];
+      if (found) selectedJobId = found.id;
     }
 
-    els.workList.innerHTML = workJobs.map((job, idx) => {
-      const isSel = job.id === selectedJobId;
-      const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
-      const statusClass = `badge-${job.status}`;
-      const statusLabel = job.status === 'waiting_approval' ? 'Ready for review' :
-                          job.status === 'auto_send_countdown' ? 'Auto-sending in 20s' :
-                          job.status === 'preparing' || job.status === 'analyzing' || job.status === 'working' ? 'Working...' :
-                          job.status === 'sent' || job.status === 'approved_sent' ? 'Sent via Gmail' :
-                          job.status === 'cancelled' ? 'Cancelled' : 'Queued';
-      const senderDisplay = (job.source?.sender || '').split('<')[0].trim();
-      return `
-        <article class="work-item ${isSel ? 'active' : ''}" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-            <strong>${escapeHtml(displayTitle)}</strong>
-            <span class="run-status ${statusClass}" style="font-size:0.68rem;padding:2px 6px;">${statusLabel}</span>
-          </div>
-          <p>${escapeHtml(senderDisplay ? senderDisplay + ' · ' : '')}${escapeHtml(job.source?.snippet || job.source?.subject || 'Preparation work')}</p>
-        </article>
-      `;
-    }).join('');
-
-    [...els.workList.querySelectorAll('.work-item[data-job-id]')].forEach(item => {
-      const jId = item.dataset.jobId;
-      const job = workJobs.find(j => j.id === jId);
-      if (job) {
-        const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
-        window.MailmateObjects?.register({
-          type: 'work-item',
-          id: job.id,
-          label: displayTitle,
-          page: 'work',
-          metadata: {
-            status: job.status,
-            sender: job.source?.sender,
-            subject: job.source?.subject
-          }
-        }, item);
-      }
-      item.addEventListener('click', () => {
-        selectedJobId = item.dataset.jobId;
-        renderWork(data);
-      });
-    });
+    renderWorkRail(workJobs);
 
     window.Kyle?.setContext({
       ...(state.data || {}),
@@ -820,18 +965,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (deadlineBadgeEl) deadlineBadgeEl.textContent = formatRelativeDeadline(job.source?.deadline);
     if (subMetaEl) subMetaEl.style.display = 'block';
 
+    const statusInfo = getJobStatusInfo(job.status);
     if (statusEl) {
-      statusEl.className = `run-status badge-${job.status}`;
-      statusEl.textContent = job.status === 'waiting_approval' ? 'Ready for review' :
-                             job.status === 'auto_send_countdown' ? 'Auto-sending…' :
-                             job.status === 'preparing' || job.status === 'analyzing' || job.status === 'working' ? 'Working...' :
-                             job.status === 'sent' || job.status === 'approved_sent' ? 'Sent via Gmail' :
-                             job.status === 'cancelled' ? 'Cancelled' : 'Queued';
+      statusEl.className = `run-status ${statusInfo.cls}`;
+      statusEl.textContent = statusInfo.label;
     }
 
     if (emptyPlaceholder) emptyPlaceholder.style.display = 'none';
     if (preparedCard) preparedCard.style.display = 'flex';
     if (collapsiblesGroup) collapsiblesGroup.style.display = 'flex';
+
+    const isResolvedExternal = job.status === 'resolved_external';
+    const isNeedsInput = job.status === 'needs_input';
+    const isSent = job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal;
+    const isCountdown = job.status === 'auto_send_countdown';
+    const verdict = job.policy_verdict || {};
 
     // 1. Policy Banner
     const policyBanner = $('workPolicyBanner');
@@ -840,11 +988,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const policyExpl = $('workPolicyExplanation');
 
     if (policyBanner) {
-      const isSent = job.status === 'sent' || job.status === 'approved_sent';
-      const isCountdown = job.status === 'auto_send_countdown';
-      const verdict = job.policy_verdict || {};
-
-      if (isSent) {
+      if (isResolvedExternal) {
+        policyBanner.className = 'policy-banner auto-sent';
+        if (policyBadge) policyBadge.textContent = 'RESOLVED IN GMAIL';
+        if (policyCat) policyCat.textContent = 'Handled outside Mailmate';
+        if (policyExpl) policyExpl.textContent = 'You replied to this thread directly in Gmail. Mailmate reconciled this task and cleaned up its draft.';
+      } else if (isNeedsInput) {
+        policyBanner.className = 'policy-banner requires-approval';
+        if (policyBadge) policyBadge.textContent = 'NEEDS INPUT';
+        if (policyCat) policyCat.textContent = 'Missing deliverable';
+        if (policyExpl) policyExpl.textContent = job.missing_deliverable || job.output?.error || 'Required attachment or input is needed before preparing this reply.';
+      } else if (isSent) {
         policyBanner.className = 'policy-banner auto-sent';
         if (policyBadge) policyBadge.textContent = 'DISPATCHED';
         if (policyCat) policyCat.textContent = 'Sent via Gmail';
@@ -912,18 +1066,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftBadge = $('workDraftBadge');
     if (replyText) {
       replyText.value = job.output?.suggested_reply || (job.reply_draft || {}).body || '';
-      replyText.disabled = (job.status === 'sent' || job.status === 'approved_sent');
+      replyText.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal);
     }
     if (draftBadge) {
-      draftBadge.innerHTML = job.output?.gmail_draft_id
-        ? `<span style="color:#1e8e48;"><i class="fas fa-check-circle"></i> Gmail Draft Staged</span>`
-        : '<span>Local draft ready</span>';
+      if (isResolvedExternal) {
+        draftBadge.innerHTML = `<span style="color:#0d9488;"><i class="fas fa-envelope-open-text"></i> Handled in Gmail · Draft removed</span>`;
+      } else if (isNeedsInput) {
+        draftBadge.innerHTML = `<span style="color:#dc2626;"><i class="fas fa-circle-exclamation"></i> Deliverable missing</span>`;
+      } else if (job.output?.gmail_draft_id) {
+        draftBadge.innerHTML = `<span style="color:#1e8e48;"><i class="fas fa-check-circle"></i> Gmail Draft Staged</span>`;
+      } else {
+        draftBadge.innerHTML = '<span>Local draft ready</span>';
+      }
     }
 
     // 4. Action Buttons
     const saveDraftBtn = $('workSaveDraftBtn');
     if (saveDraftBtn) {
-      saveDraftBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent');
+      saveDraftBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal || isNeedsInput);
       saveDraftBtn.onclick = async () => {
         saveDraftBtn.disabled = true;
         saveDraftBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
@@ -964,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const rerunBtn = $('workRerunBtn');
     if (rerunBtn) {
-      rerunBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent');
+      rerunBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal);
       rerunBtn.onclick = async () => {
         rerunBtn.disabled = true;
         rerunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rerunning...';
@@ -980,7 +1140,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const approveBtn = $('workApproveBtn');
     if (approveBtn) {
-      if (job.status === 'sent' || job.status === 'approved_sent') {
+      if (isResolvedExternal) {
+        approveBtn.disabled = true;
+        approveBtn.innerHTML = '<i class="fas fa-check-double"></i> Replied via Gmail';
+      } else if (isNeedsInput) {
+        approveBtn.disabled = true;
+        approveBtn.innerHTML = '<i class="fas fa-circle-question"></i> Needs Input';
+      } else if (job.status === 'sent' || job.status === 'approved_sent') {
         approveBtn.disabled = true;
         approveBtn.innerHTML = '<i class="fas fa-check-double"></i> Sent via Gmail';
       } else {
@@ -1196,7 +1362,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 
-  function renderStatus() {
+  async function renderStatus() {
     const h = state.health || {};
     const rows = [
       ['Google OAuth', h.googleClientConfigured],
@@ -1210,6 +1376,23 @@ document.addEventListener('DOMContentLoaded', () => {
       ['Kyle action registry', Boolean(window.KyleActions)]
     ];
     els.statusList.innerHTML = rows.map(([label, ok]) => `<li data-status="${ok ? 'Ready' : 'Unavailable'}"><strong>${escapeHtml(label)}</strong></li>`).join('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/system/context?reconcile=false`);
+      if (res.ok) {
+        const sys = await res.json();
+        const vEl = $('sysCtxVersion');
+        const wEl = $('sysCtxWorkState');
+        const cEl = $('sysCtxConflicts');
+        const fEl = $('sysCtxFreshness');
+        const headerBadge = $('systemContextVersion');
+        if (headerBadge) headerBadge.textContent = `v${sys.context_version || 1}`;
+        if (vEl) vEl.textContent = `v${sys.context_version || 1}`;
+        if (wEl) wEl.textContent = `${sys.work?.counts?.active || 0} active · ${sys.work?.counts?.waiting_approval || 0} ready · ${sys.work?.counts?.needs_input || 0} needs input`;
+        if (cEl) cEl.textContent = `${sys.calendar?.conflict_count || 0} clashes`;
+        if (fEl) fEl.textContent = `Work: ${sys.freshness?.work ? new Date(sys.freshness.work).toLocaleTimeString() : 'N/A'}`;
+      }
+    } catch (_) {}
   }
 
   function renderIntegrations() {
@@ -1445,19 +1628,30 @@ document.addEventListener('DOMContentLoaded', () => {
       .map(deadlineToCalendarItem)
       .filter(Boolean);
 
-    return [...state.calendarEvents, ...deadlines];
+    // Deduplicate calendar events by ID
+    const seenIds = new Set();
+    const uniqueCalEvents = [];
+    for (const ev of state.calendarEvents) {
+      const eid = String(ev.id || '');
+      if (eid && seenIds.has(eid)) continue;
+      if (eid) seenIds.add(eid);
+      uniqueCalEvents.push(ev);
+    }
+
+    return [...uniqueCalEvents, ...deadlines];
   }
 
   function localConflictPass(events) {
-    const timed = events
-      .filter(e => !e.all_day)
+    (events || []).forEach(e => {
+      e.conflict = false;
+      e.conflict_with = [];
+    });
+
+    // Deadlines (source === 'deadline') never participate in occupied-time collision detection
+    const timed = (events || [])
+      .filter(e => !e.all_day && e.source !== 'deadline')
       .map(e => ({ event: e, start: parseEventStart(e), end: parseEventEnd(e) }))
       .filter(x => x.start && x.end);
-
-    timed.forEach(x => {
-      x.event.conflict = Boolean(x.event.conflict);
-      x.event.conflict_with = Array.isArray(x.event.conflict_with) ? x.event.conflict_with : [];
-    });
 
     for (let i = 0; i < timed.length; i += 1) {
       for (let j = i + 1; j < timed.length; j += 1) {
@@ -1466,8 +1660,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (a.start < b.end && b.start < a.end) {
           a.event.conflict = true;
           b.event.conflict = true;
-          if (!a.event.conflict_with.some(x => x.id === b.event.id)) a.event.conflict_with.push({ id: b.event.id, title: b.event.title });
-          if (!b.event.conflict_with.some(x => x.id === a.event.id)) b.event.conflict_with.push({ id: a.event.id, title: a.event.title });
+          if (!a.event.conflict_with.some(x => x.id === b.event.id)) {
+            a.event.conflict_with.push({ id: b.event.id, title: b.event.title });
+          }
+          if (!b.event.conflict_with.some(x => x.id === a.event.id)) {
+            b.event.conflict_with.push({ id: a.event.id, title: a.event.title });
+          }
         }
       }
     }
@@ -1739,8 +1937,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const alert = $('calendarConflictAlert');
     const text = $('calendarConflictText');
     if (!alert || !text) return;
-    const conflicts = items.filter(item => item.conflict);
-    const pairCount = Math.ceil(conflicts.length / 2);
+    const conflicts = (items || []).filter(item => item.conflict && item.source !== 'deadline');
+    const uniqueIds = new Set(conflicts.map(c => c.id));
+    const pairCount = Math.max(1, Math.floor(uniqueIds.size / 2));
     alert.hidden = conflicts.length === 0;
     if (conflicts.length) {
       text.textContent = `${pairCount} schedule clash${pairCount === 1 ? '' : 'es'} this week. Conflicting events are highlighted in red.`;

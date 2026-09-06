@@ -33,6 +33,7 @@ from services.supabase_cache_service import supabase_cache
 from services.work_agent_service import work_agent_service
 from services.whisper_service import whisper_service
 from services.privacy_gate import PrivacyGate
+from services.system_context_service import system_context_service
 
 
 # Kick off local Whisper model preparation in background
@@ -850,6 +851,35 @@ def get_work_artifact(job_id, filename):
     return send_from_directory(str(job_dir), filename)
 
 
+@app.route('/api/system/context', methods=['GET'])
+def system_context_endpoint():
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id') or 'default'
+    force_reconcile = str(request.args.get('reconcile', 'true')).lower() in {'1', 'true', 'yes'}
+    ctx = system_context_service.build(user_id=user_id, force_reconcile=force_reconcile)
+    return jsonify(ctx)
+
+
+@app.route('/api/work/reconcile', methods=['POST'])
+def work_reconcile_endpoint():
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({"error": "Not authenticated"}), 401
+    user_id = profile.get('email') or profile.get('id') or 'default'
+    reconciled = work_agent_service.reconcile_jobs_with_gmail(user_id)
+    jobs = work_agent_service.list_jobs(user_id, reconcile=False)
+    system_context_service.increment_version()
+    return jsonify({
+        "ok": True,
+        "reconciled": reconciled,
+        "reconciled_count": len(reconciled),
+        "jobs": jobs,
+        "context_version": system_context_service.get_version()
+    })
+
+
 @app.route('/api/stt/status', methods=['GET'])
 def stt_status():
     return jsonify(whisper_service.get_status())
@@ -1149,6 +1179,47 @@ def _kyle_fast_path(message, context, selected_event_id=None):
             "handled": True,
         }
 
+    if re.search(r'\b(drafts?|pending drafts?|waiting for review|waiting approval|prepared work|what have you prepared|any drafts)\b', lower):
+        work_section = (context or {}).get('work') or {}
+        waiting = work_section.get('waiting_approval') or []
+        active = work_section.get('active') or []
+        if not waiting and not active:
+            return {
+                "reply": "There are no drafts waiting for your review right now. (Any thread you replied to in Gmail has been marked resolved.)",
+                "voice": "No drafts are waiting for your review. You are all caught up.",
+                "command": {"type": "open_page", "page": "work"},
+                "handled": True,
+            }
+        elif waiting:
+            first = waiting[0]
+            subj = (first.get('source') or {}).get('subject') or first.get('clean_title') or first.get('title') or 'Email'
+            plural = "s" if len(waiting) != 1 else ""
+            return {
+                "reply": f"You have {len(waiting)} draft{plural} ready for review, including '{subj}'.",
+                "voice": f"You have {len(waiting)} draft ready for review. First is {subj}.",
+                "command": {"type": "open_page", "page": "work"},
+                "handled": True,
+            }
+
+    if re.search(r'\b(clash(es)?|conflicts?|overlapping|overlap)\b', lower) and not re.search(r'\b(add|create|delete|remove)\b', lower):
+        cal_section = (context or {}).get('calendar') or {}
+        conflict_count = cal_section.get('conflict_count', 0)
+        if conflict_count == 0:
+            return {
+                "reply": "No schedule clashes detected. Your calendar has no overlapping commitments.",
+                "voice": "No schedule clashes detected. Your calendar is clear of overlaps.",
+                "command": {"type": "open_page", "page": "calendar"},
+                "handled": True,
+            }
+        else:
+            plural = "es" if conflict_count != 1 else ""
+            return {
+                "reply": f"You have {conflict_count} schedule clash{plural} this week.",
+                "voice": f"You have {conflict_count} schedule clash{plural} this week.",
+                "command": {"type": "open_page", "page": "calendar"},
+                "handled": True,
+            }
+
     # Calendar reads should never spend a Gemini token.
     if (
         ('calendar' in lower or 'schedule' in lower)
@@ -1166,7 +1237,8 @@ def _kyle_fast_path(message, context, selected_event_id=None):
         conflicts = sum(1 for e in events if e.get('conflict'))
 
         deadline_items = []
-        for task in (context or {}).get('needs_attention') or []:
+        task_source = (context or {}).get('mail', {}).get('needs_attention') or (context or {}).get('needs_attention') or []
+        for task in task_source:
             deadline = str(task.get('deadline') or '').lower()
             if not deadline:
                 continue
@@ -1298,14 +1370,24 @@ def _kyle_fast_path(message, context, selected_event_id=None):
 def _compact_context(context):
     context = context or {}
     tasks = []
-    for item in (context.get('needs_attention') or [])[:3]:
+    task_items = (
+        (context.get('mail') or {}).get('needs_attention')
+        or context.get('needs_attention')
+        or []
+    )
+    for item in task_items[:3]:
         tasks.append({
             "task": _short_task_description(item),
             "deadline": item.get('deadline'),
         })
 
     calendar_events = []
-    for event in (context.get('calendarEvents') or [])[:5]:
+    cal_items = (
+        (context.get('calendar') or {}).get('events')
+        or context.get('calendarEvents')
+        or []
+    )
+    for event in cal_items[:5]:
         calendar_events.append({
             "title": event.get('title'),
             "start": event.get('start'),
@@ -1313,7 +1395,10 @@ def _compact_context(context):
         })
 
     work_items = []
-    jobs = context.get('workJobs')
+    jobs = (
+        (context.get('work') or {}).get('all')
+        or context.get('workJobs')
+    )
     if jobs is None:
         user_id = context.get('user_id') or 'default'
         try:
@@ -1331,7 +1416,19 @@ def _compact_context(context):
             "artifacts": [a.get('name') for a in (job.get('artifacts') or [])]
         })
 
-    return {"tasks": tasks, "calendar": calendar_events, "work_items": work_items}
+    work_section = context.get('work') or {}
+    active_count = len(work_section.get('active') or [j for j in (jobs or []) if j.get('status') in {'queued', 'reading_context', 'planning', 'researching', 'generating', 'drafting_reply', 'creating_files', 'verifying', 'preparing', 'working'}])
+    waiting_count = len(work_section.get('waiting_approval') or [j for j in (jobs or []) if j.get('status') in {'waiting_approval', 'auto_send_countdown'}])
+    conflict_count = (context.get('calendar') or {}).get('conflict_count', sum(1 for e in cal_items if e.get('conflict')))
+
+    return {
+        "tasks": tasks,
+        "calendar": calendar_events,
+        "work_items": work_items,
+        "active_work_count": active_count,
+        "waiting_approval_count": waiting_count,
+        "calendar_conflict_count": conflict_count,
+    }
 
 
 def _compact_voice(text, max_chars=190):
@@ -1560,6 +1657,10 @@ def kyle_agent_endpoint():
     if not message:
         return jsonify({'error': 'message is required'}), 400
 
+    profile = get_user_profile() or {}
+    user_id = profile.get('email') or profile.get('id') or 'default'
+    system_ctx = system_context_service.build(user_id=user_id, force_reconcile=False)
+
     ui_context = _agent_ui_context(data.get('uiContext'))
     resolved = [
         item for item in (_agent_reference(ref) for ref in (data.get('resolvedReferences') or [])[:4]) if item
@@ -1575,17 +1676,24 @@ def kyle_agent_endpoint():
         })
 
     actions = []
-    context = data.get('context') or {}
-    for candidate in _infer_agent_actions(message, resolved, context=context):
+    # Merge browser context with authoritative system_ctx
+    merged_context = dict(system_ctx)
+    if isinstance(data.get('context'), dict):
+        for k, v in data['context'].items():
+            if k not in merged_context:
+                merged_context[k] = v
+
+    for candidate in _infer_agent_actions(message, resolved, context=merged_context):
         sanitized = _sanitize_agent_action(candidate, known)
         if sanitized and sanitized not in actions:
             actions.append(sanitized)
 
     compact = {
-        'mail': _compact_context(context),
+        'mail': _compact_context(merged_context),
         'ui': ui_context,
         'resolved': resolved,
         'plannedActions': actions,
+        'context_version': system_ctx.get('context_version', 1),
     }
     reply = 'Working on that.' if actions else generate_kyle_agent_reply(message, compact)
     if not reply:
@@ -1604,6 +1712,7 @@ def kyle_agent_endpoint():
         'voice': _compact_voice(reply),
         'actions': actions[:5],
         'mode': 'deterministic-context',
+        'context_version': system_ctx.get('context_version', 1),
     })
 
 
@@ -1611,12 +1720,23 @@ def kyle_agent_endpoint():
 def kyle_chat_endpoint():
     data = request.get_json(silent=True) or {}
     msg = str(data.get('message') or '').strip()
-    context = data.get('context') or {}
+
+    profile = get_user_profile() or {}
+    user_id = profile.get('email') or profile.get('id') or 'default'
+    system_ctx = system_context_service.build(user_id=user_id, force_reconcile=False)
+
+    merged_context = dict(system_ctx)
+    if isinstance(data.get('context'), dict):
+        for k, v in data['context'].items():
+            if k not in merged_context:
+                merged_context[k] = v
+
     selected_event_id = data.get('selectedCalendarEventId')
 
     try:
-        fast = _kyle_fast_path(msg, context, selected_event_id=selected_event_id)
+        fast = _kyle_fast_path(msg, merged_context, selected_event_id=selected_event_id)
         if fast:
+            fast['context_version'] = system_ctx.get('context_version', 1)
             return jsonify(fast)
     except Exception as exc:
         app.logger.warning('Kyle deterministic tool failed: %s', exc)
@@ -1624,11 +1744,12 @@ def kyle_chat_endpoint():
     # Fallback AI: give it only the tiny context that changes the answer.
     # The full inbox is already visible in the UI, so there is no reason to
     # send/voice it again.
-    compact = _compact_context(context)
+    compact = _compact_context(merged_context)
     ai_prompt = (
         "You are Kyle inside Agent Harness. Answer naturally and directly. "
         "The UI already shows details, so the spoken answer should usually be 1-2 short sentences, <=35 words. "
         "Never claim the calendar is clear when the supplied context contains a deadline or event. "
+        "Never claim drafts are waiting if waiting_approval_count is 0. "
         f"Context: {json.dumps(compact, ensure_ascii=False)}\n"
         f"User: {msg}"
     )
@@ -1638,6 +1759,7 @@ def kyle_chat_endpoint():
         "text": text,
         "voice": _compact_voice(text),
         "handled": False,
+        "context_version": system_ctx.get('context_version', 1),
     })
 
 def _cache_maintenance_loop():
