@@ -1,173 +1,337 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const LOAD_DELAY_MS = 4200;
-  const PARTICLE_COUNT = 45;
-
-  const particlesContainer = document.getElementById('particles');
-  for (let i = 0; i < PARTICLE_COUNT; i++) {
-    const particle = document.createElement('div');
-    particle.classList.add('particle');
-    const size = Math.random() * 3 + 1;
-    particle.style.width = `${size}px`;
-    particle.style.height = `${size}px`;
-    particle.style.left = `${Math.random() * 100}vw`;
-    particle.style.top = `${Math.random() * 100}vh`;
-    particlesContainer.appendChild(particle);
-  }
-
-  anime({
-    targets: '.particle',
-    translateY: () => anime.random(-180, -420),
-    translateX: () => anime.random(-120, 120),
-    scale: [() => Math.random() * 0.5 + 0.5, () => Math.random() * 1.5 + 0.5],
-    opacity: [
-      { value: 0, duration: 0 },
-      { value: () => Math.random() * 0.7 + 0.3, duration: 800 },
-      { value: 0, duration: 1000, delay: 1500 }
-    ],
-    easing: 'easeOutSine',
-    duration: () => anime.random(2500, 3500),
-    loop: false
-  });
-
   const logoCanvas = document.getElementById('dotLogo');
   const logoContext = logoCanvas.getContext('2d');
-  const logoStage = logoCanvas.parentElement;
   const logoDots = [];
-  const pointer = { x: -1000, y: -1000 };
-  const airCursor = document.getElementById('airCursor');
-  const enterButton = document.getElementById('enterButton');
-  const mainContent = document.getElementById('mainContent');
-  const splashScreen = document.getElementById('splashScreen');
-  const backButton = document.getElementById('backButton');
+  const pointer = { x: -2000, y: -2000 };
 
+  // Video autoplay handling (remains hidden on landing, blurred on scroll)
+  const bgVideo = document.getElementById('bgVideo');
+  if (bgVideo) {
+    const playPromise = bgVideo.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        const startPlay = () => {
+          bgVideo.play();
+          window.removeEventListener('click', startPlay);
+          window.removeEventListener('scroll', startPlay);
+          window.removeEventListener('touchstart', startPlay);
+        };
+        window.addEventListener('click', startPlay, { once: true });
+        window.addEventListener('scroll', startPlay, { once: true });
+        window.addEventListener('touchstart', startPlay, { once: true });
+      });
+    }
+  }
+
+  // Ambient background particles
+  const particlesContainer = document.getElementById('particles');
+  const PARTICLE_COUNT = 30;
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const p = document.createElement('div');
+    p.classList.add('particle');
+    const size = Math.random() * 3 + 1;
+    p.style.width = `${size}px`;
+    p.style.height = `${size}px`;
+    p.style.left = `${Math.random() * 100}vw`;
+    p.style.top = `${Math.random() * 100}vh`;
+    p.style.background = '#ff7597';
+    p.style.opacity = `${Math.random() * 0.45 + 0.15}`;
+    particlesContainer.appendChild(p);
+
+    const duration = Math.random() * 7000 + 4000;
+    const keyframes = [
+      { transform: 'translate(0, 0)', opacity: p.style.opacity },
+      { transform: `translate(${(Math.random() - 0.5) * 120}px, -${Math.random() * 180 + 80}px)`, opacity: 0 }
+    ];
+    p.animate(keyframes, {
+      duration: duration,
+      iterations: Infinity,
+      delay: Math.random() * 3000
+    });
+  }
+
+  // Scroll tracking & smooth scattering physics
+  let targetScatter = 0;
+  let currentScatter = 0;
+
+  function updateScroll() {
+    const scrollDistance = window.innerHeight * 0.85;
+    const progress = Math.min(1, Math.max(0, window.scrollY / scrollDistance));
+    targetScatter = progress;
+  }
+
+  window.addEventListener('scroll', updateScroll, { passive: true });
+  window.addEventListener('wheel', () => requestAnimationFrame(updateScroll), { passive: true });
+  window.addEventListener('touchmove', () => requestAnimationFrame(updateScroll), { passive: true });
+
+  // Canvas dot logo creation (centered dead middle on landing)
   function buildLogo() {
     const scale = window.devicePixelRatio || 1;
-    const width = logoStage.clientWidth;
-    const height = logoStage.clientHeight;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
     if (!width || !height) {
       requestAnimationFrame(buildLogo);
       return;
     }
-    logoCanvas.width = width * scale;
-    logoCanvas.height = height * scale;
+
+    logoCanvas.width = Math.floor(width * scale);
+    logoCanvas.height = Math.floor(height * scale);
+    logoCanvas.style.width = `${width}px`;
+    logoCanvas.style.height = `${height}px`;
     logoContext.setTransform(scale, 0, 0, scale, 0, 0);
-    logoContext.clearRect(0, 0, width, height);
-    logoContext.font = `700 ${Math.min(height * 0.82, width / 9.5)}px "Space Grotesk"`;
-    logoContext.textAlign = 'center';
-    logoContext.textBaseline = 'middle';
-    logoContext.fillStyle = '#fff';
-    logoContext.fillText('CIPHERSQUAD', width / 2, height / 2);
-    const pixels = logoContext.getImageData(0, 0, width, height).data;
+
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = width;
+    sampleCanvas.height = height;
+    const sampleCtx = sampleCanvas.getContext('2d');
+
+    // Dead center horizontally and vertically
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    const fontSize = Math.min(width / 7.2, height * 0.22, 170);
+    sampleCtx.font = `800 ${fontSize}px "Space Grotesk", sans-serif`;
+    sampleCtx.textAlign = 'center';
+    sampleCtx.textBaseline = 'middle';
+    sampleCtx.fillStyle = '#ffffff';
+    sampleCtx.fillText('CIPHERSQUAD', centerX, centerY);
+
+    const pixels = sampleCtx.getImageData(0, 0, width, height).data;
     const targets = [];
-    for (let y = 0; y < height; y += 4) {
-      for (let x = 0; x < width; x += 4) {
-        if (pixels[(y * width + x) * 4 + 3] > 80) targets.push({ x, y });
+    const step = width < 700 ? 3 : 4;
+
+    const startY = Math.max(0, Math.floor(centerY - fontSize));
+    const endY = Math.min(height, Math.ceil(centerY + fontSize));
+
+    for (let y = startY; y < endY; y += step) {
+      for (let x = 0; x < width; x += step) {
+        const pixelIndex = (y * width + x) * 4;
+        if (pixels[pixelIndex + 3] > 70) {
+          targets.push({ x, y });
+        }
       }
     }
+
+    const maxScreenDist = Math.hypot(width, height);
+
     logoDots.length = 0;
-    targets.forEach((target, index) => logoDots.push({
-      x: Math.random() * width,
-      y: height + Math.random() * 100,
-      targetX: target.x,
-      targetY: target.y,
-      delay: index * 1.5
-    }));
+    targets.forEach((target, index) => {
+      // Omnidirectional 360-degree trajectory to scatter across full screen
+      const angle = Math.random() * Math.PI * 2;
+      const dist = (Math.random() * 0.85 + 0.45) * maxScreenDist * 0.75;
+
+      const scatterX = Math.cos(angle) * dist;
+      const scatterY = Math.sin(angle) * dist;
+
+      const initAngle = Math.random() * Math.PI * 2;
+      const initDist = Math.random() * 200 + 60;
+
+      logoDots.push({
+        x: target.x + Math.cos(initAngle) * initDist,
+        y: target.y + Math.sin(initAngle) * initDist,
+        baseX: target.x,
+        baseY: target.y,
+        scatterX: scatterX,
+        scatterY: scatterY,
+        delay: (index % 150) * 3,
+        size: Math.random() * 0.5 + 1.45
+      });
+    });
   }
 
-  function animateLogo(time) {
-    const width = logoStage.clientWidth;
-    const height = logoStage.clientHeight;
-    logoContext.clearRect(0, 0, width, height);
-    logoDots.forEach((dot) => {
-      const lift = Math.max(0, Math.min(1, (time - dot.delay) / 900));
-      dot.x += (dot.targetX - dot.x) * 0.055 * lift;
-      dot.y += (dot.targetY - dot.y) * 0.055 * lift;
-      const distance = Math.hypot(dot.x - pointer.x, dot.y - pointer.y);
-      if (distance < 90) {
-        const force = (90 - distance) / 90;
-        dot.x += (dot.x - pointer.x) * force * 0.08;
-        dot.y += (dot.y - pointer.y) * force * 0.08 - force * 0.8;
+  // Tubelight Flicker & Glitch State Machine
+  let glitchActive = false;
+  let glitchIntensity = 0;
+  let nextGlitchTime = Date.now() + 1400;
+  let glitchEndTime = 0;
+  let glitchMode = 0; // 0 = white surge, 1 = hot pink buzz, 2 = alternating flicker
+
+  const pinkColors = ['#ff7597', '#ff507a', '#ff3366', '#f472b6', '#fda4af'];
+
+  function updateTubelightGlitch(now) {
+    if (!glitchActive && now >= nextGlitchTime) {
+      glitchActive = true;
+      glitchIntensity = Math.random() * 0.7 + 0.3;
+      glitchMode = Math.floor(Math.random() * 3);
+      // Fast neon voltage stutter (100ms - 280ms)
+      const duration = Math.random() * 180 + 100;
+      glitchEndTime = now + duration;
+    } else if (glitchActive) {
+      if (now >= glitchEndTime) {
+        glitchActive = false;
+        // Next glitch burst in 1.8s to 4.2s
+        nextGlitchTime = now + Math.random() * 2600 + 1800;
+        glitchIntensity = 0;
+      } else {
+        // High frequency voltage jitter during burst
+        glitchIntensity = Math.random() > 0.35 ? Math.random() * 0.9 + 0.1 : 0.05;
       }
-      logoContext.fillStyle = `rgba(255, 255, 255, ${0.35 + lift * 0.65})`;
+    }
+  }
+
+  // Animation Loop
+  let startTime = null;
+  const videoOverlay = document.getElementById('videoOverlay');
+
+  function animateLogo(time) {
+    if (!startTime) startTime = time;
+    const elapsed = time - startTime;
+    const now = Date.now();
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    logoContext.clearRect(0, 0, width, height);
+
+    // Update neon tubelight glitch
+    updateTubelightGlitch(now);
+
+    // Smooth scroll interpolation (silky lerp)
+    currentScatter += (targetScatter - currentScatter) * 0.085;
+
+    // Background transition: Hidden on landing, blurred video & pink atmosphere on scroll
+    if (bgVideo) {
+      const videoOpacity = Math.min(1, Math.max(0, (currentScatter - 0.1) / 0.65));
+      bgVideo.style.opacity = videoOpacity;
+    }
+    if (videoOverlay) {
+      const overlayOpacity = Math.min(1, Math.max(0, (currentScatter - 0.08) / 0.7));
+      videoOverlay.style.opacity = overlayOpacity;
+    }
+
+    // Dynamic Tubelight Canvas Drop-Shadow Glitch
+    if (currentScatter < 0.25) {
+      if (glitchActive && glitchIntensity > 0.2) {
+        const glowColor = glitchMode === 1 ? 'rgba(255, 51, 102, 0.9)' : 'rgba(255, 117, 151, 0.85)';
+        const blurSize = 20 + glitchIntensity * 30;
+        logoCanvas.style.filter = `drop-shadow(0 0 ${blurSize}px ${glowColor}) drop-shadow(0 0 ${blurSize * 2}px rgba(244, 114, 182, 0.6))`;
+      } else {
+        logoCanvas.style.filter = 'drop-shadow(0 0 16px rgba(255, 117, 151, 0.55)) drop-shadow(0 0 38px rgba(244, 114, 182, 0.25))';
+      }
+    }
+
+    // Fade out scroll prompt as user begins scrolling
+    const scrollPrompt = document.getElementById('scrollPrompt');
+    if (scrollPrompt) {
+      scrollPrompt.style.opacity = Math.max(0, 0.85 - currentScatter * 3.5);
+    }
+
+    // Smoothly rise and reveal the Google Auth Login Card
+    const authContainer = document.getElementById('authContainer');
+    if (authContainer) {
+      const authProgress = Math.max(0, Math.min(1, (currentScatter - 0.32) / 0.68));
+      authContainer.style.opacity = authProgress;
+      authContainer.style.transform = `translate(-50%, calc(-50% + ${(1 - authProgress) * 45}px)) scale(${0.92 + authProgress * 0.08})`;
+      authContainer.style.pointerEvents = authProgress > 0.65 ? 'auto' : 'none';
+    }
+
+    // Dot particles rendering & tubelight color logic
+    for (let i = 0; i < logoDots.length; i++) {
+      const dot = logoDots[i];
+      
+      const entryProgress = Math.max(0, Math.min(1, (elapsed - dot.delay) / 600));
+
+      const targetX = dot.baseX + dot.scatterX * currentScatter;
+      const targetY = dot.baseY + dot.scatterY * currentScatter;
+
+      const springRate = 0.085 * (0.3 + entryProgress * 0.7);
+      dot.x += (targetX - dot.x) * springRate;
+      dot.y += (targetY - dot.y) * springRate;
+
+      // Subtle mouse repulsion ONLY when at the very top (zero scroll)
+      if (currentScatter < 0.04) {
+        const dist = Math.hypot(dot.x - pointer.x, dot.y - pointer.y);
+        if (dist < 65) {
+          const force = (65 - dist) / 65;
+          dot.x += (dot.x - pointer.x) * force * 0.08;
+          dot.y += (dot.y - pointer.y) * force * 0.08;
+        }
+      }
+
+      // Fade out completely across screen as currentScatter approaches 1
+      const fade = Math.max(0, 1 - currentScatter * 1.15);
+      let alpha = fade * (0.35 + entryProgress * 0.65);
+      if (alpha <= 0.005) continue;
+
+      // Tubelight Color Glitching: shifts between electric white and hot neon sakura pink
+      let dotColor = '#ffffff';
+
+      if (glitchActive) {
+        // Voltage dip: slight random opacity pulse
+        alpha *= (0.6 + glitchIntensity * 0.4);
+
+        if (glitchMode === 1) {
+          // Hot pink neon surge
+          dotColor = pinkColors[i % pinkColors.length];
+        } else if (glitchMode === 2) {
+          // Alternating electric strobe
+          dotColor = (i % 3 === 0) ? pinkColors[i % pinkColors.length] : '#ffffff';
+        } else {
+          // Intense white flash with occasional hot pink spark
+          dotColor = (i % 7 === 0) ? '#ff507a' : '#ffffff';
+        }
+      } else {
+        // Normal state: crisp glowing white with occasional subtle rose tint
+        dotColor = (i % 8 === 0) ? '#fbcfe8' : '#ffffff';
+      }
+
+      logoContext.fillStyle = dotColor;
+      logoContext.globalAlpha = Math.min(1, alpha);
       logoContext.beginPath();
-      logoContext.arc(dot.x, dot.y, 1.45, 0, Math.PI * 2);
+      logoContext.arc(dot.x, dot.y, dot.size, 0, Math.PI * 2);
       logoContext.fill();
-    });
+    }
+
+    logoContext.globalAlpha = 1;
     requestAnimationFrame(animateLogo);
   }
 
-  buildLogo();
-  requestAnimationFrame(animateLogo);
-  window.addEventListener('resize', buildLogo);
-  logoCanvas.addEventListener('pointermove', (event) => {
-    const bounds = logoCanvas.getBoundingClientRect();
-    pointer.x = event.clientX - bounds.left;
-    pointer.y = event.clientY - bounds.top;
-    airCursor.style.left = `${event.clientX}px`;
-    airCursor.style.top = `${event.clientY}px`;
-    airCursor.classList.add('is-active');
-  });
-  document.addEventListener('pointermove', (event) => {
-    const bounds = logoCanvas.getBoundingClientRect();
-    pointer.x = event.clientX - bounds.left;
-    pointer.y = event.clientY - bounds.top;
-    airCursor.style.left = `${event.clientX}px`;
-    airCursor.style.top = `${event.clientY}px`;
-    airCursor.classList.add('is-active');
-  });
-  document.addEventListener('pointerleave', () => airCursor.classList.remove('is-active'));
-  enterButton.addEventListener('pointerenter', () => airCursor.classList.add('is-hovering'));
-  enterButton.addEventListener('pointerleave', () => airCursor.classList.remove('is-hovering'));
+  // Pointer interactions (full-screen window coordinates)
+  const handlePointer = (event) => {
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+  };
 
-  anime({
-    targets: '#brandContainer',
-    opacity: [0, 1],
-    translateY: [30, 0],
-    duration: 1200,
-    easing: 'easeOutCubic'
+  window.addEventListener('pointermove', handlePointer, { passive: true });
+  window.addEventListener('pointerleave', () => {
+    pointer.x = -2000;
+    pointer.y = -2000;
   });
 
-  anime({
-    targets: '#loaderProgress',
-    width: '100%',
-    duration: LOAD_DELAY_MS,
-    easing: 'easeInOutQuad'
-  });
+  // Interactive Google Auth Button Prototype
+  const googleAuthBtn = document.getElementById('googleAuthBtn');
+  const authStatusMsg = document.getElementById('authStatusMsg');
 
-  setTimeout(() => {
-    enterButton.classList.add('is-visible');
-    enterButton.classList.add('is-ready');
-  }, LOAD_DELAY_MS);
+  if (googleAuthBtn) {
+    googleAuthBtn.addEventListener('click', () => {
+      if (googleAuthBtn.classList.contains('is-loading')) return;
 
-  function loadWebsite() {
-    if (!enterButton.classList.contains('is-ready')) return;
-    enterButton.disabled = true;
-    let transitionComplete = false;
-    const showWebsite = () => {
-      if (transitionComplete) return;
-      transitionComplete = true;
-      document.body.classList.add('website-loaded');
-      mainContent.setAttribute('aria-hidden', 'false');
-      mainContent.classList.add('is-visible');
-    };
-    anime({
-      targets: splashScreen,
-      opacity: 0,
-      scale: 1.04,
-      duration: 700,
-      easing: 'easeInOutCubic',
-      complete: showWebsite
+      googleAuthBtn.classList.add('is-loading');
+      authStatusMsg.className = 'auth-status-msg';
+      authStatusMsg.textContent = 'Connecting to Google Authentication...';
+
+      setTimeout(() => {
+        googleAuthBtn.classList.remove('is-loading');
+        authStatusMsg.classList.add('is-success');
+        authStatusMsg.textContent = '✓ Authenticated! Welcome CipherSquad Hacker';
+      }, 1400);
     });
-    setTimeout(showWebsite, 900);
   }
 
-  enterButton.addEventListener('click', loadWebsite);
-  backButton.addEventListener('click', () => {
-    document.body.classList.remove('website-loaded');
-    mainContent.classList.remove('is-visible');
-    mainContent.setAttribute('aria-hidden', 'true');
-    splashScreen.style.opacity = '1';
-    splashScreen.style.transform = 'scale(1)';
-    enterButton.disabled = false;
-  });
+  // Return to top button inside auth card
+  const backToTopBtn = document.getElementById('backToTopBtn');
+  if (backToTopBtn) {
+    backToTopBtn.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
+  // Load font first so canvas text metrics are crisp
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(buildLogo);
+  } else {
+    buildLogo();
+  }
+
+  requestAnimationFrame(animateLogo);
+  window.addEventListener('resize', buildLogo);
 });
