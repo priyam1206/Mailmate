@@ -4,6 +4,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const logoDots = [];
   const pointer = { x: -2000, y: -2000 };
 
+  const currentTime = document.getElementById('currentTime');
+  const timeFormatter = new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  function updateTime() {
+    if (currentTime) currentTime.textContent = timeFormatter.format(new Date());
+  }
+
+  updateTime();
+  window.setInterval(updateTime, 1000);
+
   // Universal portable image fallback resolver: works in any directory structure
   document.querySelectorAll('img').forEach(img => {
     img.addEventListener('error', function () {
