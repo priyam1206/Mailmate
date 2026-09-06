@@ -9,6 +9,7 @@
 
   const PAGES = new Set(['overview', 'inbox', 'work', 'calendar', 'automations', 'status', 'integrations', 'settings']);
   const INBOX_FILTERS = new Set(['all', 'important', 'action', 'unread']);
+  const previews = new Map();
 
   function exactReference(args = {}) {
     const reference = args.reference || args;
@@ -108,18 +109,29 @@
   actions.navigation.open_calendar = actions.navigation.openCalendar;
 
   const semanticTools = {
-    'navigation.open': async args => actions.openPage(String(args?.page || '')),
+    'navigation.open': async args => {
+      const previousPage = window.MailmateContext?.snapshot?.().page || 'overview';
+      const nextPage = String(args?.page || '');
+      const ok = actions.openPage(nextPage);
+      return { ok, undo: previousPage !== nextPage ? () => actions.openPage(previousPage) : null };
+    },
     'inbox.set_filter': async args => {
       const filter = String(args?.filter || '');
       if (!INBOX_FILTERS.has(filter)) throw new Error('Unknown inbox filter');
+      const previous = document.querySelector('.filter-tab.active')?.dataset.filter || 'all';
       actions.openPage('inbox');
       document.querySelector(`.filter-tab[data-filter="${filter}"]`)?.click();
-      return true;
+      return {
+        ok: true,
+        undo: previous !== filter
+          ? () => document.querySelector(`.filter-tab[data-filter="${previous}"]`)?.click()
+          : null
+      };
     },
     'inbox.open_email': async args => {
       const reference = exactReference(args);
       if (reference.type !== 'email') throw new Error('Expected an email reference');
-      return actions.openEmail(reference.id);
+      return { ok: actions.openEmail(reference.id) };
     },
     'calendar.open_event': async args => {
       const reference = exactReference(args);
@@ -129,7 +141,7 @@
       const element = window.MailmateObjects?.getElement(reference);
       if (!element) throw new Error('That calendar event is not visible in this week');
       element.click();
-      return true;
+      return { ok: true };
     },
     'work.focus': async args => {
       const reference = exactReference(args);
@@ -138,7 +150,7 @@
       const element = window.MailmateObjects?.getElement(reference);
       if (!element) throw new Error('That work item is not currently available');
       element.click();
-      return true;
+      return { ok: true };
     },
     'ui.highlight': async args => {
       const reference = exactReference(args);
@@ -148,14 +160,18 @@
       void element.offsetWidth;
       element.classList.add('kyle-focus');
       setTimeout(() => element.classList.remove('kyle-focus'), 2600);
-      return true;
+      return { ok: true };
     },
     'ui.scroll_to': async args => {
       const reference = exactReference(args);
       const element = window.MailmateObjects?.getElement(reference);
       if (!element) return false;
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return true;
+      return { ok: true };
+    },
+    'ui.annotate': async args => {
+      const reference = exactReference(args);
+      return { ok: window.KyleMotion?.annotate(reference, String(args?.text || '').slice(0, 90)) !== false };
     },
     'ui.toast': async args => {
       const message = String(args?.message || '').trim().slice(0, 180);
@@ -172,23 +188,88 @@
       toast.classList.add('is-visible');
       clearTimeout(toast.hideTimer);
       toast.hideTimer = setTimeout(() => toast.classList.remove('is-visible'), 2800);
-      return true;
+      return { ok: true };
+    },
+    'calendar.preview_move': async args => {
+      const reference = exactReference(args);
+      if (reference.type !== 'calendar-event') throw new Error('Expected a calendar event reference');
+      const event = window.AgentCalendar?.getEvents?.().find(item => String(item.id) === reference.id);
+      if (!event) throw new Error('Calendar event is not available');
+      const originalStart = new Date(event.start);
+      const originalEnd = new Date(event.end || originalStart.getTime() + 3600000);
+      const nextStart = new Date(args.start);
+      if (Number.isNaN(nextStart.getTime())) throw new Error('Preview needs an exact start time');
+      const nextEnd = args.end ? new Date(args.end) : new Date(nextStart.getTime() + Math.max(900000, originalEnd - originalStart));
+      const previewId = `preview_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      const preview = {
+        id: previewId,
+        kind: 'move',
+        reference: { ...args.reference, type: reference.type, id: reference.id },
+        original: { start: originalStart.toISOString(), end: originalEnd.toISOString() },
+        next: { start: nextStart.toISOString(), end: nextEnd.toISOString() },
+        deltaMinutes: (nextStart - originalStart) / 60000
+      };
+      previews.set(previewId, preview);
+      return { ok: true, previewId, preview, requiresApproval: true };
+    },
+    'calendar.commit_move': async args => {
+      const preview = previews.get(String(args.previewId || ''));
+      if (!preview || preview.kind !== 'move') throw new Error('Move preview expired');
+      const event = await actions.calendar.updateEvent(preview.reference.id, preview.next);
+      previews.delete(preview.id);
+      return {
+        ok: true,
+        event,
+        reference: preview.reference,
+        undo: () => actions.calendar.updateEvent(preview.reference.id, preview.original)
+      };
+    },
+    'calendar.preview_create': async args => {
+      const payload = { ...(args.payload || {}) };
+      if (!payload.title || !payload.start || !payload.end) throw new Error('Calendar preview is incomplete');
+      const previewId = `preview_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      const preview = { id: previewId, kind: 'create', payload };
+      previews.set(previewId, preview);
+      return { ok: true, previewId, preview, requiresApproval: true };
+    },
+    'calendar.commit_create': async args => {
+      const preview = previews.get(String(args.previewId || ''));
+      if (!preview || preview.kind !== 'create') throw new Error('Create preview expired');
+      const event = await actions.calendar.createEvent(preview.payload);
+      previews.delete(preview.id);
+      const reference = { type: 'calendar-event', id: String(event.id), label: event.title || preview.payload.title };
+      return { ok: true, event, reference, undo: () => actions.calendar.deleteEvent(event.id) };
     }
   };
 
+  async function run(toolName, args = {}, transaction = null) {
+    const tool = semanticTools[toolName];
+    if (!tool) throw new Error('Tool is not allowed');
+    const result = await tool(args, transaction);
+    const reference = args?.reference;
+    if (reference && result !== false && result?.ok !== false) window.MailmateContext?.remember?.('manipulated', reference);
+    if (toolName === 'calendar.commit_move' && result?.reference) window.MailmateContext?.remember?.('modified', result.reference);
+    if (toolName === 'calendar.commit_create' && result?.reference) window.MailmateContext?.remember?.('created', result.reference);
+    return result;
+  }
+
   async function execute(requestedActions = []) {
+    if (window.KyleExecutor) {
+      return window.KyleExecutor.execute({
+        id: `run_${Date.now().toString(36)}`,
+        goal: 'Kyle action',
+        steps: requestedActions
+      });
+    }
     const results = [];
     for (const action of requestedActions.slice(0, 5)) {
-      const tool = semanticTools[action?.tool];
-      if (!tool) {
+      if (!semanticTools[action?.tool]) {
         results.push({ tool: action?.tool || '', ok: false, error: 'Tool is not allowed' });
         continue;
       }
       try {
-        const result = await tool(action.args || {});
-        const reference = action.args?.reference;
-        if (reference && result !== false) window.MailmateContext?.remember?.('manipulated', reference);
-        results.push({ tool: action.tool, ok: result !== false });
+        const result = await run(action.tool, action.args || {});
+        results.push({ tool: action.tool, ok: result !== false && result?.ok !== false });
       } catch (error) {
         results.push({ tool: action.tool, ok: false, error: error.message });
       }
@@ -197,5 +278,5 @@
   }
 
   window.KyleActions = actions;
-  window.KyleTools = { execute, names: Object.freeze(Object.keys(semanticTools)) };
+  window.KyleTools = { execute, run, previews, names: Object.freeze(Object.keys(semanticTools)) };
 })();

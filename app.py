@@ -329,6 +329,51 @@ def _deadline_title(item):
     return title
 
 
+def _source_email_for_attention(item, payload):
+    source_id = str(
+        (item or {}).get('source_message_id')
+        or (item or {}).get('message_id')
+        or (item or {}).get('email_id')
+        or ''
+    ).strip()
+    if not source_id:
+        return None
+    for email in (payload or {}).get('emails') or []:
+        ids = {
+            str(email.get('id') or ''),
+            str(email.get('gmail_id') or ''),
+        }
+        if source_id in ids:
+            return email
+    return None
+
+
+def _calendar_write_decision(item, payload, profile=None):
+    """Deterministic boundary for automatic email-derived Calendar writes."""
+    source = _source_email_for_attention(item, payload)
+    if not source:
+        return False, 'ambiguous_source'
+
+    direction = str(source.get('direction') or '').strip().lower()
+    if direction == 'outbound' or 'SENT' in (source.get('labels') or []):
+        return False, 'outbound_email'
+    if direction != 'inbound':
+        return False, 'ambiguous_direction'
+
+    owner = str((item or {}).get('owner') or '').strip().lower()
+    current_email = str((profile or {}).get('email') or '').strip().lower()
+    current_names = {
+        'me', 'myself', 'current_user', 'current user', 'user',
+        current_email,
+        str((profile or {}).get('name') or '').strip().lower(),
+    }
+    current_names.discard('')
+    if owner not in current_names:
+        return False, 'not_assigned_to_current_user' if owner else 'ambiguous_owner'
+
+    return True, 'inbound_assigned_to_current_user'
+
+
 def _reconcile_ai_calendar(payload, profile=None, force=False):
     """
     Persist high-confidence email deadlines into the currently connected
@@ -346,9 +391,17 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
     _ai_calendar_last_sync[account_key] = now_ts
     changed = 0
     skipped = 0
+    skip_reasons = {}
 
     for item in (payload or {}).get('needs_attention') or []:
         if not item.get('deadline'):
+            continue
+
+        may_write, policy_reason = _calendar_write_decision(item, payload, profile=profile)
+        item['calendar_write'] = {'allowed': may_write, 'reason': policy_reason}
+        if not may_write:
+            skipped += 1
+            skip_reasons[policy_reason] = skip_reasons.get(policy_reason, 0) + 1
             continue
 
         target, has_time = _deadline_target(item)
@@ -393,7 +446,12 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
             app.logger.warning('AI calendar reconcile skipped %s: %s', marker, exc)
             skipped += 1
 
-    return {"created_or_updated": changed, "skipped": skipped, "enabled": True}
+    return {
+        "created_or_updated": changed,
+        "skipped": skipped,
+        "skip_reasons": skip_reasons,
+        "enabled": True,
+    }
 
 
 def _build_live_dashboard(profile, user_row, force_ai=False):
@@ -969,13 +1027,28 @@ def _sanitize_agent_action(action, known):
     if tool == 'ui.toast':
         message = _agent_text(args.get('message'), 180)
         return {'tool': tool, 'args': {'message': message}} if message else None
+    if tool == 'calendar.preview_create':
+        payload = args.get('payload') or {}
+        title = _agent_text(payload.get('title'), 160)
+        start = _agent_text(payload.get('start'), 80)
+        end = _agent_text(payload.get('end'), 80)
+        if not title or not start or not end:
+            return None
+        return {'tool': tool, 'args': {'payload': {
+            'title': title,
+            'start': start,
+            'end': end,
+            'description': _agent_text(payload.get('description'), 600),
+        }}}
 
     expected = {
         'inbox.open_email': 'email',
         'calendar.open_event': 'calendar-event',
+        'calendar.preview_move': 'calendar-event',
         'work.focus': 'work-item',
         'ui.highlight': None,
         'ui.scroll_to': None,
+        'ui.annotate': None,
     }
     if tool not in expected:
         return None
@@ -983,13 +1056,24 @@ def _sanitize_agent_action(action, known):
     if not reference or (expected[tool] and reference['type'] != expected[tool]):
         return None
     exact = known.get(f"{reference['type']}:{reference['id']}")
-    return {'tool': tool, 'args': {'reference': exact}} if exact else None
+    if not exact:
+        return None
+    clean_args = {'reference': exact}
+    if tool == 'calendar.preview_move':
+        clean_args['start'] = _agent_text(args.get('start'), 80)
+        clean_args['end'] = _agent_text(args.get('end'), 80)
+        if not clean_args['start']:
+            return None
+    if tool == 'ui.annotate':
+        clean_args['text'] = _agent_text(args.get('text'), 90)
+    return {'tool': tool, 'args': clean_args}
 
 
-def _infer_agent_actions(message, resolved):
+def _infer_agent_actions(message, resolved, context=None):
     lower = message.lower()
     reference = resolved[0] if resolved else None
     actions = []
+    context = context or {}
     pages = [
         ('calendar', r'\b(open|go to|show)\s+(my\s+)?calendar\b'),
         ('inbox', r'\b(open|go to|show)\s+(my\s+)?inbox\b'),
@@ -1008,12 +1092,63 @@ def _infer_agent_actions(message, resolved):
         )
     )
     if filter_name and re.search(r'\b(show|filter|open|find)\b', lower):
+        if not any(action.get('args', {}).get('page') == 'inbox' for action in actions):
+            actions.append({'tool': 'navigation.open', 'args': {'page': 'inbox'}})
         actions.append({'tool': 'inbox.set_filter', 'args': {'filter': filter_name}})
 
-    if reference and reference['type'] == 'email' and re.search(r'\b(open|show|read|reply|respond)\b', lower):
+    put_on_calendar = bool(re.search(r'\b(put|add|save|schedule)\b.*\b(calendar|schedule)\b', lower))
+    if reference and reference['type'] == 'email' and put_on_calendar:
+        source = next((email for email in (context.get('emails') or []) if str(email.get('id') or email.get('gmail_id')) == reference['id']), None)
+        attention = next((item for item in (context.get('needs_attention') or []) if str(item.get('source_message_id') or item.get('message_id') or item.get('email_id')) == reference['id']), None)
+        target, has_time = _deadline_target(attention or {})
+        if source and target:
+            start = target - timedelta(minutes=60) if has_time else target.replace(hour=17, minute=0, second=0, microsecond=0)
+            payload = {
+                'title': _agent_text(source.get('subject') or reference.get('label') or 'Email follow-up', 160),
+                'start': start.isoformat(),
+                'end': (start + timedelta(hours=1)).isoformat(),
+                'description': _agent_text(source.get('snippet') or '', 600),
+            }
+            actions.extend([
+                {'tool': 'navigation.open', 'args': {'page': 'calendar'}},
+                {'tool': 'calendar.preview_create', 'args': {'payload': payload}},
+            ])
+    elif reference and reference['type'] == 'email' and re.search(r'\b(open|show|read|reply|respond)\b', lower):
         actions.append({'tool': 'inbox.open_email', 'args': {'reference': reference}})
     elif reference and reference['type'] == 'calendar-event' and re.search(r'\b(open|show|edit|move|reschedule|change)\b', lower):
-        actions.append({'tool': 'calendar.open_event', 'args': {'reference': reference}})
+        moving = bool(re.search(r'\b(move|reschedule|change)\b', lower))
+        clock = _parse_clock(lower)
+        if not clock and moving:
+            short_clock = re.search(r'\b(?:to|at)\s+([1-9]|1[0-2])(?::([0-5]\d))?\b', lower)
+            if short_clock:
+                hour = int(short_clock.group(1))
+                if hour <= 7:
+                    hour += 12
+                clock = (hour, int(short_clock.group(2) or 0))
+        current = next((event for event in (context.get('calendarEvents') or []) if str(event.get('id')) == reference['id']), None)
+        if moving and clock and current and current.get('start'):
+            old_start = date_parser.parse(str(current['start']))
+            if old_start.tzinfo is None:
+                old_start = old_start.replace(tzinfo=APP_TZ)
+            old_end = date_parser.parse(str(current.get('end') or current['start']))
+            if old_end.tzinfo is None:
+                old_end = old_end.replace(tzinfo=old_start.tzinfo)
+            duration = max(timedelta(minutes=15), old_end - old_start)
+            if re.search(r'\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', lower):
+                target_day, _ = _day_window_from_text(lower)
+            else:
+                target_day = old_start.astimezone(APP_TZ)
+            next_start = target_day.replace(hour=clock[0], minute=clock[1], second=0, microsecond=0)
+            actions.extend([
+                {'tool': 'navigation.open', 'args': {'page': 'calendar'}},
+                {'tool': 'calendar.preview_move', 'args': {
+                    'reference': reference,
+                    'start': next_start.isoformat(),
+                    'end': (next_start + duration).isoformat(),
+                }},
+            ])
+        else:
+            actions.append({'tool': 'calendar.open_event', 'args': {'reference': reference}})
     elif reference and reference['type'] == 'work-item' and re.search(r'\b(open|show|do|work|focus)\b', lower):
         actions.append({'tool': 'work.focus', 'args': {'reference': reference}})
 
@@ -1047,13 +1182,14 @@ def kyle_agent_endpoint():
         })
 
     actions = []
-    for candidate in _infer_agent_actions(message, resolved):
+    context = data.get('context') or {}
+    for candidate in _infer_agent_actions(message, resolved, context=context):
         sanitized = _sanitize_agent_action(candidate, known)
         if sanitized and sanitized not in actions:
             actions.append(sanitized)
 
     compact = {
-        'mail': _compact_context(data.get('context') or {}),
+        'mail': _compact_context(context),
         'ui': ui_context,
         'resolved': resolved,
         'plannedActions': actions,

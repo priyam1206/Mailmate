@@ -32,6 +32,7 @@
     const context = canvas.getContext('2d');
     let cloudPhase = 0.65;
     let captionTimer = null;
+    let captionVersion = 0;
 
     function createFloatingMount() {
       const existing = document.getElementById('kyleMount');
@@ -103,17 +104,38 @@
         SPEAKING: 'Kyle is speaking',
         INTERRUPTED: 'Kyle was interrupted',
         ERROR: 'Kyle needs attention',
-        RESULT: 'Kyle has results'
+        RESULT: 'Kyle has results',
+        ACTING: 'Kyle is acting',
+        OBSERVING: 'Kyle is checking the result',
+        WAITING_APPROVAL: 'Kyle is waiting for approval',
+        DONE: 'Kyle finished'
       };
       stateLabel.textContent = textByState[next] || 'Kyle';
       widget.classList.toggle('is-expanded', next !== 'IDLE');
     }
 
-    function setLiveText(text, autoHideMs = 0) {
+    async function setLiveText(text, autoHideMs = 0, wordDelay = 32) {
       clearTimeout(captionTimer);
-      caption.textContent = text || '';
+      const version = ++captionVersion;
+      caption.replaceChildren();
       widget.classList.toggle('has-caption', Boolean(text));
-      if (text && autoHideMs) captionTimer = setTimeout(() => setLiveText(''), autoHideMs);
+      if (!text) return;
+
+      const words = String(text).trim().split(/\s+/);
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      if (reduceMotion) {
+        caption.textContent = String(text);
+      } else {
+        for (const word of words) {
+          if (version !== captionVersion) return;
+          const span = document.createElement('span');
+          span.className = 'kyle-word-enter';
+          span.textContent = word + ' ';
+          caption.appendChild(span);
+          await new Promise(resolve => setTimeout(resolve, wordDelay));
+        }
+      }
+      if (version === captionVersion && autoHideMs) captionTimer = setTimeout(() => setLiveText(''), autoHideMs);
     }
 
     function setMuted(muted) {
@@ -183,6 +205,10 @@
     window.addEventListener('harness:kyle-brief', event => {
       const detail = event.detail || {};
       renderBrief(detail.title || 'Kyle', detail.items || []);
+    });
+    window.addEventListener('kyle:motion-caption', event => {
+      const detail = event.detail || {};
+      setLiveText(detail.text || '', detail.transient ? 2400 : 0, detail.delay || 32);
     });
 
     drawCloud(0, 0);

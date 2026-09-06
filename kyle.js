@@ -235,6 +235,32 @@
 
     store.addMessage('user', cleanPrompt);
     ui.setLiveText(cleanPrompt);
+
+    if (window.KylePlanner?.isUndo(cleanPrompt)) {
+      const undone = await window.KyleExecutor?.undoLast?.();
+      const reply = undone?.message || 'There is nothing I can safely undo yet.';
+      store.addMessage('kyle', reply);
+      ui.setLiveText(reply, 4200);
+      speak(reply, run);
+      return;
+    }
+
+    if (window.KyleExecutor?.pending?.() && window.KylePlanner?.isApproval(cleanPrompt)) {
+      const approved = await window.KyleExecutor.approvePending();
+      store.addMessage('kyle', approved.message);
+      ui.setLiveText(approved.message, 4200);
+      speak(approved.message, run);
+      return;
+    }
+
+    if (window.KyleExecutor?.pending?.() && window.KylePlanner?.isCancellation(cleanPrompt)) {
+      const cancelled = window.KyleExecutor.cancelPending();
+      store.addMessage('kyle', cancelled.message);
+      ui.setLiveText(cancelled.message, 4200);
+      speak(cancelled.message, run);
+      return;
+    }
+
     const resolution = window.KyleReferents?.resolvePrompt(cleanPrompt) || {
       hasReference: false,
       references: [],
@@ -266,14 +292,23 @@
       if (!response.ok) throw new Error(`Kyle returned ${response.status}`);
 
       const data = await response.json();
-      const reply = String(data.reply || data.text || '').trim() || 'Done.';
-      const voice = String(data.voice || compactVoice(reply)).trim();
+      let reply = String(data.reply || data.text || '').trim() || 'Done.';
+      let voice = String(data.voice || compactVoice(reply)).trim();
 
       if (run !== activeRun) return;
 
-      const toolResults = await window.KyleTools?.execute?.(data.actions || []);
-      if (toolResults?.some(result => !result.ok)) {
-        console.warn('[Kyle Agent] some UI actions could not run', toolResults);
+      const plan = window.KylePlanner?.fromResponse(cleanPrompt, data, resolution) || {
+        id: `run_${Date.now().toString(36)}`,
+        goal: cleanPrompt,
+        steps: data.actions || []
+      };
+      const transaction = await window.KyleExecutor?.execute?.(plan);
+      if (transaction && !['complete', 'waiting-approval'].includes(transaction.status)) {
+        console.warn('[Kyle Agent] action transaction ended', transaction.status, transaction);
+      }
+      if (transaction?.status === 'waiting-approval') {
+        reply = 'The preview is ready. Say confirm to save it, or cancel to leave your calendar unchanged.';
+        voice = reply;
       }
       applyCommand(data.command);
       if (data.brief?.items?.length) {
@@ -317,7 +352,7 @@
   function speak(text, run) {
     stopSpeech(false);
     if (store.muted || !('speechSynthesis' in window) || !text) {
-      store.set(store.states.IDLE);
+      store.set(window.KyleExecutor?.pending?.() ? store.states.WAITING_APPROVAL : store.states.IDLE);
       return;
     }
 
@@ -382,7 +417,7 @@
   function finishSpeech(run) {
     if (run !== activeRun) return;
     stopSpeech(false);
-    store.set(store.states.IDLE);
+    store.set(window.KyleExecutor?.pending?.() ? store.states.WAITING_APPROVAL : store.states.IDLE);
     console.log('[Kyle Voice] short response finished');
   }
 

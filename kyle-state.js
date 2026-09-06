@@ -7,7 +7,11 @@
     SPEAKING: 'SPEAKING',
     INTERRUPTED: 'INTERRUPTED',
     ERROR: 'ERROR',
-    RESULT: 'RESULT'
+    RESULT: 'RESULT',
+    ACTING: 'ACTING',
+    OBSERVING: 'OBSERVING',
+    WAITING_APPROVAL: 'WAITING_APPROVAL',
+    DONE: 'DONE'
   };
 
   function createKyleState() {

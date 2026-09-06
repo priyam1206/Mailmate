@@ -3,10 +3,55 @@
 
   function expectedType(prompt) {
     const text = String(prompt || '').toLowerCase();
+    if (/\bemail\s+for\s+(this|that|the)\s+event\b/.test(text)) return 'calendar-event';
     if (/\b(add|put|save)\s+(this|that|it)\s+(to|on)\s+(my\s+)?calendar\b/.test(text)) return 'email';
     if (/\b(reply|email|message|sender|archive|star|unread|inbox)\b/.test(text)) return 'email';
     if (/\b(calendar|event|meeting|schedule|reschedule|move|appointment)\b/.test(text)) return 'calendar-event';
     if (/\b(task|work item|action item|blocker)\b/.test(text)) return 'work-item';
+    return null;
+  }
+
+  function relationalCandidate(text, type, context) {
+    const lower = text.toLowerCase();
+    if (/\b(last thing|last event|last item)\s+(you\s+)?created\b/.test(lower)) {
+      return context.references?.lastCreated || null;
+    }
+    if (/\b(email|message)\s+i\s+just\s+opened\b/.test(lower)) {
+      const candidate = context.references?.lastOpened;
+      return candidate?.type === 'email' ? candidate : null;
+    }
+
+    if (/\b(next email|email below|one below)\b/.test(lower) || /\b(one above|previous email|email above)\b/.test(lower)) {
+      const anchor = context.selected?.type === 'email' ? context.selected : context.open;
+      const element = window.MailmateObjects?.getElement(anchor);
+      const rows = [...(element?.parentElement?.querySelectorAll?.('[data-kyle-type="email"][data-kyle-id]') || [])];
+      const index = rows.indexOf(element);
+      const delta = /\b(one above|previous email|email above)\b/.test(lower) ? -1 : 1;
+      return index >= 0 ? window.MailmateObjects?.getFromElement(rows[index + delta]) : null;
+    }
+
+    const visible = context.visibleObjects || [];
+    if (/\b(red|clashing|conflicting)\s+(event|meeting)\b/.test(lower)) {
+      const events = visible.filter(item => item.type === 'calendar-event' && (item.metadata?.conflict === 'true' || item.metadata?.urgency === 'clash'));
+      return events.length === 1 ? events[0] : null;
+    }
+
+    const fromMatch = lower.match(/\b(?:email|one|message)\s+from\s+([a-z][a-z\s.'-]{1,40})/i);
+    if (fromMatch) {
+      const needle = fromMatch[1].trim();
+      const emails = visible.filter(item => item.type === 'email' && `${item.label} ${item.metadata?.sender || ''}`.toLowerCase().includes(needle));
+      return emails.length === 1 ? emails[0] : null;
+    }
+
+    const afterMatch = lower.match(/\b(?:event|meeting)\s+after\s+(.+?)(?:[?.]|$)/i);
+    if (afterMatch) {
+      const events = visible
+        .filter(item => item.type === 'calendar-event')
+        .sort((a, b) => String(a.metadata?.start || '').localeCompare(String(b.metadata?.start || '')));
+      const anchorIndex = events.findIndex(item => item.label.toLowerCase().includes(afterMatch[1].trim()));
+      return anchorIndex >= 0 ? events[anchorIndex + 1] || null : null;
+    }
+
     return null;
   }
 
@@ -27,12 +72,29 @@
   function resolvePrompt(prompt) {
     const text = String(prompt || '').trim();
     const mentions = [...text.matchAll(REFERENCE_PATTERN)].map(match => match[0].toLowerCase());
-    const hasReference = mentions.length > 0;
+    const hasRelationalReference = /\b(next email|email below|one below|one above|previous email|email above|red event|clashing event|conflicting event|email i just opened|message i just opened|last thing (?:you )?created|event after|meeting after|email from|message from)\b/i.test(text);
+    const hasReference = mentions.length > 0 || hasRelationalReference;
     const type = expectedType(text);
     const context = window.MailmateContext?.snapshot?.() || {};
+    const relation = hasRelationalReference ? relationalCandidate(text, type, context) : null;
 
     if (!hasReference) {
       return { hasReference: false, references: [], unresolved: false, context };
+    }
+
+    if (hasRelationalReference) {
+      if (!relation || !matches(relation, type)) return clarification(type, context, []);
+      window.MailmateContext?.remember?.('mentioned', relation);
+      return {
+        hasReference: true,
+        references: [relation],
+        bindings: { relation },
+        unresolved: false,
+        confidence: 'high',
+        reason: 'relational reference',
+        expectedType: type,
+        context
+      };
     }
 
     const tiers = [

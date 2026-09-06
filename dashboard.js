@@ -892,6 +892,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const END_HOUR = 24;
     const HOUR_HEIGHT = 56;
     const today = new Date();
+    container.dataset.startHour = String(START_HOUR);
 
     let timeHtml = '<div class="calendar-time-column">';
     for (let hour = START_HOUR; hour <= END_HOUR; hour += 1) {
