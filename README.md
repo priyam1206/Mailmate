@@ -1,6 +1,6 @@
-# Agent Harness - Team CIPHERSQUAD
+# Mailmate - Team CIPHERSQUAD
 
-Agent Harness is a Gmail intelligence workspace built for Code2Create 7.0. It signs users in with Google, fetches their recent Gmail, stores processed context in Supabase, uses Gemini to identify priorities and actions, and provides the optional Kyle browser voice assistant.
+Mailmate is a Gmail intelligence workspace built for Code2Create 7.0. It signs users in with Google, fetches their recent Gmail, stores processed context in Supabase, uses Gemini to identify priorities and actions, and provides the optional Kyle browser voice assistant.
 
 ## Features
 

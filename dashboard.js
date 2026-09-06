@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentPage: name
     });
     if (name === 'calendar') refreshCalendar(false);
-    console.log('[Harness] navigation', name);
+    console.log('[Mailmate] navigation', name);
   }
 
   function setProfile(profile = {}) {
@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadInbox(forceRefresh) {
-    console.log('[Harness] dashboard load', forceRefresh ? 'refresh' : 'cache-first');
+    console.log('[Mailmate] dashboard load', forceRefresh ? 'refresh' : 'cache-first');
     if (!state.userId) {
       setStep('auth', 'active', 'Connect Google from the landing page');
       els.summaryText.textContent = 'Connect Google from the landing page to see your Gmail priorities here.';
@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
         health: state.health,
         currentPage: state.currentPage
       });
-      console.log('[Harness] dashboard ready');
+      console.log('[Mailmate] dashboard ready');
     } catch (error) {
       addError(error.message);
       els.processState.textContent = 'Needs attention';

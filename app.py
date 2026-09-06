@@ -361,7 +361,7 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
         description = str(
             item.get('description')
             or item.get('reason')
-            or 'Automatically created from an email deadline by Agent Harness.'
+            or 'Automatically created from an email deadline by Mailmate.'
         ).strip()
 
         if has_time:
@@ -370,7 +370,7 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
             end = target
             event_payload = {
                 "title": _deadline_title(item),
-                "description": description + "\n\nCreated automatically by Agent Harness from Gmail.",
+                "description": description + "\n\nCreated automatically by Mailmate from Gmail.",
                 "start": start.isoformat(),
                 "end": end.isoformat(),
                 "all_day": False,
@@ -379,7 +379,7 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
         else:
             event_payload = {
                 "title": _deadline_title(item),
-                "description": description + "\n\nCreated automatically by Agent Harness from Gmail.",
+                "description": description + "\n\nCreated automatically by Mailmate from Gmail.",
                 "start": target.date().isoformat(),
                 "end": (target.date() + timedelta(days=1)).isoformat(),
                 "all_day": True,
