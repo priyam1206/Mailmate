@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CipherSquad</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js" defer></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <section class="splash-screen" id="splashScreen" aria-label="CipherSquad loading screen">
+    <div id="particles"></div>
+    <div class="brand-container" id="brandContainer">
+      <div class="logo-stage" aria-label="CipherSquad">
+        <canvas class="dot-logo" id="dotLogo" aria-hidden="true"></canvas>
+        <h1 class="brand-name" aria-label="CIPHERSQUAD">
+          <span>C</span><span>I</span><span>P</span><span>H</span><span>E</span><span>R</span><span>S</span><span>Q</span><span>U</span><span>A</span><span>D</span>
+        </h1>
+      </div>
+      <p class="subtitle">Entering Digital Space</p>
+      <div class="loader-bar" aria-label="Loading website">
+        <div class="loader-progress" id="loaderProgress"></div>
+      </div>
+      <button class="enter-button" id="enterButton" type="button">
+        <span class="air-icon" aria-hidden="true"></span>
+        Load Website
+      </button>
+    </div>
+  </section>
+
+  <main class="main-content" id="mainContent" aria-hidden="true">
+    <div class="main-orbit" aria-hidden="true"></div>
+    <p class="eyebrow">Welcome to your digital space</p>
+    <h1>Cipher<span>Squad</span></h1>
+    <p class="main-copy">A focused place for ideas, code, and the next connection.</p>
+    <button class="back-button" id="backButton" type="button">Return to launch</button>
+  </main>
+  <div class="air-cursor" id="airCursor" aria-hidden="true"></div>
+</body>
+</html>
