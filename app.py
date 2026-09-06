@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 from urllib.parse import urlencode, urlparse
 from pathlib import Path
@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import hashlib
+import requests
 from dateutil import parser as date_parser
 
 from flask import Flask, request, jsonify, redirect, send_from_directory, session, abort
@@ -26,7 +27,8 @@ load_dotenv(BASE_DIR / 'api.env')
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
-from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError
+from email.utils import parseaddr
+from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.work_agent_service import work_agent_service
@@ -219,6 +221,100 @@ def config():
         "googleClientId": os.getenv('GOOGLE_CLIENT_ID', ''),
         "backendAuthUrl": "/auth/google"
     })
+
+
+# MAILMATE_REMOTE_COMPUTE_STATUS_START
+def _mailmate_probe_local_compute():
+    base = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:2806/v1").rstrip("/")
+    started = time.perf_counter()
+    try:
+        response = requests.get(f"{base}/models", timeout=1.6)
+        return {
+            "configured": True,
+            "available": bool(response.ok),
+            "status": response.status_code,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+        }
+    except Exception:
+        return {
+            "configured": True,
+            "available": False,
+            "status": None,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+        }
+
+
+def _mailmate_probe_remote_compute():
+    base = os.getenv("MAILMATE_REMOTE_WORKER_URL", "").strip().rstrip("/")
+    if not base:
+        return {
+            "configured": False,
+            "available": False,
+            "status": None,
+            "latency_ms": None,
+        }
+
+    started = time.perf_counter()
+    try:
+        response = requests.get(f"{base}/health", timeout=1.8)
+        payload = response.json() if response.content else {}
+        return {
+            "configured": True,
+            "available": bool(response.ok and payload.get("ok")),
+            "status": response.status_code,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "worker": payload.get("worker"),
+            "retention": payload.get("retention"),
+        }
+    except Exception:
+        return {
+            "configured": True,
+            "available": False,
+            "status": None,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+        }
+
+
+@app.route("/api/compute/status")
+def mailmate_compute_status():
+    local = _mailmate_probe_local_compute()
+    remote = _mailmate_probe_remote_compute()
+
+    ready = bool(local.get("available") or remote.get("available"))
+    mode = (
+        "local"
+        if local.get("available")
+        else "remote_local"
+        if remote.get("available")
+        else "unavailable"
+    )
+
+    label = os.getenv(
+        "MAILMATE_COMPUTE_LABEL",
+        "Priyam's hotspot"
+    ).strip() or "Priyam's hotspot"
+
+    return jsonify({
+        "ok": True,
+        "ready": ready,
+        "mode": mode,
+        "local": local,
+        "remote": remote,
+        "connect_label": label,
+        "requires_hotspot": bool(
+            not local.get("available")
+            and remote.get("configured")
+            and not remote.get("available")
+        ),
+        "message": (
+            "Kyle Work is ready."
+            if ready
+            else f"Connect to {label} to enable Kyle Work."
+            if remote.get("configured")
+            else "Kyle Work needs a local or configured team workstation."
+        ),
+    })
+# MAILMATE_REMOTE_COMPUTE_STATUS_END
 
 def _oauth_origin():
     redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
@@ -865,6 +961,35 @@ def gmail_message_read(message_id):
         }), status
 
 
+@app.route('/api/mail/send', methods=['POST'])
+def send_mail_endpoint():
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    data = request.get_json(silent=True) or {}
+    to = str(data.get('to') or data.get('recipient') or '').strip()
+    subject = str(data.get('subject') or 'No Subject').strip()
+    body = str(data.get('body') or '').strip()
+    thread_id = data.get('thread_id')
+    in_reply_to = data.get('in_reply_to')
+    draft_id = data.get('draft_id')
+
+    if not to or not body:
+        return jsonify({'error': 'Recipient and body are required'}), 400
+
+    try:
+        if draft_id:
+            result = send_gmail_draft(draft_id)
+        else:
+            result = send_gmail_direct(to=to, subject=subject, body=body, thread_id=thread_id, in_reply_to=in_reply_to)
+        msg_id = result.get('id') if isinstance(result, dict) else (result if isinstance(result, str) else None)
+        return jsonify({'ok': True, 'result': result, 'message_id': msg_id})
+    except Exception as exc:
+        app.logger.exception('Send mail failed')
+        return jsonify({'error': str(exc)}), 500
+
+
 @app.route('/api/calendar/ai-sync', methods=['POST'])
 def calendar_ai_sync():
     profile = get_user_profile()
@@ -1024,10 +1149,10 @@ def _event_brief_item(event):
     try:
         if 'T' in start:
             dt = datetime.fromisoformat(start.replace('Z', '+00:00')).astimezone(APP_TZ)
-            label = dt.strftime('%a %d %b · %-I:%M %p') if os.name != 'nt' else dt.strftime('%a %d %b · %#I:%M %p')
+            label = dt.strftime('%a %d %b Â· %-I:%M %p') if os.name != 'nt' else dt.strftime('%a %d %b Â· %#I:%M %p')
         elif start:
             dt = datetime.fromisoformat(start[:10])
-            label = dt.strftime('%a %d %b · all day')
+            label = dt.strftime('%a %d %b Â· all day')
     except Exception:
         pass
     return {
@@ -1407,6 +1532,41 @@ def _sanitize_agent_action(action, known):
             'description': _agent_text(payload.get('description'), 600),
         }}}
 
+    if tool == 'mail.compose':
+        return {
+            'tool': tool,
+            'args': {
+                'recipient': _agent_text(args.get('recipient'), 160),
+                'to': _agent_text(args.get('to'), 160),
+                'subject': _agent_text(args.get('subject') or 'No Subject', 200),
+                'body': _agent_text(args.get('body'), 5000),
+            }
+        }
+    if tool == 'mail.reply':
+        return {
+            'tool': tool,
+            'args': {
+                'recipient': _agent_text(args.get('recipient'), 160),
+                'to': _agent_text(args.get('to'), 160),
+                'subject': _agent_text(args.get('subject') or 'Re: Update', 200),
+                'body': _agent_text(args.get('body'), 5000),
+                'thread_id': _agent_text(args.get('thread_id'), 120),
+                'in_reply_to': _agent_text(args.get('in_reply_to'), 120),
+            }
+        }
+    if tool == 'mail.update_draft':
+        return {
+            'tool': tool,
+            'args': {
+                'subject': _agent_text(args.get('subject'), 200) if args.get('subject') else None,
+                'body': _agent_text(args.get('body'), 5000),
+            }
+        }
+    if tool == 'mail.send_draft':
+        return {'tool': tool, 'args': {}}
+    if tool == 'mail.close_composer':
+        return {'tool': tool, 'args': {}}
+
     expected = {
         'inbox.open_email': 'email',
         'calendar.open_event': 'calendar-event',
@@ -1526,6 +1686,202 @@ def _infer_agent_actions(message, resolved, context=None):
     return actions
 
 
+def _find_contacts_by_name(query, emails):
+    query_clean = str(query or '').strip().lower()
+    if not query_clean:
+        return []
+    contacts = {}
+    for email in emails or []:
+        sender = email.get('sender') or ''
+        name, addr = parseaddr(sender)
+        if not addr:
+            continue
+        key = addr.lower()
+        if key not in contacts:
+            contacts[key] = {
+                'name': name or addr.split('@')[0],
+                'email': addr,
+                'full': sender
+            }
+    matched = []
+    for key, c in contacts.items():
+        if query_clean in c['name'].lower() or query_clean in c['email'].lower():
+            matched.append(c)
+    return matched
+
+
+def _handle_mail_intent(message, active_draft, selected_email, context_emails, user_profile):
+    lower = message.lower().strip()
+    user_name = user_profile.get('name') or 'Priyam'
+
+    # Case 1: Active draft editing or sending in contextual composer
+    if active_draft and active_draft.get('body'):
+        if re.search(r'\b(send\s*(?:it|draft|email|now)?|looks\s+good,?\s+send)\b', lower):
+            return {
+                'reply': 'Sending the email now.',
+                'actions': [{'tool': 'mail.send_draft', 'args': {}}],
+                'mode': 'mail_composer'
+            }
+
+        if re.search(r'\b(cancel|close|dismiss|nevermind|discard)\b', lower):
+            return {
+                'reply': 'I closed the draft.',
+                'actions': [{'tool': 'mail.close_composer', 'args': {}}],
+                'mode': 'composer_closed'
+            }
+
+        edit_words = {'short', 'shorter', 'brief', 'briefer', 'concise', 'long', 'longer', 'casual',
+                      'informal', 'formal', 'professional', 'friendly', 'polite', 'tone', 'change',
+                      'edit', 'rewrite', 'modify', 'add', 'remove', 'replace', 'fix', 'tonight', 'tomorrow'}
+        if any(w in lower for w in edit_words) or (len(lower.split()) <= 15 and not re.search(r'\b(open|show|go to|calendar|inbox|work)\b', lower)):
+            current_sub = active_draft.get('subject') or ''
+            current_body = active_draft.get('body') or ''
+            prompt = (
+                f"You are Kyle, editing an email draft for {user_name}.\n"
+                f"User instruction: {message}\n"
+                f"Current Subject: {current_sub}\n"
+                f"Current Body:\n{current_body}\n\n"
+                f"Return ONLY the revised email body text. Keep the greeting and sign-off consistent."
+            )
+            revised_body = chat_with_kyle(prompt).strip()
+            return {
+                'reply': "I've updated the draft for you.",
+                'actions': [{
+                    'tool': 'mail.update_draft',
+                    'args': {'body': revised_body}
+                }],
+                'mode': 'mail_composer'
+            }
+
+    # Case 2: Reply intent
+    # Matches: "reply to Rupayan saying I'll send it tonight", "reply saying ...", "reply to this"
+    if re.search(r'\breply\b', lower):
+        target_name = None
+        name_match = re.search(r'\breply\s+to\s+([A-Za-z]+)\b', lower)
+        if name_match and name_match.group(1).lower() not in {'this', 'that', 'the', 'it', 'me'}:
+            target_name = name_match.group(1)
+
+        target_contact = None
+        thread_id = None
+        in_reply_to = None
+        thread_subject = 'Update'
+
+        if target_name:
+            contacts = _find_contacts_by_name(target_name, context_emails)
+            if len(contacts) > 1:
+                options_str = ", ".join([f"{c['name']} ({c['email']})" for c in contacts])
+                return {
+                    'reply': f"Which {target_name.capitalize()}? I found: {options_str}",
+                    'actions': [],
+                    'mode': 'contact_disambiguation',
+                    'contacts': contacts
+                }
+            elif len(contacts) == 1:
+                target_contact = contacts[0]
+                matching_email = next((e for e in context_emails if target_contact['email'] in (e.get('sender') or '').lower()), None)
+                if matching_email:
+                    thread_id = matching_email.get('threadId') or matching_email.get('thread_id') or matching_email.get('id')
+                    in_reply_to = matching_email.get('id') or matching_email.get('gmail_id')
+                    thread_subject = matching_email.get('subject') or thread_subject
+            else:
+                target_contact = {'name': target_name.capitalize(), 'email': '', 'full': target_name.capitalize()}
+        elif selected_email:
+            s_name, s_addr = parseaddr(selected_email.get('sender') or '')
+            target_contact = {'name': s_name or 'Sender', 'email': s_addr, 'full': selected_email.get('sender') or ''}
+            thread_id = selected_email.get('threadId') or selected_email.get('thread_id') or selected_email.get('id')
+            in_reply_to = selected_email.get('id') or selected_email.get('gmail_id')
+            thread_subject = selected_email.get('subject') or thread_subject
+
+        if target_contact:
+            saying_m = re.search(r'\b(?:saying|that|to\s+say)\s+(.*)$', message, re.I)
+            user_saying = saying_m.group(1).strip() if saying_m else message
+
+            clean_sub = f"Re: {thread_subject}" if not thread_subject.lower().startswith('re:') else thread_subject
+            recipient_display = target_contact['name']
+            first_name = recipient_display.split()[0] if recipient_display else 'there'
+
+            prompt = (
+                f"You are Kyle, an AI assistant drafting a polite email reply from {user_name}.\n"
+                f"Recipient: {recipient_display} <{target_contact['email']}>\n"
+                f"Subject: {clean_sub}\n"
+                f"Instruction: {user_saying}\n\n"
+                f"Draft a concise, natural reply email. Include greeting ('Hi {first_name},'), the concise response message, and sign-off ('Regards,\n{user_name}').\n"
+                f"Return ONLY the email body text."
+            )
+            body = chat_with_kyle(prompt).strip()
+
+            return {
+                'reply': f"I prepared a reply to {first_name}. You can review it above, make edits, or click Send.",
+                'actions': [{
+                    'tool': 'mail.reply',
+                    'args': {
+                        'recipient': target_contact.get('full') or recipient_display,
+                        'to': target_contact['email'],
+                        'subject': clean_sub,
+                        'body': body,
+                        'thread_id': thread_id,
+                        'in_reply_to': in_reply_to
+                    }
+                }],
+                'mode': 'mail_composer'
+            }
+
+    # Case 3: Compose new email intent
+    # Matches: "Email Aarush and ask if he finished the report", "write an email to Aarush asking..."
+    compose_match = re.search(r'\b(?:email|write\s+(?:an?\s+)?email\s+to|compose\s+(?:an?\s+)?email\s+to|send\s+(?:an?\s+)?email\s+to)\s+([A-Za-z]+)\b', lower)
+    if compose_match:
+        target_name = compose_match.group(1)
+        if target_name.lower() not in {'this', 'that', 'the', 'it', 'me'}:
+            contacts = _find_contacts_by_name(target_name, context_emails)
+            if len(contacts) > 1:
+                options_str = ", ".join([f"{c['name']} ({c['email']})" for c in contacts])
+                return {
+                    'reply': f"Which {target_name.capitalize()}? I found: {options_str}",
+                    'actions': [],
+                    'mode': 'contact_disambiguation',
+                    'contacts': contacts
+                }
+            target_contact = contacts[0] if contacts else {'name': target_name.capitalize(), 'email': '', 'full': target_name.capitalize()}
+
+            intent_m = re.search(r'\b(?:and\s+ask|asking|about|saying|that)\s+(.*)$', message, re.I)
+            user_intent = intent_m.group(1).strip() if intent_m else message
+
+            first_name = target_contact['name'].split()[0]
+            prompt = (
+                f"You are Kyle, an AI assistant composing a new email from {user_name}.\n"
+                f"Recipient: {target_contact['name']} <{target_contact['email']}>\n"
+                f"User instruction: {user_intent}\n\n"
+                f"Return JSON with 'subject' (concise 3-6 words) and 'body' (greeting, concise message, sign-off 'Best,\n{user_name}').\n"
+                f"Format: {{\"subject\": \"...\", \"body\": \"...\"}}"
+            )
+            raw = chat_with_kyle(prompt).strip()
+            subject = 'Update'
+            body = f"Hi {first_name},\n\n{user_intent}\n\nBest,\n{user_name}"
+            try:
+                clean_json = re.sub(r'^```json\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+                parsed = json.loads(clean_json)
+                subject = parsed.get('subject') or subject
+                body = parsed.get('body') or body
+            except Exception:
+                pass
+
+            return {
+                'reply': f"I prepared a draft for {first_name}. Review it above, edit if needed, and send whenever you're ready.",
+                'actions': [{
+                    'tool': 'mail.compose',
+                    'args': {
+                        'recipient': target_contact.get('full') or target_contact['name'],
+                        'to': target_contact['email'],
+                        'subject': subject,
+                        'body': body
+                    }
+                }],
+                'mode': 'mail_composer'
+            }
+
+    return None
+
+
 @app.route('/api/kyle/agent', methods=['POST'])
 def kyle_agent_endpoint():
     data = request.get_json(silent=True) or {}
@@ -1543,6 +1899,36 @@ def kyle_agent_endpoint():
     ]
     known = _agent_known_references(ui_context, resolved)
 
+    active_draft = data.get('activeDraft')
+    selected_email = data.get('selectedEmail')
+
+    # Merge browser context with authoritative system_ctx
+    merged_context = dict(system_ctx)
+    if isinstance(data.get('context'), dict):
+        for k, v in data['context'].items():
+            if k not in merged_context:
+                merged_context[k] = v
+
+    # 1. Contextual Email Composer & Intent Handling
+    mail_intent_res = _handle_mail_intent(
+        message=message,
+        active_draft=active_draft,
+        selected_email=selected_email,
+        context_emails=merged_context.get('emails') or [],
+        user_profile=profile
+    )
+    if mail_intent_res:
+        reply = mail_intent_res.get('reply') or ''
+        return jsonify({
+            'reply': reply,
+            'text': reply,
+            'voice': _compact_voice(reply),
+            'actions': mail_intent_res.get('actions') or [],
+            'mode': mail_intent_res.get('mode', 'mail_composer'),
+            'contacts': mail_intent_res.get('contacts'),
+            'context_version': system_ctx.get('context_version', 1),
+        })
+
     if re.search(r'\b(this|that|it|this one|that one|these|those)\b', message, re.I) and not resolved:
         return jsonify({
             'reply': 'Which item do you mean? Click it, then ask me again.',
@@ -1552,12 +1938,6 @@ def kyle_agent_endpoint():
         })
 
     actions = []
-    # Merge browser context with authoritative system_ctx
-    merged_context = dict(system_ctx)
-    if isinstance(data.get('context'), dict):
-        for k, v in data['context'].items():
-            if k not in merged_context:
-                merged_context[k] = v
 
     for candidate in _infer_agent_actions(message, resolved, context=merged_context):
         sanitized = _sanitize_agent_action(candidate, known)
@@ -1645,3 +2025,4 @@ if __name__ == '__main__':
     print(f"[Static] project root: {BASE_DIR}")
     print(f"[Static] styles.css: {(BASE_DIR / 'styles.css').is_file()}")
     app.run(port=port, host='0.0.0.0', debug=True, use_reloader=False)
+
