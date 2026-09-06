@@ -29,7 +29,7 @@ os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 from services.whisper_service import whisper_service
 from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
-from services.ai_service import get_dashboard_overview, chat_with_kyle
+from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.supabase_cache_service import supabase_cache
 
 app = Flask(__name__, static_folder=None)
@@ -894,6 +894,188 @@ def _compact_voice(text, max_chars=190):
     if len(spoken) > max_chars:
         spoken = spoken[:max_chars].rsplit(' ', 1)[0].rstrip(' ,;:') + '.'
     return spoken
+
+
+def _agent_text(value, limit=240):
+    return re.sub(r'\s+', ' ', str(value or '')).strip()[:limit]
+
+
+def _agent_reference(value):
+    value = value or {}
+    ref_type = _agent_text(value.get('type'), 48)
+    ref_id = _agent_text(value.get('id'), 180)
+    if not ref_type or not ref_id:
+        return None
+    metadata = {}
+    for key, item in list((value.get('metadata') or {}).items())[:8]:
+        if item is not None and item != '':
+            metadata[_agent_text(key, 48)] = _agent_text(item)
+    return {
+        'type': ref_type,
+        'id': ref_id,
+        'label': _agent_text(value.get('label') or ref_id),
+        'page': _agent_text(value.get('page'), 48),
+        'metadata': metadata,
+    }
+
+
+def _agent_ui_context(value):
+    value = value or {}
+    refs = value.get('references') or {}
+    return {
+        'page': _agent_text(value.get('page') or 'overview', 48),
+        'selected': _agent_reference(value.get('selected')),
+        'open': _agent_reference(value.get('open')),
+        'hovered': _agent_reference(value.get('hovered')),
+        'focused': _agent_reference(value.get('focused')),
+        'lastClicked': _agent_reference(value.get('lastClicked')),
+        'selectedText': _agent_text(value.get('selectedText'), 280),
+        'selectedTextSource': _agent_reference(value.get('selectedTextSource')),
+        'references': {
+            'lastMentioned': _agent_reference(refs.get('lastMentioned')),
+            'lastOpened': _agent_reference(refs.get('lastOpened')),
+            'lastCreated': _agent_reference(refs.get('lastCreated')),
+            'lastModified': _agent_reference(refs.get('lastModified')),
+            'lastManipulated': _agent_reference(refs.get('lastManipulated')),
+        },
+        'visibleObjects': [
+            item for item in (_agent_reference(ref) for ref in (value.get('visibleObjects') or [])[:12]) if item
+        ],
+    }
+
+
+def _agent_known_references(ui_context, resolved):
+    candidates = [
+        ui_context.get('selected'), ui_context.get('open'), ui_context.get('hovered'),
+        ui_context.get('focused'), ui_context.get('lastClicked'),
+        ui_context.get('selectedTextSource'),
+        *(ui_context.get('references') or {}).values(),
+        *(ui_context.get('visibleObjects') or []),
+        *resolved,
+    ]
+    return {f"{ref['type']}:{ref['id']}": ref for ref in candidates if ref}
+
+
+def _sanitize_agent_action(action, known):
+    action = action or {}
+    tool = _agent_text(action.get('tool'), 64)
+    args = action.get('args') or {}
+    pages = {'overview', 'inbox', 'work', 'calendar', 'automations', 'status', 'integrations', 'settings'}
+    filters = {'all', 'important', 'action', 'unread'}
+    if tool == 'navigation.open' and args.get('page') in pages:
+        return {'tool': tool, 'args': {'page': args['page']}}
+    if tool == 'inbox.set_filter' and args.get('filter') in filters:
+        return {'tool': tool, 'args': {'filter': args['filter']}}
+    if tool == 'ui.toast':
+        message = _agent_text(args.get('message'), 180)
+        return {'tool': tool, 'args': {'message': message}} if message else None
+
+    expected = {
+        'inbox.open_email': 'email',
+        'calendar.open_event': 'calendar-event',
+        'work.focus': 'work-item',
+        'ui.highlight': None,
+        'ui.scroll_to': None,
+    }
+    if tool not in expected:
+        return None
+    reference = _agent_reference(args.get('reference') or args)
+    if not reference or (expected[tool] and reference['type'] != expected[tool]):
+        return None
+    exact = known.get(f"{reference['type']}:{reference['id']}")
+    return {'tool': tool, 'args': {'reference': exact}} if exact else None
+
+
+def _infer_agent_actions(message, resolved):
+    lower = message.lower()
+    reference = resolved[0] if resolved else None
+    actions = []
+    pages = [
+        ('calendar', r'\b(open|go to|show)\s+(my\s+)?calendar\b'),
+        ('inbox', r'\b(open|go to|show)\s+(my\s+)?inbox\b'),
+        ('work', r'\b(open|go to|show)\s+(my\s+)?work\b'),
+        ('overview', r'\b(open|go to|show)\s+(the\s+)?overview\b'),
+        ('status', r'\b(open|go to|show)\s+(the\s+)?status\b'),
+    ]
+    for page, pattern in pages:
+        if re.search(pattern, lower):
+            actions.append({'tool': 'navigation.open', 'args': {'page': page}})
+            break
+
+    filter_name = 'unread' if re.search(r'\bunread\b', lower) else (
+        'important' if re.search(r'\bimportant\b', lower) else (
+            'action' if re.search(r'\b(requires action|action items?)\b', lower) else None
+        )
+    )
+    if filter_name and re.search(r'\b(show|filter|open|find)\b', lower):
+        actions.append({'tool': 'inbox.set_filter', 'args': {'filter': filter_name}})
+
+    if reference and reference['type'] == 'email' and re.search(r'\b(open|show|read|reply|respond)\b', lower):
+        actions.append({'tool': 'inbox.open_email', 'args': {'reference': reference}})
+    elif reference and reference['type'] == 'calendar-event' and re.search(r'\b(open|show|edit|move|reschedule|change)\b', lower):
+        actions.append({'tool': 'calendar.open_event', 'args': {'reference': reference}})
+    elif reference and reference['type'] == 'work-item' and re.search(r'\b(open|show|do|work|focus)\b', lower):
+        actions.append({'tool': 'work.focus', 'args': {'reference': reference}})
+
+    if reference and re.search(r'\b(where|which|highlight|point)\b', lower):
+        actions.extend([
+            {'tool': 'ui.scroll_to', 'args': {'reference': reference}},
+            {'tool': 'ui.highlight', 'args': {'reference': reference}},
+        ])
+    return actions
+
+
+@app.route('/api/kyle/agent', methods=['POST'])
+def kyle_agent_endpoint():
+    data = request.get_json(silent=True) or {}
+    message = _agent_text(data.get('message'), 1200)
+    if not message:
+        return jsonify({'error': 'message is required'}), 400
+
+    ui_context = _agent_ui_context(data.get('uiContext'))
+    resolved = [
+        item for item in (_agent_reference(ref) for ref in (data.get('resolvedReferences') or [])[:4]) if item
+    ]
+    known = _agent_known_references(ui_context, resolved)
+
+    if re.search(r'\b(this|that|it|this one|that one|these|those)\b', message, re.I) and not resolved:
+        return jsonify({
+            'reply': 'Which item do you mean? Click it, then ask me again.',
+            'voice': 'Which item do you mean? Click it, then ask me again.',
+            'actions': [],
+            'mode': 'clarification',
+        })
+
+    actions = []
+    for candidate in _infer_agent_actions(message, resolved):
+        sanitized = _sanitize_agent_action(candidate, known)
+        if sanitized and sanitized not in actions:
+            actions.append(sanitized)
+
+    compact = {
+        'mail': _compact_context(data.get('context') or {}),
+        'ui': ui_context,
+        'resolved': resolved,
+        'plannedActions': actions,
+    }
+    reply = generate_kyle_agent_reply(message, compact)
+    if not reply:
+        if resolved:
+            reply = f"I know you mean {resolved[0]['label']}. " + (
+                'I opened the right place for it.' if actions else 'What would you like me to do with it?'
+            )
+        elif actions:
+            reply = 'Done. I opened the right place.'
+        else:
+            reply = 'I am with you. What should we handle first?'
+
+    return jsonify({
+        'reply': reply,
+        'text': reply,
+        'voice': _compact_voice(reply),
+        'actions': actions[:5],
+        'mode': 'deterministic-context',
+    })
 
 
 @app.route('/api/kyle/chat', methods=['POST'])

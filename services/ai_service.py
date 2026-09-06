@@ -66,3 +66,24 @@ def chat_with_kyle(message):
         return res.text
     except Exception as e:
         return f"Kyle error: {str(e)}"
+
+
+def generate_kyle_agent_reply(message, compact_context):
+    """Generate speech-friendly wording only; UI actions are resolved elsewhere."""
+    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+    model = genai.GenerativeModel('gemini-3.5-flash-lite')
+    prompt = f"""You are Kyle, the calm operating agent inside Mailmate.
+Reply like a person speaking, in one or two short sentences and at most 40 words.
+No markdown, bullets, headings, or technical narration.
+The app has already resolved words like this, that, and it. Treat the resolved object as authoritative.
+Never claim an email was sent or data was deleted. If an editor was opened, say it is open for review.
+
+Compact context: {json.dumps(compact_context, ensure_ascii=False)}
+User: {message}
+"""
+    try:
+        response = model.generate_content(prompt)
+        return str(response.text or '').strip()
+    except Exception as exc:
+        print('Kyle agent reply error:', exc)
+        return ''

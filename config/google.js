@@ -3,10 +3,12 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', 'api.env') });
 require('dotenv').config();
 
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
-);
+function createOAuthClient(redirectUri = process.env.GOOGLE_REDIRECT_URI) {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    redirectUri
+  );
+}
 
-module.exports = oauth2Client;
+module.exports = { createOAuthClient };
