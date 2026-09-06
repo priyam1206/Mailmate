@@ -4,8 +4,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const logoDots = [];
   const pointer = { x: -2000, y: -2000 };
 
-  // Video autoplay handling (remains hidden on landing, blurred on scroll)
+  // Universal portable image fallback resolver: works in any directory structure
+  document.querySelectorAll('img').forEach(img => {
+    img.addEventListener('error', function () {
+      if (this.dataset.fallbackTried) return;
+      this.dataset.fallbackTried = '1';
+      const currentSrc = this.getAttribute('src') || '';
+      const filename = currentSrc.split('/').pop();
+      if (currentSrc.includes('assets/')) {
+        this.src = './' + filename;
+      } else {
+        this.src = './assets/images/' + filename;
+      }
+    });
+  });
+
+  // Video autoplay handling with error fallback
   const bgVideo = document.getElementById('bgVideo');
+  const videoFallbackBg = document.getElementById('videoFallbackBg');
+
   if (bgVideo) {
     const playPromise = bgVideo.play();
     if (playPromise !== undefined) {
@@ -21,6 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('touchstart', startPlay, { once: true });
       });
     }
+    bgVideo.addEventListener('error', () => {
+      // If video file cannot be found or decoded on another computer, fallback background displays cleanly
+      if (videoFallbackBg) videoFallbackBg.style.display = 'block';
+    });
   }
 
   // Ambient background particles
@@ -189,9 +210,12 @@ document.addEventListener('DOMContentLoaded', () => {
     currentScatter += (targetScatter - currentScatter) * 0.085;
 
     // Background transition: Hidden on landing, blurred video & pink atmosphere on scroll
+    const videoOpacity = Math.min(1, Math.max(0, (currentScatter - 0.1) / 0.65));
     if (bgVideo) {
-      const videoOpacity = Math.min(1, Math.max(0, (currentScatter - 0.1) / 0.65));
       bgVideo.style.opacity = videoOpacity;
+    }
+    if (videoFallbackBg) {
+      videoFallbackBg.style.opacity = videoOpacity;
     }
     if (videoOverlay) {
       const overlayOpacity = Math.min(1, Math.max(0, (currentScatter - 0.08) / 0.7));
@@ -307,23 +331,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       googleAuthBtn.classList.add('is-loading');
       authStatusMsg.className = 'auth-status-msg';
-      authStatusMsg.textContent = 'Connecting to Google Authentication...';
+      authStatusMsg.textContent = 'Connecting to Gmail & Workspace Thread Analyzer...';
 
       setTimeout(() => {
         googleAuthBtn.classList.remove('is-loading');
         authStatusMsg.classList.add('is-success');
-        authStatusMsg.textContent = '✓ Authenticated! Welcome CipherSquad Hacker';
+        authStatusMsg.textContent = '✓ Inbox Connected! Agent Harness initialized.';
       }, 1400);
     });
   }
 
-  // Return to top button inside auth card
-  const backToTopBtn = document.getElementById('backToTopBtn');
-  if (backToTopBtn) {
-    backToTopBtn.addEventListener('click', () => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  }
 
   // Load font first so canvas text metrics are crisp
   if (document.fonts && document.fonts.ready) {
