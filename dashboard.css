@@ -1744,54 +1744,70 @@ h2 { font-size: 1rem; }
 .privacy-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 2px 7px;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
   border-radius: 999px;
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
-.privacy-pill.private {
-  background: rgba(239, 68, 68, 0.12);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.25);
-}
 .privacy-pill.work-active {
-  background: rgba(168, 85, 247, 0.15);
-  color: #d8b4fe;
-  border: 1px solid rgba(168, 85, 247, 0.3);
+  background: #f3e8ff;
+  border: 1px solid #d8b4fe;
+  color: #6b21a8;
 }
-.privacy-pill.ai-safe {
-  background: rgba(14, 165, 233, 0.12);
-  color: #7dd3fc;
-  border: 1px solid rgba(14, 165, 233, 0.25);
+.privacy-pill.private {
+  background: #fff1f2;
+  border: 1px solid #fda4af;
+  color: #9f1239;
 }
 
 .email-privacy-card {
   margin-top: 10px;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-radius: 8px;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.email-privacy-card.private {
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #fecaca;
-}
 .email-privacy-card.safe {
-  background: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(14, 165, 233, 0.2);
-  color: #bae6fd;
+  background: #eef6ff;
+  border: 1px solid #93c5fd;
+  color: #172033;
+}
+.email-privacy-card.safe strong {
+  color: #111827;
+}
+.email-privacy-card.safe p {
+  color: #475569;
+  opacity: 1;
+}
+.email-privacy-card.private {
+  background: #fff1f2;
+  border: 1px solid #fda4af;
+  color: #881337;
+}
+.email-privacy-card.private strong {
+  color: #4c0519;
+}
+.email-privacy-card.private p {
+  color: #9f1239;
+  opacity: 1;
 }
 .email-privacy-card.work {
-  background: rgba(168, 85, 247, 0.08);
-  border: 1px solid rgba(168, 85, 247, 0.2);
-  color: #e9d5ff;
+  background: #faf5ff;
+  border: 1px solid #d8b4fe;
+  color: #581c87;
+}
+.email-privacy-card.work strong {
+  color: #3b0764;
+}
+.email-privacy-card.work p {
+  color: #6b21a8;
+  opacity: 1;
 }
 
 /* Badges for Work Job Statuses */

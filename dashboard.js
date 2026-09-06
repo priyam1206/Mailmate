@@ -288,19 +288,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderCacheSettings() {
     const status = $('cacheSettingsStatus');
     const policyText = $('cachePolicyText');
-    const supabase = state.health?.supabase || {};
-    const policy = state.health?.cachePolicy || {};
 
     if (status) {
-      status.textContent = supabase.ready
-        ? (supabase.mode === 'processed-context' ? 'Supabase · full context' : 'Supabase · legacy cache')
-        : (supabase.configured ? 'Supabase error' : 'Disabled');
+      status.textContent = 'Active · Zero retention (RAM-only)';
     }
 
     if (policyText) {
-      const syncMins = Math.max(1, Math.round((policy.syncCheckSeconds || 300) / 60));
-      const reprocessMins = Math.max(1, Math.round((policy.reprocessSeconds || 1800) / 60));
-      policyText.textContent = `Check Gmail for changes about every ${syncMins} min. Reprocess semantic context about every ${reprocessMins} min, or immediately when Gmail changes.`;
+      policyText.textContent = 'Raw mailbox content is kept in transient browser RAM only. Privacy gate filters all sensitive correspondence locally before AI summarization.';
     }
   }
 
@@ -478,7 +472,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (gate.ai_allowed === false) {
       return `<span class="privacy-pill private" title="Private: Excluded from AI &amp; Work Agent (${escapeHtml(gate.reason || gate.label || 'Sensitive')})"><i class="fas fa-shield-halved"></i> Private</span>`;
     }
-    return `<span class="privacy-pill ai-safe" title="Safe for local AI overview"><i class="fas fa-eye"></i> AI Safe</span>`;
+    // Ordinary safe mail has no badge to eliminate visual noise
+    return '';
   }
 
   function privacyDetailBox(gate) {
@@ -487,38 +482,38 @@ document.addEventListener('DOMContentLoaded', () => {
       return `
         <div class="email-privacy-card private">
           <div style="display:flex;align-items:center;gap:8px;">
-            <i class="fas fa-shield-halved" style="font-size:1.1rem;color:#f87171;"></i>
+            <i class="fas fa-shield-halved" style="font-size:1.1rem;color:#f43f5e;"></i>
             <div>
               <strong>Display Plane Only</strong> · Excluded from AI &amp; Work Agent
-              <p style="margin:2px 0 0;font-size:0.75rem;opacity:0.85;">${escapeHtml(gate.reason || 'Contains financial, security, or sensitive information.')}</p>
+              <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(gate.reason || 'Contains financial, security, or sensitive information.')}</p>
             </div>
           </div>
-          <span style="font-size:0.72rem;background:rgba(239,68,68,0.2);padding:2px 8px;border-radius:6px;white-space:nowrap;">No AI Transmission</span>
+          <span style="font-size:0.72rem;background:#ffe4e6;color:#9f1239;padding:2px 8px;border-radius:6px;white-space:nowrap;font-weight:600;">Private</span>
         </div>`;
     }
     if (gate.work_agent_allowed) {
       return `
         <div class="email-privacy-card work">
           <div style="display:flex;align-items:center;gap:8px;">
-            <i class="fas fa-robot" style="font-size:1.1rem;color:#c084fc;"></i>
+            <i class="fas fa-robot" style="font-size:1.1rem;color:#9333ea;"></i>
             <div>
               <strong>Actionable Task Plane</strong> · Work Agent active
-              <p style="margin:2px 0 0;font-size:0.75rem;opacity:0.85;">${escapeHtml(gate.reason || 'Coursework or project deliverable.')}</p>
+              <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(gate.reason || 'Coursework or project deliverable.')}</p>
             </div>
           </div>
-          <span style="font-size:0.72rem;background:rgba(168,85,247,0.2);padding:2px 8px;border-radius:6px;white-space:nowrap;">Autonomous Prep</span>
+          <span style="font-size:0.72rem;background:#f3e8ff;color:#6b21a8;padding:2px 8px;border-radius:6px;white-space:nowrap;font-weight:600;">Work Active</span>
         </div>`;
     }
     return `
       <div class="email-privacy-card safe">
         <div style="display:flex;align-items:center;gap:8px;">
-          <i class="fas fa-circle-check" style="font-size:1.1rem;color:#38bdf8;"></i>
+          <i class="fas fa-circle-check" style="font-size:1.1rem;color:#0284c7;"></i>
           <div>
-            <strong>General Communication</strong> · Safe for local AI overview
-            <p style="margin:2px 0 0;font-size:0.75rem;opacity:0.85;">${escapeHtml(gate.reason || 'Direct correspondence; suitable for contextual summarization.')}</p>
+            <strong>Display Only</strong> · Safe for local AI overview
+            <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(gate.reason || 'Direct correspondence; suitable for contextual summarization.')}</p>
           </div>
         </div>
-        <span style="font-size:0.72rem;background:rgba(14,165,233,0.2);padding:2px 8px;border-radius:6px;white-space:nowrap;">AI Safe</span>
+        <span style="font-size:0.72rem;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:6px;white-space:nowrap;font-weight:600;">Display only</span>
       </div>`;
   }
 
@@ -1370,7 +1365,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ['Gmail draft & send permission', h.gmailWrite],
       ['Google Calendar read/write', h.calendarReadWrite],
       ['Gemini', h.geminiConfigured],
-      ['Supabase cache', h.supabaseConfigured],
+      ['Local Privacy Gate', true],
       ['Browser speech recognition', Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)],
       ['Browser text-to-speech', 'speechSynthesis' in window],
       ['Kyle action registry', Boolean(window.KyleActions)]
@@ -1401,7 +1396,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ['Google Gmail (Draft & Send)', h.gmailWrite],
       ['Google Calendar', h.calendarReadWrite],
       ['Gemini', h.geminiConfigured],
-      ['Supabase', h.supabaseConfigured],
+      ['Local Privacy Gate', true],
       ['Browser speech recognition', Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)],
       ['Browser TTS', 'speechSynthesis' in window]
     ];

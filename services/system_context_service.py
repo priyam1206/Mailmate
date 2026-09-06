@@ -7,7 +7,6 @@ import os
 from services.google_service import get_user_profile
 from services.work_agent_service import work_agent_service
 from services.calendar_service import list_events as calendar_list_events
-from services.supabase_cache_service import supabase_cache
 
 _APP_TZ = timezone(timedelta(hours=5, minutes=30))  # Default fallback IST
 
@@ -132,18 +131,9 @@ class SystemContextService:
         except Exception as e:
             print(f"[SystemContext] Calendar fetch/conflict error: {e}")
 
-        # 4. Mail & Needs Attention Context (from Supabase cache if available)
+        # 4. Mail & Needs Attention Context
         needs_attention = []
         recent_emails_count = 0
-        try:
-            if supabase_cache.enabled and user_id:
-                cached = supabase_cache.get_cached_dashboard(user_id)
-                if cached and cached.get("payload"):
-                    payload = cached["payload"]
-                    needs_attention = payload.get("needs_attention") or []
-                    recent_emails_count = len(payload.get("emails") or [])
-        except Exception as e:
-            print(f"[SystemContext] Mail cache read error: {e}")
 
         with self._lock:
             self._context_version += 1

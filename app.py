@@ -29,7 +29,6 @@ os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
-from services.supabase_cache_service import supabase_cache
 from services.work_agent_service import work_agent_service
 from services.whisper_service import whisper_service
 from services.privacy_gate import PrivacyGate
@@ -64,8 +63,6 @@ def _load_app_timezone():
 APP_TZ = _load_app_timezone()
 CACHE_SYNC_SECONDS = max(60, int(os.getenv('CACHE_SYNC_SECONDS', '300')))
 CACHE_REPROCESS_SECONDS = max(CACHE_SYNC_SECONDS, int(os.getenv('CACHE_REPROCESS_SECONDS', '1800')))
-_refresh_lock = threading.Lock()
-_refreshing_users = set()
 AI_CALENDAR_SYNC_SECONDS = max(30, int(os.getenv('AI_CALENDAR_SYNC_SECONDS', '180')))
 _ai_calendar_last_sync = {}
 CALENDAR_DISMISSALS_FILE = DATA_DIR / 'calendar_dismissals.json'
@@ -191,9 +188,9 @@ def health():
     return jsonify({
         "ok": True,
         "googleClientConfigured": bool(os.getenv('GOOGLE_CLIENT_ID')),
-        "geminiConfigured": bool(os.getenv('GEMINI_API_KEY')),
-        "supabaseConfigured": supabase_cache.configured,
-        "supabase": supabase_cache.status(),
+        "supabaseConfigured": False,
+        "supabase": {"enabled": False, "configured": False, "ready": False, "mode": "disabled"},
+        "privacyGate": {"enabled": True, "mode": "deterministic-local", "centralRetention": "disabled"},
         "cachePolicy": {"syncCheckSeconds": CACHE_SYNC_SECONDS, "reprocessSeconds": CACHE_REPROCESS_SECONDS},
         "elevenLabsConfigured": bool(os.getenv('ELEVENLABS_API_KEY')),
         "calendar": calendar_access_status(),
@@ -319,25 +316,6 @@ def _parse_utc(value):
         return dt.astimezone(timezone.utc)
     except Exception:
         return None
-
-
-def _cache_age_seconds(cache_row, field):
-    dt = _parse_utc((cache_row or {}).get(field))
-    return None if dt is None else max(0, (_utc_now() - dt).total_seconds())
-
-
-def _cached_response(cache_row, profile, user_row):
-    payload = dict((cache_row or {}).get('payload') or {})
-    payload['cached'] = True
-    payload['cache_mode'] = (cache_row or {}).get('mode')
-    payload['cache_processed_at'] = (cache_row or {}).get('processed_at')
-    payload['cache_last_checked_at'] = (cache_row or {}).get('last_checked_at')
-    payload['user'] = profile
-    payload['user_id'] = profile.get('email') or profile.get('id') or ''
-    if user_row:
-        payload['supabase_user_id'] = user_row.get('id')
-    payload['calendar_dismissed_markers'] = sorted(_calendar_dismissed_markers(profile))
-    return payload
 
 
 def _deadline_target(item):
@@ -552,20 +530,10 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
     }
 
 
-def _build_live_dashboard(profile, user_row, force_ai=False):
+def _build_live_dashboard(profile, force_ai=False):
     threads, emails = get_gmail_threads()
     if not threads:
         raise RuntimeError('No Gmail threads are available')
-
-    supabase_id = user_row.get('id') if user_row else None
-    fingerprint = supabase_cache.fingerprint_emails(emails)
-    cached = supabase_cache.get_cached_dashboard(supabase_id) if supabase_id else None
-
-    same_source = bool(
-        cached and cached.get('source_fingerprint') == fingerprint
-    )
-    processed_age = _cache_age_seconds(cached, 'processed_at')
-    reprocess_due = processed_age is None or processed_age >= CACHE_REPROCESS_SECONDS
 
     # Two-Plane Architecture: Annotate all emails with Privacy Gate for Display Plane
     for email in emails:
@@ -583,58 +551,17 @@ def _build_live_dashboard(profile, user_row, force_ai=False):
 
     # Central mailbox retention is PROHIBITED (Gmail -> database = prohibited).
     # Raw emails remain transient in browser RAM only.
-
-    if cached and same_source and not force_ai and not reprocess_due:
-        supabase_cache.mark_checked(supabase_id)
-        response = _cached_response(cached, profile, user_row)
-        response['cache_revalidated'] = True
-        response['emails'] = emails
-        response['privacy_summary'] = privacy_summary
-        return response
-
     overview = get_dashboard_overview(threads)
     overview['emails'] = emails
     overview['privacy_summary'] = privacy_summary
     overview['user'] = profile
     overview['user_id'] = profile.get('email') or profile.get('id') or ''
     overview['cached'] = False
-    overview['source_changed'] = not same_source if cached else True
+    overview['source_changed'] = True
     overview['calendar_dismissed_markers'] = sorted(_calendar_dismissed_markers(profile))
     overview['ai_calendar_sync'] = _reconcile_ai_calendar(overview, profile=profile, force=True)
 
-    if supabase_id:
-        reprocess_after = (_utc_now() + timedelta(seconds=CACHE_REPROCESS_SECONDS)).isoformat()
-        # Save derived dashboard state only; never store raw mailbox content in remote tables
-        cacheable_payload = dict(overview)
-        cacheable_payload['emails'] = []
-        rich_saved = supabase_cache.save_processed_context(
-            supabase_id, cacheable_payload, fingerprint, reprocess_after
-        )
-        overview['cache_mode'] = 'processed-context' if rich_saved else 'legacy-cache'
-        overview['supabase_user_id'] = supabase_id
-
     return overview
-
-
-
-def _refresh_user_in_background(profile, user_row):
-    key = (user_row or {}).get('id') or profile.get('email') or 'default'
-    with _refresh_lock:
-        if key in _refreshing_users:
-            return False
-        _refreshing_users.add(key)
-
-    def runner():
-        try:
-            _build_live_dashboard(profile, user_row, force_ai=False)
-        except Exception as exc:
-            app.logger.warning('Background Gmail/cache refresh failed: %s', exc)
-        finally:
-            with _refresh_lock:
-                _refreshing_users.discard(key)
-
-    threading.Thread(target=runner, daemon=True, name=f'cache-refresh-{key}').start()
-    return True
 
 
 @app.route('/api/dashboard/overview')
@@ -645,54 +572,7 @@ def dashboard_overview():
             return jsonify({"error": "Not authenticated"}), 401
 
         force = str(request.args.get('refresh', '')).lower() in {'1', 'true', 'yes'}
-        user_row = supabase_cache.find_or_create_user(profile) if supabase_cache.enabled else None
-        supabase_id = user_row.get('id') if user_row else None
-
-        if supabase_id and not force:
-            cached = supabase_cache.get_cached_dashboard(supabase_id)
-            if cached:
-                checked_age = _cache_age_seconds(cached, 'last_checked_at')
-                processed_age = _cache_age_seconds(cached, 'processed_at')
-                should_check = checked_age is None or checked_age >= CACHE_SYNC_SECONDS
-                should_reprocess = processed_age is None or processed_age >= CACHE_REPROCESS_SECONDS
-
-                started = False
-                if should_check or should_reprocess:
-                    started = _refresh_user_in_background(profile, user_row)
-
-                response = _cached_response(cached, profile, user_row)
-                try:
-                    live_limit = max(100, min(500, len(response.get('emails') or []) * 4 or 100))
-                    response = _prune_payload_to_live_gmail(response, get_gmail_message_ids(limit=live_limit))
-                except Exception as prune_exc:
-                    app.logger.debug('Live Gmail prune skipped: %s', prune_exc)
-                response['background_refresh_started'] = started
-                response['ai_calendar_sync'] = _reconcile_ai_calendar(response, profile=profile, force=False)
-
-                # Ensure Privacy Gate metadata is attached to all Display Plane emails
-                emails = response.get('emails') or []
-                for email in emails:
-                    if 'privacy_gate' not in email:
-                        email['privacy_gate'] = PrivacyGate.evaluate(email)
-                ai_shielded = sum(1 for e in emails if not (e.get('privacy_gate') or {}).get('ai_allowed', True))
-                work_active = sum(1 for e in emails if (e.get('privacy_gate') or {}).get('work_agent_allowed', False))
-                response['privacy_summary'] = {
-                    "display_plane_total": len(emails),
-                    "ai_allowed_count": len(emails) - ai_shielded,
-                    "ai_shielded_count": ai_shielded,
-                    "work_active_count": work_active,
-                    "central_retention": "disabled (browser-ram-only)"
-                }
-
-                user_id = profile.get('email') or profile.get('id')
-
-                try:
-                    threading.Thread(target=work_agent_service.sync_and_enqueue, args=(user_id, response), daemon=True).start()
-                except Exception as sync_exc:
-                    app.logger.debug('Work agent sync skipped: %s', sync_exc)
-                return jsonify(response)
-
-        live_payload = _build_live_dashboard(profile, user_row, force_ai=force)
+        live_payload = _build_live_dashboard(profile, force_ai=force)
         user_id = profile.get('email') or profile.get('id')
         try:
             threading.Thread(target=work_agent_service.sync_and_enqueue, args=(user_id, live_payload), daemon=True).start()
@@ -923,18 +803,15 @@ def stt_transcribe():
 def cache_status():
     profile = get_user_profile()
     if not profile:
-        return jsonify({"authenticated": False, "supabase": supabase_cache.status()}), 401
+        return jsonify({"authenticated": False, "supabase": {"enabled": False, "configured": False, "ready": False}}), 401
 
-    user_row = supabase_cache.find_or_create_user(profile) if supabase_cache.enabled else None
-    cached = supabase_cache.get_cached_dashboard(user_row.get('id')) if user_row else None
     return jsonify({
         "authenticated": True,
-        "supabase": supabase_cache.status(),
+        "supabase": {"enabled": False, "configured": False, "ready": False, "mode": "disabled"},
         "cache": {
-            "available": bool(cached),
-            "mode": cached.get('mode') if cached else None,
-            "processed_at": cached.get('processed_at') if cached else None,
-            "last_checked_at": cached.get('last_checked_at') if cached else None,
+            "available": False,
+            "mode": "live-gmail",
+            "retention": "transient-browser-ram-only",
         },
         "policy": {
             "sync_check_seconds": CACHE_SYNC_SECONDS,
@@ -994,13 +871,12 @@ def calendar_ai_sync():
     if not profile:
         return jsonify({"error": "Not authenticated"}), 401
 
-    user_row = supabase_cache.find_or_create_user(profile) if supabase_cache.enabled else None
-    cached = supabase_cache.get_cached_dashboard(user_row.get('id')) if user_row else None
-    payload = (cached or {}).get('payload') or {}
-    if not payload:
-        return jsonify({"ok": True, "created_or_updated": 0, "reason": "No cached deadlines"})
+    threads, emails = get_gmail_threads()
+    if not threads:
+        return jsonify({"ok": True, "created_or_updated": 0, "reason": "No Gmail threads"})
 
-    result = _reconcile_ai_calendar(payload, profile=profile, force=True)
+    overview = get_dashboard_overview(threads)
+    result = _reconcile_ai_calendar(overview, profile=profile, force=True)
     return jsonify({"ok": True, **result})
 
 
@@ -1762,40 +1638,8 @@ def kyle_chat_endpoint():
         "context_version": system_ctx.get('context_version', 1),
     })
 
-def _cache_maintenance_loop():
-    while True:
-        time.sleep(CACHE_SYNC_SECONDS)
-        if not supabase_cache.enabled:
-            continue
-        try:
-            profile = get_user_profile()
-            if not profile:
-                continue
-            user_row = supabase_cache.find_or_create_user(profile)
-            if user_row:
-                _refresh_user_in_background(profile, user_row)
-        except Exception as exc:
-            app.logger.debug('Cache maintenance skipped: %s', exc)
-
-
-def _start_cache_maintenance():
-    if not supabase_cache.enabled:
-        print('[Cache] Supabase disabled; using live Gmail processing.')
-        return
-    status = supabase_cache.status()
-    print(
-        f"[Cache] Supabase ready; mode={status.get('mode')}; "
-        f"source-check={CACHE_SYNC_SECONDS}s; reprocess={CACHE_REPROCESS_SECONDS}s"
-    )
-    threading.Thread(
-        target=_cache_maintenance_loop,
-        daemon=True,
-        name='cache-maintenance'
-    ).start()
-
-
 if __name__ == '__main__':
-    _start_cache_maintenance()
+    print('[Mailmate] Running with zero central mailbox retention (transient browser RAM only).')
     port = int(os.getenv('PORT', 5000))
     print(f"Flask server running on http://localhost:{port}")
     print(f"[Static] project root: {BASE_DIR}")
