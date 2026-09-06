@@ -62,7 +62,7 @@ Fill in `api.env`, then start the app:
 npm start
 ```
 
-Open [http://localhost:5000](http://localhost:5000), choose **Continue with Google**, and allow read-only Gmail access.
+Open [http://localhost:5000](http://localhost:5000), choose **Continue with Google**, and allow Gmail and Calendar access. Mailmate uses Gmail modify access to mark opened messages as read and to support user-approved message actions.
 
 ## Environment Variables
 
@@ -96,7 +96,7 @@ SUPABASE_SECRET_KEY=your_supabase_service_role_key
 SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
 ```
 
-ElevenLabs and Whisper variables remain in the example only for future integration. The current Kyle implementation uses `SpeechRecognition`/`webkitSpeechRecognition` and `window.speechSynthesis` in the browser.
+ElevenLabs variables remain in the example only for future integration. The current Kyle implementation uses `SpeechRecognition`/`webkitSpeechRecognition` and `window.speechSynthesis` in the browser; it does not initialize or call Whisper.
 
 ## Google OAuth Setup
 
@@ -152,6 +152,7 @@ Expected local pages:
 
 - **Google access blocked:** add the Gmail account as an OAuth test user or publish the consent screen.
 - **No emails appear:** reconnect Google, then use Refresh on Overview and inspect the Status page.
+- **Opened mail stays unread:** reconnect Google once to grant the current `gmail.modify` scope; older saved tokens may contain only `gmail.readonly`.
 - **Authentication failed after a restart:** verify `GOOGLE_CLIENT_SECRET`, the callback URI, and Supabase token storage.
 - **Kyle cannot hear you:** use Chrome, allow microphone access, and check Browser speech recognition on Status.
 - **Gemini falls back:** verify `GEMINI_API_KEY` and `GEMINI_MODEL`, then restart the server.

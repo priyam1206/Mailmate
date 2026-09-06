@@ -31,23 +31,17 @@
     onMute: () => {
       store.muted = !store.muted;
       ui.setMuted(store.muted);
-      if (store.muted && store.current === store.states.SPEAKING) interrupt(false);
+      if (store.muted) interrupt(false);
     },
-    onText: prompt => handlePrompt(prompt)
+    onTextFocus: () => stopAudioForText(),
+    onText: prompt => {
+      stopAudioForText();
+      handlePrompt(prompt);
+    }
   });
 
-  async function whisperReady() {
-    try {
-      const response = await fetch(`${API_BASE}/api/stt/status`, { cache: 'no-store' });
-      if (!response.ok) return false;
-      const status = await response.json();
-      return Boolean(status.loaded || status.available);
-    } catch (_) {
-      return false;
-    }
-  }
-
   async function startListening() {
+    if (store.muted) return;
     if (store.current === store.states.LISTENING || store.current === store.states.TRANSCRIBING) return;
     interrupt(false);
 
@@ -55,76 +49,7 @@
     const run = activeRun;
     recognitionTranscript = '';
 
-    if (await whisperReady()) {
-      return startWhisperListening(run);
-    }
-
     return startBrowserListening(run);
-  }
-
-  async function startWhisperListening(run) {
-    try {
-      await audio.openMic();
-      if (run !== activeRun) return;
-
-      store.set(store.states.LISTENING);
-      ui.setLiveText('Listening…');
-      console.log('[Kyle Voice] local Whisper recording started');
-
-      currentRecorder = audio.startRecording(
-        null,
-        blob => transcribeWithWhisper(blob, run)
-      );
-
-      recognitionTimer = setTimeout(() => stopListening(), 12000);
-    } catch (error) {
-      console.warn('[Kyle Voice] local recording unavailable:', error.message || error);
-      audio.cleanupMic();
-      startBrowserListening(run);
-    }
-  }
-
-  async function transcribeWithWhisper(blob, run) {
-    clearTimeout(recognitionTimer);
-    recognitionTimer = null;
-    currentRecorder = null;
-    audio.cleanupMic();
-
-    if (run !== activeRun) return;
-
-    store.set(store.states.TRANSCRIBING);
-    ui.setLiveText('Transcribing…');
-
-    const form = new FormData();
-    form.append('audio', blob, 'kyle.webm');
-
-    try {
-      const response = await fetch(`${API_BASE}/api/stt/transcribe`, {
-        method: 'POST',
-        body: form
-      });
-      if (!response.ok) throw new Error(`STT returned ${response.status}`);
-      const data = await response.json();
-      const transcript = String(data.text || '').trim();
-
-      if (!transcript) {
-        store.set(store.states.IDLE);
-        ui.setLiveText('');
-        return;
-      }
-
-      console.log('[Kyle Voice] Whisper transcript ready');
-      ui.setLiveText(transcript);
-      handlePrompt(transcript, run);
-    } catch (error) {
-      console.warn('[Kyle Voice] Whisper failed:', error.message || error);
-      if (SpeechRecognition) {
-        ui.setLiveText('Local STT failed. Using browser fallback…', 1800);
-        setTimeout(() => startBrowserListening(run), 150);
-      } else {
-        fail('Voice transcription failed. You can still type to Kyle.');
-      }
-    }
   }
 
   async function startBrowserListening(run) {
@@ -215,6 +140,7 @@
   }
 
   function handleMicAmplitude(value) {
+    if (store.muted) return;
     if (store.current === store.states.LISTENING) {
       ui.setAmplitude(value, 0.016);
       return;
@@ -309,6 +235,12 @@
       if (transaction?.status === 'waiting-approval') {
         reply = 'The preview is ready. Say confirm to save it, or cancel to leave your calendar unchanged.';
         voice = reply;
+      } else {
+        const observed = transaction?.narration || narrateObservedActions(data.actions || []);
+        if (observed) {
+          reply = observed;
+          voice = observed;
+        }
       }
       applyCommand(data.command);
       if (data.brief?.items?.length) {
@@ -370,7 +302,7 @@
       bargePeaks = 0;
       startSpeechAnimation(text, run);
       // Only open the mic for barge-in after speech begins.
-      audio.openMic().catch(error => console.warn('[Kyle Voice] barge-in mic unavailable:', error.message || error));
+      if (!store.muted) audio.openMic().catch(error => console.warn('[Kyle Voice] barge-in mic unavailable:', error.message || error));
     };
 
     utterance.onend = () => finishSpeech(run);
@@ -453,8 +385,33 @@
     stopSpeech(true);
     audio.cleanupMic();
     store.set(store.states.INTERRUPTED);
-    if (thenListen) setTimeout(() => startListening(), 90);
+    if (thenListen && !store.muted) setTimeout(() => startListening(), 90);
     else store.set(store.states.IDLE);
+  }
+
+  function narrateObservedActions(actions) {
+    const filterAction = [...actions].reverse().find(action => action?.tool === 'inbox.set_filter');
+    if (filterAction) {
+      const filter = String(filterAction.args?.filter || 'all');
+      const active = document.querySelector('.filter-tab.active')?.dataset.filter;
+      if (active !== filter) return '';
+      const count = document.querySelectorAll('#emailList .email-item').length;
+      const nouns = {
+        important: ['important message', 'important messages'],
+        unread: ['unread message', 'unread messages'],
+        action: ['message requiring action', 'messages requiring action'],
+        all: ['message', 'messages']
+      };
+      const [singular, plural] = nouns[filter] || nouns.all;
+      if (count === 0) return `You don't have any ${plural} right now.`;
+      return count === 1 ? `I found 1 ${singular}.` : `I found ${count} ${plural}.`;
+    }
+    return '';
+  }
+
+  function stopAudioForText() {
+    const active = recognition || currentRecorder || [store.states.LISTENING, store.states.TRANSCRIBING, store.states.SPEAKING].includes(store.current);
+    if (active) interrupt(false);
   }
 
   function fail(message) {

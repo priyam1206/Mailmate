@@ -7,6 +7,34 @@
     if (state?.states?.[name]) state.set(state.states[name]);
   }
 
+  function observedNarration(transaction) {
+    const completed = (transaction.steps || []).filter(step => step.status === 'complete');
+    const filterStep = [...completed].reverse().find(step => step.action?.tool === 'inbox.set_filter');
+    if (filterStep) {
+      const count = Number(filterStep.observation?.details?.count || 0);
+      const filter = filterStep.observation?.details?.filter || filterStep.action.args?.filter;
+      const nouns = {
+        important: ['important message', 'important messages'],
+        unread: ['unread message', 'unread messages'],
+        action: ['message requiring action', 'messages requiring action'],
+        all: ['message', 'messages']
+      };
+      const [singular, plural] = nouns[filter] || nouns.all;
+      if (count === 0) return `You don't have any ${plural} right now.`;
+      if (count === 1) return `I found 1 ${singular}.`;
+      return `I found ${count} ${plural}.`;
+    }
+    const opened = [...completed].reverse().find(step => step.action?.tool === 'inbox.open_email');
+    if (opened) return `I opened ${opened.action.args?.reference?.label || 'that email'}.`;
+    const navigation = [...completed].reverse().find(step => step.action?.tool === 'navigation.open');
+    if (navigation) {
+      const page = navigation.action.args?.page || 'page';
+      return `${page.charAt(0).toUpperCase()}${page.slice(1)} opened.`;
+    }
+    if (transaction.status === 'failed' || transaction.status === 'blocked') return 'I could not complete that action.';
+    return '';
+  }
+
   async function executePlan(plan) {
     const transaction = {
       id: plan.id,
@@ -75,6 +103,7 @@
     }
 
     if (transaction.status === 'running') transaction.status = 'complete';
+    transaction.narration = observedNarration(transaction);
     transaction.completedAt = new Date().toISOString();
     if (transaction.status === 'complete') setState('DONE');
     return transaction;
@@ -128,6 +157,7 @@
     undoLast,
     approvePending,
     cancelPending,
+    observedNarration,
     transactions,
     latest: () => transactions.at(-1) || null,
     pending: () => pendingApproval

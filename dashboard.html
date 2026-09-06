@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=9">
+  <link rel="stylesheet" href="./dashboard.css?v=11">
 </head>
 <body>
   <div class="app-shell">
@@ -204,7 +204,7 @@
           <article><div><h2>Google profile</h2><p>Your signed-in name and profile picture are used in this workspace.</p></div><span>Current session</span></article>
           <article><div><h2>Processed inbox cache</h2><p>Supabase is used first. Gmail is checked for changes only when needed, and new information replaces stale processed context.</p></div><span id="cacheSettingsStatus">Checking</span></article>
           <article><div><h2>Cache policy</h2><p id="cachePolicyText">Checking cache policy...</p></div><span>Automatic</span></article>
-          <article><div><h2>Kyle voice</h2><p>Local Whisper handles speech-to-text; the browser remains the fallback and current TTS output.</p></div><span>Local-first</span></article>
+          <article><div><h2>Kyle voice</h2><p>Browser speech recognition handles voice input and browser text-to-speech reads Kyle's response.</p></div><span>Browser voice</span></article>
           <article class="settings-danger-row">
             <div><h2>Sign out</h2><p>Remove the local Google session. Supabase history is retained, but the dashboard cannot access it while signed out.</p></div>
             <button class="logout-btn" id="logoutBtn" type="button"><i class="fas fa-arrow-right-from-bracket"></i> Sign out</button>
@@ -247,19 +247,19 @@
     </section>
   </div>
 
-  <script src="./mailmate-objects.js?v=9"></script>
-  <script src="./mailmate-context.js?v=9"></script>
-  <script src="./kyle-referents.js?v=9"></script>
-  <script src="./kyle-state.js?v=9"></script>
-  <script src="./kyle-policy.js?v=9"></script>
-  <script src="./kyle-observation.js?v=9"></script>
-  <script src="./kyle-motion.js?v=9"></script>
-  <script src="./kyle-tools.js?v=9"></script>
-  <script src="./kyle-executor.js?v=9"></script>
-  <script src="./kyle-planner.js?v=9"></script>
-  <script src="./kyle-audio.js?v=9"></script>
-  <script src="./kyle-ui.js?v=9"></script>
-  <script src="./kyle.js?v=9"></script>
-  <script src="./dashboard.js?v=9"></script>
+  <script src="./mailmate-objects.js?v=11"></script>
+  <script src="./mailmate-context.js?v=11"></script>
+  <script src="./kyle-referents.js?v=11"></script>
+  <script src="./kyle-state.js?v=11"></script>
+  <script src="./kyle-policy.js?v=11"></script>
+  <script src="./kyle-observation.js?v=11"></script>
+  <script src="./kyle-motion.js?v=11"></script>
+  <script src="./kyle-tools.js?v=11"></script>
+  <script src="./kyle-executor.js?v=11"></script>
+  <script src="./kyle-planner.js?v=11"></script>
+  <script src="./kyle-audio.js?v=11"></script>
+  <script src="./kyle-ui.js?v=11"></script>
+  <script src="./kyle.js?v=11"></script>
+  <script src="./dashboard.js?v=11"></script>
 </body>
 </html>

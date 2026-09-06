@@ -32,7 +32,6 @@
     const context = canvas.getContext('2d');
     let cloudPhase = 0.65;
     let captionTimer = null;
-    let captionVersion = 0;
 
     function createFloatingMount() {
       const existing = document.getElementById('kyleMount');
@@ -114,28 +113,19 @@
       widget.classList.toggle('is-expanded', next !== 'IDLE');
     }
 
-    async function setLiveText(text, autoHideMs = 0, wordDelay = 32) {
+    function setLiveText(text, autoHideMs = 0) {
       clearTimeout(captionTimer);
-      const version = ++captionVersion;
-      caption.replaceChildren();
-      widget.classList.toggle('has-caption', Boolean(text));
-      if (!text) return;
-
-      const words = String(text).trim().split(/\s+/);
-      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      if (reduceMotion) {
-        caption.textContent = String(text);
-      } else {
-        for (const word of words) {
-          if (version !== captionVersion) return;
-          const span = document.createElement('span');
-          span.className = 'kyle-word-enter';
-          span.textContent = word + ' ';
-          caption.appendChild(span);
-          await new Promise(resolve => setTimeout(resolve, wordDelay));
-        }
+      const value = String(text || '');
+      caption.classList.remove('is-visible');
+      if (!value) {
+        caption.textContent = '';
+        widget.classList.remove('has-caption');
+        return;
       }
-      if (version === captionVersion && autoHideMs) captionTimer = setTimeout(() => setLiveText(''), autoHideMs);
+      caption.textContent = value;
+      widget.classList.add('has-caption');
+      requestAnimationFrame(() => requestAnimationFrame(() => caption.classList.add('is-visible')));
+      if (autoHideMs) captionTimer = setTimeout(() => setLiveText(''), autoHideMs);
     }
 
     function setMuted(muted) {
@@ -191,6 +181,8 @@
     function bind(handlers) {
       orb.addEventListener('click', handlers.onOrb);
       mute.addEventListener('click', handlers.onMute);
+      input.addEventListener('focus', () => handlers.onTextFocus?.());
+      input.addEventListener('input', () => handlers.onTextFocus?.());
       form.addEventListener('submit', event => {
         event.preventDefault();
         const prompt = input.value.trim();
@@ -208,7 +200,7 @@
     });
     window.addEventListener('kyle:motion-caption', event => {
       const detail = event.detail || {};
-      setLiveText(detail.text || '', detail.transient ? 2400 : 0, detail.delay || 32);
+      setLiveText(detail.text || '', detail.transient ? 2400 : 0);
     });
 
     drawCloud(0, 0);

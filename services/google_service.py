@@ -1,8 +1,12 @@
 import os
 import json
+import base64
+import html
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 from email.utils import getaddresses, parseaddr
+from html.parser import HTMLParser
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -205,6 +209,139 @@ def trash_gmail_message(message_id):
         'trashed': True,
         'id': result.get('id') or str(message_id),
         'thread_id': result.get('threadId'),
+        'labels': result.get('labelIds') or [],
+    }
+
+
+class _ReadableHtmlParser(HTMLParser):
+    """Extract readable text while ignoring executable and styling content."""
+
+    _BLOCK_TAGS = {'br', 'div', 'p', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'blockquote'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in {'script', 'style', 'noscript'}:
+            self._ignored_depth += 1
+        elif not self._ignored_depth and tag in self._BLOCK_TAGS:
+            self.parts.append('\n')
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in {'script', 'style', 'noscript'} and self._ignored_depth:
+            self._ignored_depth -= 1
+        elif not self._ignored_depth and tag in self._BLOCK_TAGS:
+            self.parts.append('\n')
+
+    def handle_data(self, data):
+        if not self._ignored_depth:
+            self.parts.append(data)
+
+
+def _decode_gmail_body(data):
+    if not data:
+        return ''
+    padded = str(data) + '=' * (-len(str(data)) % 4)
+    try:
+        return base64.urlsafe_b64decode(padded.encode('ascii')).decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def _message_body_parts(payload):
+    plain = []
+    rich = []
+
+    def visit(part):
+        mime_type = str(part.get('mimeType') or '').lower()
+        filename = str(part.get('filename') or '').strip()
+        data = (part.get('body') or {}).get('data')
+        if data and not filename:
+            decoded = _decode_gmail_body(data)
+            if mime_type == 'text/plain':
+                plain.append(decoded)
+            elif mime_type == 'text/html':
+                rich.append(decoded)
+        for child in part.get('parts') or []:
+            visit(child)
+
+    visit(payload or {})
+    return plain, rich
+
+
+def _clean_message_text(value):
+    value = html.unescape(str(value or '')).replace('\r\n', '\n').replace('\r', '\n')
+    value = re.sub(r'[\u200b-\u200d\ufeff]', '', value)
+    value = re.sub(r'[ \t]+', ' ', value)
+    value = re.sub(r' *\n *', '\n', value)
+    value = re.sub(r'\n{3,}', '\n\n', value)
+    return value.strip()
+
+
+def _readable_message_body(payload, fallback=''):
+    plain, rich = _message_body_parts(payload)
+    if plain:
+        return _clean_message_text('\n\n'.join(part for part in plain if part.strip()))
+    if rich:
+        parser = _ReadableHtmlParser()
+        parser.feed('\n'.join(rich))
+        parser.close()
+        return _clean_message_text(''.join(parser.parts))
+    return _clean_message_text(fallback)
+
+
+def get_gmail_message(message_id):
+    """Fetch one full Gmail message only when the user opens it."""
+    if not message_id:
+        raise ValueError('message_id is required')
+    service = _gmail_service()
+    if not service:
+        raise RuntimeError('Google credentials are not available')
+    message = service.users().messages().get(userId='me', id=str(message_id), format='full').execute()
+    payload = message.get('payload') or {}
+    headers = {str(item.get('name') or ''): str(item.get('value') or '') for item in payload.get('headers') or []}
+    sender_raw = headers.get('From', '')
+    sender_name, sender_email = parseaddr(sender_raw)
+    labels = message.get('labelIds') or []
+    return {
+        'id': message.get('id') or str(message_id),
+        'gmail_id': message.get('id') or str(message_id),
+        'thread_id': message.get('threadId'),
+        'sender': sender_raw,
+        'from': {'name': sender_name, 'email': sender_email.lower()},
+        'to': _address_list(headers.get('To', '')),
+        'cc': _address_list(headers.get('Cc', '')),
+        'subject': headers.get('Subject') or 'No Subject',
+        'date': headers.get('Date', ''),
+        'timestamp': headers.get('Date', ''),
+        'snippet': message.get('snippet') or '',
+        'body': _readable_message_body(payload, message.get('snippet') or ''),
+        'is_read': 'UNREAD' not in labels,
+        'is_starred': 'STARRED' in labels,
+        'labels': labels,
+    }
+
+
+def mark_gmail_message_read(message_id):
+    """Remove Gmail's UNREAD label from one exact message."""
+    if not message_id:
+        raise ValueError('message_id is required')
+    service = _gmail_service()
+    if not service:
+        raise RuntimeError('Google credentials are not available')
+    result = service.users().messages().modify(
+        userId='me',
+        id=str(message_id),
+        body={'removeLabelIds': ['UNREAD']},
+    ).execute()
+    return {
+        'id': result.get('id') or str(message_id),
+        'thread_id': result.get('threadId'),
+        'is_read': True,
         'labels': result.get('labelIds') or [],
     }
 

@@ -40,6 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
     data: null,
     health: null,
     selectedEmailId: null,
+    fullMessages: new Map(),
+    loadingMessageIds: new Set(),
     inboxFilter: 'all',
     currentPage: 'overview',
     calendarEvents: [],
@@ -151,12 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.addEventListener('harness:open-email', event => {
       const email = event.detail;
-      state.selectedEmailId = emailKey(email);
-      renderEmails(state.data?.emails || []);
       showTab('inbox');
-      const reference = emailReference(email);
-      window.MailmateContext?.select(reference);
-      window.MailmateContext?.open(reference);
+      openEmail(email);
     });
 
     window.addEventListener('harness:error', event => {
@@ -454,19 +452,63 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }, item);
       item.addEventListener('click', () => {
-        state.selectedEmailId = emailKey(email);
-        const reference = emailReference(email);
-        window.MailmateContext?.select(reference);
-        window.MailmateContext?.open(reference);
-        renderEmails(emails);
+        openEmail(email);
       });
     });
 
     const selected = emails.find(email => emailKey(email) === state.selectedEmailId);
-    renderEmailDetail(selected);
+    const hydrated = selected ? { ...selected, ...(state.fullMessages.get(emailKey(selected)) || {}) } : null;
+    renderEmailDetail(hydrated, selected ? state.loadingMessageIds.has(emailKey(selected)) : false);
   }
 
-  function renderEmailDetail(email) {
+  async function openEmail(email) {
+    const id = String(emailKey(email) || '');
+    if (!id) return;
+    state.selectedEmailId = id;
+    const reference = emailReference(email);
+    window.MailmateContext?.select(reference);
+    window.MailmateContext?.open(reference);
+
+    if (email.is_read === false) {
+      email.is_read = true;
+      const source = state.data?.emails?.find(item => emailKey(item) === id);
+      if (source) source.is_read = true;
+      saveSessionSnapshot(state.data);
+      fetch(`${API_BASE}/api/gmail/messages/${encodeURIComponent(id)}/read`, { method: 'POST' })
+        .then(async response => {
+          if (response.ok) return;
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.error || `Gmail mark-read returned ${response.status}`);
+        })
+        .catch(error => {
+          email.is_read = false;
+          if (source) source.is_read = false;
+          addError('Gmail: ' + error.message);
+          renderEmails(state.data?.emails || []);
+        });
+    }
+
+    renderEmails(state.data?.emails || []);
+    if (state.fullMessages.has(id) || state.loadingMessageIds.has(id)) return;
+
+    state.loadingMessageIds.add(id);
+    renderEmailDetail(email, true);
+    try {
+      const response = await fetch(`${API_BASE}/api/gmail/messages/${encodeURIComponent(id)}`, { cache: 'no-store' });
+      const detail = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(detail.error || `Gmail message returned ${response.status}`);
+      state.fullMessages.set(id, detail);
+      const source = state.data?.emails?.find(item => emailKey(item) === id);
+      if (source) Object.assign(source, detail, { is_read: source.is_read });
+    } catch (error) {
+      addError('Gmail: ' + error.message);
+    } finally {
+      state.loadingMessageIds.delete(id);
+      if (state.selectedEmailId === id) renderEmails(state.data?.emails || []);
+    }
+  }
+
+  function renderEmailDetail(email, loading = false) {
     if (!email) {
       els.emailDetail.innerHTML = '<div class="empty-detail"><i class="far fa-envelope-open"></i><p>Select an email to read it here.</p></div>';
       return;
@@ -480,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <h2>${escapeHtml(email.subject || 'No subject')}</h2>
         <div class="email-detail-meta"><span>${escapeHtml(email.sender || 'Unknown sender')}</span><time>${escapeHtml(formatDate(email.date || email.timestamp, true))}</time></div>
       </header>
-      <div class="email-body">${escapeHtml(email.body || email.snippet || 'This message has no readable text body.')}</div>`;
+      <div class="email-body" ${loading ? 'aria-busy="true"' : ''}>${loading ? '<span class="email-loading">Loading full message...</span>' : escapeHtml(email.body || email.snippet || 'This message has no readable text body.')}</div>`;
     $('emailTrashBtn')?.addEventListener('click', () => trashEmail(email));
     const reference = emailReference(email);
     window.MailmateObjects?.register({
@@ -567,14 +609,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderStatus() {
     const h = state.health || {};
-    const whisper = h.whisper || {};
     const rows = [
       ['Google OAuth', h.googleClientConfigured],
       ['Gmail session', h.gmailAuthenticated || Boolean(state.userId)],
       ['Google Calendar read/write', h.calendarReadWrite],
       ['Gemini', h.geminiConfigured],
       ['Supabase cache', h.supabaseConfigured],
-      [`Whisper ${whisper.model || 'local'}`, Boolean(whisper.loaded || whisper.available)],
+      ['Browser speech recognition', Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)],
       ['Browser text-to-speech', 'speechSynthesis' in window],
       ['Kyle action registry', Boolean(window.KyleActions)]
     ];
@@ -588,7 +629,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ['Google Calendar', h.calendarReadWrite],
       ['Gemini', h.geminiConfigured],
       ['Supabase', h.supabaseConfigured],
-      ['Local Whisper STT', Boolean(h.whisper?.loaded || h.whisper?.available)],
+      ['Browser speech recognition', Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)],
       ['Browser TTS', 'speechSynthesis' in window]
     ];
     els.integrationList.innerHTML = rows.map(([label, ok]) => `<li data-status="${ok ? 'Connected' : 'Unavailable'}"><strong>${escapeHtml(label)}</strong></li>`).join('');

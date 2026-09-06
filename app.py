@@ -26,8 +26,7 @@ load_dotenv(BASE_DIR / 'api.env')
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
-from services.whisper_service import whisper_service
-from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, trash_gmail_message
+from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.supabase_cache_service import supabase_cache
@@ -143,9 +142,6 @@ def _prune_payload_to_live_gmail(payload, live_ids):
     result['gmail_pruned_count'] = len(removed_ids)
     return result
 
-# Initialize Whisper in background
-whisper_service.initialize()
-
 @app.route('/')
 def index():
     return send_from_directory(str(BASE_DIR), 'index.html')
@@ -192,7 +188,7 @@ def health():
         "calendar": calendar_access_status(),
         "calendarReadWrite": calendar_access_status().get("writable", False),
         "appTimezone": APP_TIMEZONE,
-        "whisper": whisper_service.get_status(),
+        "voiceInput": "browser-speech-recognition",
         "staticFiles": {
             "index.html": (BASE_DIR / "index.html").is_file(),
             "styles.css": (BASE_DIR / "styles.css").is_file(),
@@ -689,6 +685,33 @@ def gmail_message_delete(message_id):
         }), status
 
 
+@app.route('/api/gmail/messages/<message_id>', methods=['GET'])
+def gmail_message_detail(message_id):
+    if not get_user_profile():
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        return jsonify(get_gmail_message(message_id))
+    except Exception as exc:
+        app.logger.exception('Gmail message fetch failed')
+        return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/gmail/messages/<message_id>/read', methods=['POST'])
+def gmail_message_read(message_id):
+    if not get_user_profile():
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        return jsonify(mark_gmail_message_read(message_id))
+    except Exception as exc:
+        app.logger.exception('Gmail mark-read failed')
+        detail = str(exc)
+        status = 403 if ('insufficient' in detail.lower() or 'permission' in detail.lower() or 'scope' in detail.lower()) else 500
+        return jsonify({
+            'error': detail,
+            'hint': 'Reconnect Google once so Mailmate can receive the gmail.modify scope.' if status == 403 else None,
+        }), status
+
+
 @app.route('/api/calendar/ai-sync', methods=['POST'])
 def calendar_ai_sync():
     profile = get_user_profile()
@@ -756,26 +779,6 @@ def calendar_sync():
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
-
-@app.route('/api/stt/status')
-def stt_status():
-    return jsonify(whisper_service.get_status())
-
-@app.route('/api/stt/transcribe', methods=['POST'])
-def stt_transcribe():
-    if 'audio' not in request.files:
-        return jsonify({"error": "No audio file"}), 400
-
-    audio_file = request.files['audio']
-    path = str(DATA_DIR / 'temp_audio.webm')
-    audio_file.save(path)
-
-    try:
-        result = whisper_service.transcribe(path)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 503
-
 
 def _day_window_from_text(text):
     now = datetime.now(APP_TZ)
@@ -1319,7 +1322,7 @@ def kyle_agent_endpoint():
         'resolved': resolved,
         'plannedActions': actions,
     }
-    reply = generate_kyle_agent_reply(message, compact)
+    reply = 'Working on that.' if actions else generate_kyle_agent_reply(message, compact)
     if not reply:
         if resolved:
             reply = f"I know you mean {resolved[0]['label']}. " + (

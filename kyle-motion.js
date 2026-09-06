@@ -20,7 +20,7 @@
 
   function caption(text, options = {}) {
     window.dispatchEvent(new CustomEvent('kyle:motion-caption', {
-      detail: { text: String(text || ''), transient: Boolean(options.transient), delay: options.delay || 32 }
+      detail: { text: String(text || ''), transient: Boolean(options.transient) }
     }));
   }
 
@@ -45,7 +45,7 @@
     if (!element) return false;
     element.scrollIntoView({ behavior: reducedMotion?.matches ? 'auto' : 'smooth', block: 'center' });
     element.classList.add('kyle-acquiring');
-    await wait(210);
+    await wait(140);
     element.classList.remove('kyle-acquiring');
     return true;
   }
@@ -65,7 +65,7 @@
     document.body.appendChild(sweep);
     requestAnimationFrame(() => sweep.classList.add('is-visible'));
     annotate(reference, 'Using this', 1100);
-    await wait(260);
+    await wait(180);
     setTimeout(() => sweep.remove(), duration(900));
     return true;
   }
@@ -75,7 +75,7 @@
     const current = document.querySelector('.tab-panel.active');
     nav?.classList.add('kyle-nav-target');
     current?.classList.add('kyle-panel-leaving');
-    await wait(150);
+    await wait(120);
     nav?.classList.remove('kyle-nav-target');
   }
 
@@ -97,7 +97,7 @@
     void detail.offsetWidth;
     detail.classList.add('kyle-reveal');
     setTimeout(() => detail.classList.remove('kyle-reveal'), duration(650));
-    await wait(240);
+    await wait(190);
     return true;
   }
 
@@ -171,7 +171,7 @@
       await emphasizeSelection(action.args.reference);
       return true;
     }
-    return wait(70);
+    return wait(20);
   }
 
   async function after(action, result, observation) {
