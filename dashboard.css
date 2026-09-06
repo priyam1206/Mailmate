@@ -1301,3 +1301,40 @@ h2 { font-size: 1rem; }
   line-height: 1.2;
   vertical-align: 1px;
 }
+
+
+/* V9: Gmail trash action + responsive detail header */
+.email-detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.email-trash-btn {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border: 1px solid rgba(150, 30, 30, 0.20);
+  border-radius: 6px;
+  background: transparent;
+  color: #8a2525;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.email-trash-btn:hover {
+  background: rgba(150, 30, 30, 0.07);
+  border-color: rgba(150, 30, 30, 0.34);
+  transform: translateY(-1px);
+}
+
+.email-trash-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  transform: none;
+}

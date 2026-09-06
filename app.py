@@ -27,7 +27,7 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 from services.whisper_service import whisper_service
-from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads
+from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, trash_gmail_message
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.supabase_cache_service import supabase_cache
@@ -58,6 +58,90 @@ _refresh_lock = threading.Lock()
 _refreshing_users = set()
 AI_CALENDAR_SYNC_SECONDS = max(30, int(os.getenv('AI_CALENDAR_SYNC_SECONDS', '180')))
 _ai_calendar_last_sync = {}
+CALENDAR_DISMISSALS_FILE = DATA_DIR / 'calendar_dismissals.json'
+_calendar_dismissal_lock = threading.Lock()
+
+
+def _calendar_account_key(profile=None):
+    profile = profile or {}
+    return str(profile.get('email') or profile.get('id') or 'default').strip().lower()
+
+
+def _read_calendar_dismissals():
+    if not CALENDAR_DISMISSALS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(CALENDAR_DISMISSALS_FILE.read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _calendar_dismissed_markers(profile=None):
+    account = _calendar_account_key(profile)
+    with _calendar_dismissal_lock:
+        data = _read_calendar_dismissals()
+        values = data.get(account) or []
+        return {str(value) for value in values if value}
+
+
+def _remember_calendar_dismissal(profile, marker):
+    marker = str(marker or '').strip()
+    if not marker:
+        return False
+    account = _calendar_account_key(profile)
+    with _calendar_dismissal_lock:
+        data = _read_calendar_dismissals()
+        values = {str(value) for value in (data.get(account) or []) if value}
+        values.add(marker)
+        data[account] = sorted(values)
+        tmp = CALENDAR_DISMISSALS_FILE.with_suffix('.tmp')
+        tmp.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        tmp.replace(CALENDAR_DISMISSALS_FILE)
+    return True
+
+
+def _attention_source_id(item):
+    return str(
+        (item or {}).get('source_message_id')
+        or (item or {}).get('message_id')
+        or (item or {}).get('email_id')
+        or ''
+    ).strip()
+
+
+def _prune_payload_to_live_gmail(payload, live_ids):
+    """Remove messages/tasks that no longer exist in active Gmail (e.g. moved to Trash)."""
+    result = dict(payload or {})
+    live_ids = {str(value) for value in (live_ids or set()) if value}
+    before_emails = list(result.get('emails') or [])
+    result['emails'] = [
+        email for email in before_emails
+        if str(email.get('id') or email.get('gmail_id') or '') in live_ids
+    ]
+
+    removed_ids = {
+        str(email.get('id') or email.get('gmail_id') or '')
+        for email in before_emails
+        if str(email.get('id') or email.get('gmail_id') or '') not in live_ids
+    }
+
+    for key in ('needs_attention', 'waiting_on_others'):
+        cleaned = []
+        for item in result.get(key) or []:
+            source_id = _attention_source_id(item)
+            if source_id and source_id in removed_ids:
+                continue
+            cleaned.append(item)
+        result[key] = cleaned
+
+    metrics = dict(result.get('metrics') or {})
+    metrics['emails'] = len(result['emails'])
+    metrics['important'] = len(result.get('needs_attention') or [])
+    metrics['actions'] = len(result.get('needs_attention') or [])
+    result['metrics'] = metrics
+    result['gmail_pruned_count'] = len(removed_ids)
+    return result
 
 # Initialize Whisper in background
 whisper_service.initialize()
@@ -243,6 +327,7 @@ def _cached_response(cache_row, profile, user_row):
     payload['user_id'] = profile.get('email') or profile.get('id') or ''
     if user_row:
         payload['supabase_user_id'] = user_row.get('id')
+    payload['calendar_dismissed_markers'] = sorted(_calendar_dismissed_markers(profile))
     return payload
 
 
@@ -411,6 +496,10 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
 
         urgency = _deadline_urgency(target)
         marker = _deadline_marker(item)
+        if marker in _calendar_dismissed_markers(profile):
+            skipped += 1
+            skip_reasons['user_deleted'] = skip_reasons.get('user_deleted', 0) + 1
+            continue
         description = str(
             item.get('description')
             or item.get('reason')
@@ -484,6 +573,7 @@ def _build_live_dashboard(profile, user_row, force_ai=False):
     overview['user_id'] = profile.get('email') or profile.get('id') or ''
     overview['cached'] = False
     overview['source_changed'] = not same_source if cached else True
+    overview['calendar_dismissed_markers'] = sorted(_calendar_dismissed_markers(profile))
     overview['ai_calendar_sync'] = _reconcile_ai_calendar(overview, profile=profile, force=True)
 
     if supabase_id:
@@ -542,6 +632,11 @@ def dashboard_overview():
                     started = _refresh_user_in_background(profile, user_row)
 
                 response = _cached_response(cached, profile, user_row)
+                try:
+                    live_limit = max(100, min(500, len(response.get('emails') or []) * 4 or 100))
+                    response = _prune_payload_to_live_gmail(response, get_gmail_message_ids(limit=live_limit))
+                except Exception as prune_exc:
+                    app.logger.debug('Live Gmail prune skipped: %s', prune_exc)
                 response['background_refresh_started'] = started
                 response['ai_calendar_sync'] = _reconcile_ai_calendar(response, profile=profile, force=False)
                 return jsonify(response)
@@ -574,6 +669,24 @@ def cache_status():
             "reprocess_seconds": CACHE_REPROCESS_SECONDS,
         }
     })
+
+
+@app.route('/api/gmail/messages/<message_id>', methods=['DELETE'])
+def gmail_message_delete(message_id):
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        result = trash_gmail_message(message_id)
+        return jsonify(result)
+    except Exception as exc:
+        app.logger.exception('Gmail trash failed')
+        detail = str(exc)
+        status = 403 if ('insufficient' in detail.lower() or 'permission' in detail.lower() or 'scope' in detail.lower()) else 500
+        return jsonify({
+            'error': detail,
+            'hint': 'Reconnect Google once so Mailmate can receive the gmail.modify scope.' if status == 403 else None,
+        }), status
 
 
 @app.route('/api/calendar/ai-sync', methods=['POST'])
@@ -614,7 +727,13 @@ def calendar_events():
 def calendar_event_detail(event_id):
     try:
         if request.method == 'DELETE':
-            return jsonify(calendar_delete_event(event_id))
+            result = calendar_delete_event(event_id)
+            marker = str((result or {}).get('marker') or '').strip()
+            if marker:
+                profile = get_user_profile() or {}
+                _remember_calendar_dismissal(profile, marker)
+                result['dismissed_marker'] = marker
+            return jsonify(result)
         payload = request.get_json(silent=True) or {}
         return jsonify(calendar_update_event(event_id, payload))
     except Exception as exc:
@@ -855,7 +974,13 @@ def _kyle_fast_path(message, context, selected_event_id=None):
 
     # Selected-event mutations.
     if selected_event_id and re.search(r'\b(delete|remove|cancel)\b', lower):
-        calendar_delete_event(selected_event_id)
+        delete_result = calendar_delete_event(selected_event_id)
+        marker = str((delete_result or {}).get('marker') or '').strip()
+        if marker:
+            try:
+                _remember_calendar_dismissal(get_user_profile() or {}, marker)
+            except Exception as dismissal_exc:
+                app.logger.warning('Could not persist AI deadline dismissal: %s', dismissal_exc)
         return {
             "reply": "Deleted the selected Google Calendar event.",
             "voice": "Done. I deleted it.",

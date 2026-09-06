@@ -47,7 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
     calendarSelectedEventId: null,
     calendarSyncTimer: null,
     calendarSyncing: false,
-    calendarLastSyncAt: null
+    calendarLastSyncAt: null,
+    calendarSyncSeq: 0,
+    calendarDismissedMarkers: new Set()
   };
 
   const pageCopy = {
@@ -69,9 +71,44 @@ document.addEventListener('DOMContentLoaded', () => {
     registerStaticObjects();
     initCalendarControls();
     setProfile();
-    await loadHealth();
-    await loadInbox(false);
+
+    // Paint the last same-session snapshot immediately, then refresh network data.
+    hydrateSessionSnapshot();
+    const inboxPromise = loadInbox(false);
+    const healthPromise = loadHealth();
+    await Promise.allSettled([inboxPromise, healthPromise]);
     startCalendarAutoSync();
+  }
+
+  function sessionSnapshotKey() {
+    return `mailmate.dashboard.${state.userId || 'anonymous'}`;
+  }
+
+  function hydrateSessionSnapshot() {
+    if (!state.userId) return false;
+    try {
+      const raw = sessionStorage.getItem(sessionSnapshotKey());
+      if (!raw) return false;
+      const snapshot = JSON.parse(raw);
+      if (!snapshot?.data || Date.now() - Number(snapshot.savedAt || 0) > 15 * 60 * 1000) return false;
+      state.data = snapshot.data;
+      state.calendarDismissedMarkers = new Set(snapshot.data.calendar_dismissed_markers || []);
+      renderDashboard(snapshot.data);
+      if (snapshot.data.user) setProfile(snapshot.data.user);
+      els.processState.textContent = 'Showing recent session · refreshing';
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function saveSessionSnapshot(data) {
+    if (!state.userId || !data) return;
+    try {
+      sessionStorage.setItem(sessionSnapshotKey(), JSON.stringify({ savedAt: Date.now(), data }));
+    } catch (_) {
+      // Session storage is only a speed optimization.
+    }
   }
 
   function hydrateReturnParams() {
@@ -221,6 +258,12 @@ document.addEventListener('DOMContentLoaded', () => {
       renderStatus();
       renderIntegrations();
       renderCacheSettings();
+      window.Kyle?.setContext({
+        ...(state.data || {}),
+        calendarEvents: state.calendarEvents,
+        health: state.health,
+        currentPage: state.currentPage
+      });
     } catch (error) {
       addError('Health check failed: ' + error.message);
     }
@@ -254,6 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const response = await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
       if (!response.ok) throw new Error(`Logout returned ${response.status}`);
+      try { sessionStorage.removeItem(sessionSnapshotKey()); } catch (_) {}
       ['userId', 'userName', 'userPicture'].forEach(key => localStorage.removeItem(key));
       window.location.replace('/');
     } catch (error) {
@@ -279,7 +323,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setStep('cache', 'active', 'Reading Supabase cache');
 
     try {
-      await sleep(180);
       setStep('cache', 'done', forceRefresh ? 'Refresh requested' : 'Cache checked first');
       setStep('fetch', 'active', forceRefresh ? 'Refreshing Gmail now' : 'Loading current context');
       const response = await fetch(`${API_BASE}/api/dashboard/overview?userId=${encodeURIComponent(state.userId)}${forceRefresh ? '&refresh=true' : ''}`);
@@ -291,14 +334,14 @@ document.addEventListener('DOMContentLoaded', () => {
       setStep('fetch', 'done', 'Context loaded');
       setStep('extract', 'active', 'Extracting work, blockers, and deadlines');
       const data = await response.json();
-      await sleep(180);
       setStep('extract', 'done', data.cached ? 'Loaded processed context' : 'New context extracted');
       setStep('store', 'active', 'Saving processed context');
-      await sleep(150);
       setStep('store', 'done', data.cached ? 'Supabase context reused' : (data.cache_mode ? `Saved · ${data.cache_mode}` : 'Current context ready'));
 
       state.data = data;
+      state.calendarDismissedMarkers = new Set(data.calendar_dismissed_markers || []);
       renderDashboard(data);
+      saveSessionSnapshot(data);
       if (data.user) setProfile(data.user);
 
       // Persist cached/new email deadlines into the currently connected
@@ -430,11 +473,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     els.emailDetail.innerHTML = `
       <header class="email-detail-header">
-        <p class="section-label">${isImportant(email) ? 'Needs attention' : 'Message'}</p>
+        <div class="email-detail-title-row">
+          <p class="section-label">${isImportant(email) ? 'Needs attention' : 'Message'}</p>
+          <button class="email-trash-btn" id="emailTrashBtn" type="button" title="Move this message to Gmail Trash"><i class="far fa-trash-can"></i> Trash</button>
+        </div>
         <h2>${escapeHtml(email.subject || 'No subject')}</h2>
         <div class="email-detail-meta"><span>${escapeHtml(email.sender || 'Unknown sender')}</span><time>${escapeHtml(formatDate(email.date || email.timestamp, true))}</time></div>
       </header>
       <div class="email-body">${escapeHtml(email.body || email.snippet || 'This message has no readable text body.')}</div>`;
+    $('emailTrashBtn')?.addEventListener('click', () => trashEmail(email));
     const reference = emailReference(email);
     window.MailmateObjects?.register({
       ...reference,
@@ -443,6 +490,52 @@ document.addEventListener('DOMContentLoaded', () => {
     }, els.emailDetail);
     window.MailmateContext?.open(reference);
   }
+
+  async function trashEmail(email) {
+    const id = String(emailKey(email) || '');
+    if (!id) return;
+    if (!window.confirm('Move this message to Gmail Trash?')) return;
+
+    const button = $('emailTrashBtn');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Moving…';
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/gmail/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const detail = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const hint = detail.hint ? ` ${detail.hint}` : '';
+        throw new Error((detail.error || `Gmail delete returned ${response.status}`) + hint);
+      }
+
+      if (state.data) {
+        state.data.emails = (state.data.emails || []).filter(item => String(emailKey(item) || '') !== id);
+        for (const key of ['needs_attention', 'waiting_on_others']) {
+          state.data[key] = (state.data[key] || []).filter(item => attentionSourceId(item) !== id);
+        }
+        state.data.metrics = {
+          ...(state.data.metrics || {}),
+          emails: (state.data.emails || []).length,
+          important: (state.data.needs_attention || []).length,
+          actions: (state.data.needs_attention || []).length
+        };
+      }
+
+      state.selectedEmailId = null;
+      renderDashboard(state.data || { emails: [], needs_attention: [], waiting_on_others: [], metrics: {} });
+      saveSessionSnapshot(state.data);
+      window.KyleTools?.execute?.([{ tool: 'ui.toast', args: { message: 'Moved to Gmail Trash' } }]);
+    } catch (error) {
+      addError('Gmail: ' + error.message);
+      if (button) {
+        button.disabled = false;
+        button.innerHTML = '<i class="far fa-trash-can"></i> Trash';
+      }
+    }
+  }
+
 
   function renderWork(data) {
     const attention = data.needs_attention || [];
@@ -529,6 +622,11 @@ document.addEventListener('DOMContentLoaded', () => {
       id: String(emailKey(email) || ''),
       label: email?.subject || 'No subject'
     };
+  }
+
+
+  function attentionSourceId(item) {
+    return String(item?.source_message_id || item?.message_id || item?.email_id || '').trim();
   }
 
   function isImportant(email) {
@@ -691,8 +789,27 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function combinedCalendarItems() {
+    const dismissed = new Set([
+      ...(state.data?.calendar_dismissed_markers || []),
+      ...state.calendarDismissedMarkers
+    ]);
+    const managedMarkers = new Set(
+      state.calendarEvents
+        .filter(event => event.source === 'ai')
+        .map(event => event.agent_harness?.agent_harness_marker)
+        .filter(Boolean)
+    );
+
     const deadlines = (state.data?.needs_attention || [])
       .filter(item => item.deadline)
+      .filter(item => {
+        const sourceId = attentionSourceId(item);
+        const marker = sourceId ? `gmail-${sourceId}` : '';
+        if (!marker) return true;
+        // Do not render a second virtual deadline when the real AI event exists,
+        // and do not resurrect a deadline the user explicitly deleted.
+        return !managedMarkers.has(marker) && !dismissed.has(marker);
+      })
       .map(deadlineToCalendarItem)
       .filter(Boolean);
 
@@ -759,6 +876,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function refreshCalendar(force = false) {
     if (state.calendarSyncing && !force) return state.calendarEvents;
+    const requestSeq = ++state.calendarSyncSeq;
     state.calendarSyncing = true;
     setCalendarSyncState('syncing', 'Syncing');
 
@@ -773,6 +891,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Calendar returned ${response.status}`);
       const events = await response.json();
+      if (requestSeq !== state.calendarSyncSeq) return state.calendarEvents;
       state.calendarEvents = localConflictPass(Array.isArray(events) ? events : []);
       state.calendarLastSyncAt = new Date();
 
@@ -792,7 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
       addError('Calendar: ' + error.message);
       return state.calendarEvents;
     } finally {
-      state.calendarSyncing = false;
+      if (requestSeq === state.calendarSyncSeq) state.calendarSyncing = false;
     }
   }
 
@@ -1080,13 +1199,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!window.confirm('Delete this Google Calendar event?')) return;
 
     const response = await fetch(`${API_BASE}/api/calendar/events/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const detail = await response.json().catch(() => ({}));
     if (!response.ok) {
-      addError(`Calendar delete returned ${response.status}`);
+      addError(detail.error || `Calendar delete returned ${response.status}`);
       return;
     }
 
+    const marker = detail.dismissed_marker || detail.marker;
+    if (marker) {
+      state.calendarDismissedMarkers.add(marker);
+      if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
+      saveSessionSnapshot(state.data);
+    }
+
+    // Remove it immediately so an older in-flight calendar GET cannot make the
+    // deleted event appear to flash back into the UI.
+    state.calendarEvents = state.calendarEvents.filter(item => String(item.id) !== String(id));
     state.calendarSelectedEventId = null;
     closeCalendarModal();
+    renderCalendar();
     await refreshCalendar(true);
     window.dispatchEvent(new CustomEvent('harness:calendar-changed'));
   }
@@ -1117,7 +1248,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function removeCalendarEvent(id) {
     const response = await fetch(`${API_BASE}/api/calendar/events/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (!response.ok) throw new Error(`Calendar delete returned ${response.status}`);
+    const detail = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(detail.error || `Calendar delete returned ${response.status}`);
+    const marker = detail.dismissed_marker || detail.marker;
+    if (marker) {
+      state.calendarDismissedMarkers.add(marker);
+      if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
+      saveSessionSnapshot(state.data);
+    }
+    state.calendarEvents = state.calendarEvents.filter(item => String(item.id) !== String(id));
+    renderCalendar();
     await refreshCalendar(true);
     return true;
   }
