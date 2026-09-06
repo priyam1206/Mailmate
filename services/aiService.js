@@ -34,7 +34,7 @@ const prompt = `
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
       contents: prompt,
     });
 
