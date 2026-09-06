@@ -3,42 +3,111 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CipherSquad</title>
+  <title>CipherSquad • Code2Create 7.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js" defer></script>
   <script src="script.js" defer></script>
 </head>
 <body>
-  <section class="splash-screen" id="splashScreen" aria-label="CipherSquad loading screen">
-    <div id="particles"></div>
-    <div class="brand-container" id="brandContainer">
-      <div class="logo-stage" aria-label="CipherSquad">
-        <canvas class="dot-logo" id="dotLogo" aria-hidden="true"></canvas>
-        <h1 class="brand-name" aria-label="CIPHERSQUAD">
-          <span>C</span><span>I</span><span>P</span><span>H</span><span>E</span><span>R</span><span>S</span><span>Q</span><span>U</span><span>A</span><span>D</span>
-        </h1>
+  <h1 class="sr-only">CipherSquad - Code2Create 7.0 Portal</h1>
+
+  <!-- Background Video & Atmospheric Overlay (Hidden on landing, blurred on scroll) -->
+  <video id="bgVideo" class="bg-video" autoplay muted loop playsinline preload="auto" poster="video_preview.jpg">
+    <source src="c2c_background.mp4" type="video/mp4">
+  </video>
+  <div class="video-overlay" id="videoOverlay" aria-hidden="true"></div>
+
+  <!-- Ambient floating sakura sparks -->
+  <div id="particles" aria-hidden="true"></div>
+
+  <!-- Top-Left Collaboration Badge: Our Logo ✕ Their Logo (No Text) -->
+  <header class="top-collab-badge" id="topCollabBadge">
+    <div class="mini-lockup" title="CipherSquad ✕ Code2Create 7.0">
+      <img src="ciphersquad_logo.jpg" alt="CipherSquad Logo" class="badge-logo cs-badge">
+      <span class="badge-x" aria-hidden="true">✕</span>
+      <img src="logo.svg" alt="Code2Create Logo" class="badge-logo c2c-badge">
+    </div>
+  </header>
+
+  <!-- Fullscreen Interactive Canvas for Tubelight Glitching Dot Logo -->
+  <canvas class="dot-logo" id="dotLogo" aria-hidden="true"></canvas>
+
+  <!-- Subtle Scroll Indicator -->
+  <div class="scroll-prompt" id="scrollPrompt">
+    <span class="prompt-text">Scroll to Authenticate</span>
+    <div class="mouse-icon" aria-hidden="true">
+      <div class="mouse-wheel"></div>
+    </div>
+  </div>
+
+  <!-- Google Auth Login Section (Revealed on Scroll with Glassmorphism) -->
+  <section class="auth-container" id="authContainer" aria-label="Participant Authentication">
+    <div class="auth-card" id="authCard">
+      <!-- Card Glow Accent -->
+      <div class="card-glow" aria-hidden="true"></div>
+
+      <!-- Mini Dual Branding -->
+      <div class="auth-brand">
+        <img src="ciphersquad_logo.jpg" alt="CipherSquad" class="auth-mini-logo cs-mini">
+        <span class="auth-mini-x" aria-hidden="true">✕</span>
+        <img src="logo.svg" alt="Code2Create 7.0" class="auth-mini-logo c2c-mini">
       </div>
-      <p class="subtitle">Entering Digital Space</p>
-      <div class="loader-bar" aria-label="Loading website">
-        <div class="loader-progress" id="loaderProgress"></div>
+
+      <!-- Header Content -->
+      <div class="auth-header">
+        <div class="auth-badge">HACKATHON PORTAL</div>
+        <h2 class="auth-title">Welcome to CipherSquad</h2>
+        <p class="auth-subtitle">Authenticate via Google to access your team workspace for <strong>Code2Create 7.0</strong></p>
       </div>
-      <button class="enter-button" id="enterButton" type="button">
-        <span class="air-icon" aria-hidden="true"></span>
-        Load Website
-      </button>
+
+      <!-- Google Sign In Button -->
+      <div class="auth-actions">
+        <button class="google-auth-btn" id="googleAuthBtn" type="button">
+          <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"/>
+            <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+          </svg>
+          <span class="btn-text" id="btnText">Continue with Google</span>
+          <div class="btn-spinner" id="btnSpinner" aria-hidden="true"></div>
+        </button>
+
+        <div class="auth-status-msg" id="authStatusMsg" aria-live="polite"></div>
+      </div>
+
+      <!-- Feature Tags & Verification Badges -->
+      <div class="auth-divider">
+        <span>VERIFIED PLATFORM</span>
+      </div>
+
+      <div class="auth-features">
+        <div class="feature-item">
+          <span class="feature-dot"></span>
+          <span>Team Sync</span>
+        </div>
+        <div class="feature-item">
+          <span class="feature-dot"></span>
+          <span>Secure Token</span>
+        </div>
+        <div class="feature-item">
+          <span class="feature-dot"></span>
+          <span>Submission Hub</span>
+        </div>
+      </div>
+
+      <!-- Footer & Back to Hero Link -->
+      <div class="auth-footer">
+        <button class="back-to-top-btn" id="backToTopBtn" type="button">
+          ↑ Return to launch
+        </button>
+      </div>
     </div>
   </section>
 
-  <main class="main-content" id="mainContent" aria-hidden="true">
-    <div class="main-orbit" aria-hidden="true"></div>
-    <p class="eyebrow">Welcome to your digital space</p>
-    <h1>Cipher<span>Squad</span></h1>
-    <p class="main-copy">A focused place for ideas, code, and the next connection.</p>
-    <button class="back-button" id="backButton" type="button">Return to launch</button>
-  </main>
-  <div class="air-cursor" id="airCursor" aria-hidden="true"></div>
+  <!-- Scroll spacer that enables scroll/swipe gestures -->
+  <div class="scroll-spacer" aria-hidden="true"></div>
 </body>
 </html>
