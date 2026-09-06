@@ -7,15 +7,19 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
-  <script src="script.js" defer></script>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./script.js" defer></script>
 </head>
 <body>
   <h1 class="sr-only">CipherSquad - Code2Create 7.0 Portal</h1>
 
-  <!-- Background Video & Atmospheric Overlay (Hidden on landing, blurred on scroll) -->
-  <video id="bgVideo" class="bg-video" autoplay muted loop playsinline preload="auto" poster="video_preview.jpg">
-    <source src="c2c_background.mp4" type="video/mp4">
+  <!-- Portable Fallback Background Image (Works if video is missing or unsupported) -->
+  <div class="video-fallback-bg" id="videoFallbackBg" aria-hidden="true"></div>
+
+  <!-- Background Video with Multi-Source Fallback (assets/videos/ and root ./) -->
+  <video id="bgVideo" class="bg-video" autoplay muted loop playsinline preload="auto" poster="./assets/images/video_preview.jpg">
+    <source src="./assets/videos/c2c_background.mp4" type="video/mp4">
+    <source src="./c2c_background.mp4" type="video/mp4">
   </video>
   <div class="video-overlay" id="videoOverlay" aria-hidden="true"></div>
 
@@ -25,9 +29,9 @@
   <!-- Top-Left Collaboration Badge: Our Logo ✕ Their Logo (No Text) -->
   <header class="top-collab-badge" id="topCollabBadge">
     <div class="mini-lockup" title="CipherSquad ✕ Code2Create 7.0">
-      <img src="ciphersquad_logo.jpg" alt="CipherSquad Logo" class="badge-logo cs-badge">
+      <img src="./assets/images/ciphersquad_logo.jpg" alt="CipherSquad Logo" class="badge-logo cs-badge">
       <span class="badge-x" aria-hidden="true">✕</span>
-      <img src="logo.svg" alt="Code2Create Logo" class="badge-logo c2c-badge">
+      <img src="./assets/images/logo.svg" alt="Code2Create Logo" class="badge-logo c2c-badge">
     </div>
   </header>
 
@@ -50,16 +54,16 @@
 
       <!-- Mini Dual Branding -->
       <div class="auth-brand">
-        <img src="ciphersquad_logo.jpg" alt="CipherSquad" class="auth-mini-logo cs-mini">
+        <img src="./assets/images/ciphersquad_logo.jpg" alt="CipherSquad" class="auth-mini-logo cs-mini">
         <span class="auth-mini-x" aria-hidden="true">✕</span>
-        <img src="logo.svg" alt="Code2Create 7.0" class="auth-mini-logo c2c-mini">
+        <img src="./assets/images/logo.svg" alt="Code2Create 7.0" class="auth-mini-logo c2c-mini">
       </div>
 
       <!-- Header Content -->
       <div class="auth-header">
-        <div class="auth-badge">HACKATHON PORTAL</div>
-        <h2 class="auth-title">Welcome to CipherSquad</h2>
-        <p class="auth-subtitle">Authenticate via Google to access your team workspace for <strong>Code2Create 7.0</strong></p>
+        <div class="auth-badge">AGENT HARNESS • EMAIL CLIENT</div>
+        <h2 class="auth-title">Access Intelligent Inbox</h2>
+        <p class="auth-subtitle">Connect your Google Workspace to transform unstructured email threads into <strong>dependency-aware, executable workflows</strong>.</p>
       </div>
 
       <!-- Google Sign In Button -->
@@ -71,7 +75,7 @@
             <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
             <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
           </svg>
-          <span class="btn-text" id="btnText">Continue with Google</span>
+          <span class="btn-text" id="btnText">Connect with Google</span>
           <div class="btn-spinner" id="btnSpinner" aria-hidden="true"></div>
         </button>
 
@@ -80,29 +84,22 @@
 
       <!-- Feature Tags & Verification Badges -->
       <div class="auth-divider">
-        <span>VERIFIED PLATFORM</span>
+        <span>CORE CAPABILITIES</span>
       </div>
 
       <div class="auth-features">
         <div class="feature-item">
           <span class="feature-dot"></span>
-          <span>Team Sync</span>
+          <span>Dependency Graph</span>
         </div>
         <div class="feature-item">
           <span class="feature-dot"></span>
-          <span>Secure Token</span>
+          <span>Blocker Detection</span>
         </div>
         <div class="feature-item">
           <span class="feature-dot"></span>
-          <span>Submission Hub</span>
+          <span>Human-Approved Actions</span>
         </div>
-      </div>
-
-      <!-- Footer & Back to Hero Link -->
-      <div class="auth-footer">
-        <button class="back-to-top-btn" id="backToTopBtn" type="button">
-          ↑ Return to launch
-        </button>
       </div>
     </div>
   </section>
