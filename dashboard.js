@@ -189,7 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const copy = pageCopy[name] || pageCopy.overview;
     els.pageTitle.textContent = copy[0];
     els.pageSubtitle.textContent = copy[1];
-    document.title = `Agent Harness - ${copy[0]}`;
+    document.title = `MailMate - ${copy[0]}`;
     els.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
     els.panels.forEach(panel => panel.classList.toggle('active', panel.id === `tab-${name}`));
     window.MailmateContext?.setPage(name);
@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     clearSteps();
     setStep('auth', 'done', 'Gmail session found');
-    setStep('cache', 'active', 'Reading Supabase cache');
+    setStep('cache', 'active', 'Checking current mailbox context');
 
     try {
       setStep('cache', 'done', forceRefresh ? 'Refresh requested' : 'Cache checked first');
@@ -351,7 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await response.json();
       setStep('extract', 'done', data.cached ? 'Loaded processed context' : 'New context extracted');
       setStep('store', 'active', 'Saving processed context');
-      setStep('store', 'done', data.cached ? 'Supabase context reused' : (data.cache_mode ? `Saved · ${data.cache_mode}` : 'Current context ready'));
+      setStep('store', 'done', 'Current transient context ready');
 
       state.data = data;
       state.calendarDismissedMarkers = new Set(data.calendar_dismissed_markers || []);

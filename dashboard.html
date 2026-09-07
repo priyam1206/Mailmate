@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="./dashboard.css?v=22">
-  <link rel="stylesheet" href="/remote-worker-ui.css?v=1">
+  <link rel="stylesheet" href="/remote-worker-ui.css?v=5">
   <link rel="stylesheet" href="/compute-ui-fix.css?v=1">
 </head>
 <body>
@@ -325,7 +325,7 @@
       <section class="tab-panel" id="tab-settings">
         <section class="settings-list">
           <article><div><h2>Google profile</h2><p>Your signed-in name and profile picture are used in this workspace.</p></div><span>Current session</span></article>
-          <article><div><h2>Processed inbox cache</h2><p>Supabase is used first. Gmail is checked for changes only when needed, and new information replaces stale processed context.</p></div><span id="cacheSettingsStatus">Checking</span></article>
+          <article><div><h2>Mailbox retention</h2><p>Gmail remains the source of truth. Mailmate keeps message content transient and does not use a central mailbox database.</p></div><span id="cacheSettingsStatus">Checking</span></article>
           <article><div><h2>Kyle voice & audio</h2><p>Mute or unmute Kyle's voice responses and active audio listening.</p></div><label class="switch" title="Mute or unmute Kyle voice"><input type="checkbox" id="settingKyleVoice" checked><span></span></label></article>
           <article><div><h2>Cache policy</h2><p id="cachePolicyText">Checking cache policy...</p></div><span>Automatic</span></article>
           <article class="settings-privacy-article">
@@ -497,8 +497,8 @@
   <script src="./kyle-ui.js?v=21"></script>
   <script src="./kyle.js?v=21"></script>
   <script src="./calendar-conflicts.js?v=21"></script>
-  <script src="./dashboard.js?v=22"></script>
-  <script src="/remote-worker-ui.js?v=1"></script>
+  <script src="./dashboard.js?v=24"></script>
+  <script src="/remote-worker-ui.js?v=5"></script>
   <script src="/compute-ui-fix.js?v=1"></script>
 </body>
 </html>

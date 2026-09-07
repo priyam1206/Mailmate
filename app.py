@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 from urllib.parse import urlencode, urlparse
 from pathlib import Path
@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import hashlib
+import hmac
 import requests
 from dateutil import parser as date_parser
 
@@ -269,6 +270,68 @@ def config():
     })
 
 
+
+# MAILMATE_EMBEDDED_COMPUTE_PROXY_START
+MAILMATE_COMPUTE_MAX_BYTES = 2 * 1024 * 1024
+
+def _mailmate_compute_authorized():
+    expected = os.getenv("MAILMATE_WORKER_TOKEN", "").strip()
+    if not expected:
+        return False
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return False
+    supplied = header[7:].strip()
+    return bool(supplied) and hmac.compare_digest(supplied, expected)
+
+@app.route("/api/compute/health", methods=["GET"])
+def embedded_compute_health():
+    if not _mailmate_compute_authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    local = _mailmate_probe_local_compute()
+    ready = bool(local.get("available"))
+    return jsonify({
+        "ok": ready,
+        "worker": "mailmate-embedded-compute",
+        "transport": "tailscale",
+        "lm_studio": local,
+        "retention": "none",
+    }), 200 if ready else 503
+
+@app.route("/api/compute/v1/chat/completions", methods=["POST"])
+def embedded_compute_completion():
+    if not _mailmate_compute_authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    if request.content_length and request.content_length > MAILMATE_COMPUTE_MAX_BYTES:
+        return jsonify({"error": "request_too_large"}), 413
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_json"}), 400
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return jsonify({"error": "messages_required"}), 400
+    if len(messages) > 64:
+        return jsonify({"error": "too_many_messages"}), 400
+
+    base = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:2806/v1").rstrip("/")
+    try:
+        upstream = requests.post(
+            f"{base}/chat/completions",
+            json=payload,
+            timeout=int(os.getenv("MAILMATE_WORKER_TIMEOUT_SECONDS", "75")),
+        )
+    except requests.RequestException:
+        return jsonify({"error": "local_model_unavailable"}), 503
+
+    try:
+        body = upstream.json()
+    except Exception:
+        return jsonify({"error": "invalid_upstream_response", "status": upstream.status_code}), 502
+
+    return jsonify(body), upstream.status_code
+# MAILMATE_EMBEDDED_COMPUTE_PROXY_END
+
 # MAILMATE_REMOTE_COMPUTE_STATUS_START
 def _mailmate_probe_local_compute():
     base = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:2806/v1").rstrip("/")
@@ -291,7 +354,7 @@ def _mailmate_probe_local_compute():
 
 
 def _mailmate_probe_remote_compute():
-    base = os.getenv("MAILMATE_REMOTE_WORKER_URL", "http://192.168.137.1:2810").strip().rstrip("/")
+    base = os.getenv("MAILMATE_REMOTE_WORKER_URL", "http://100.114.2.88:5000/api/compute").strip().rstrip("/")
     if not base:
         return {
             "configured": False,
@@ -302,7 +365,9 @@ def _mailmate_probe_remote_compute():
 
     started = time.perf_counter()
     try:
-        response = requests.get(f"{base}/health", timeout=1.8)
+        worker_token = os.getenv("MAILMATE_WORKER_TOKEN", "").strip()
+        headers = {"Authorization": f"Bearer {worker_token}"} if worker_token else {}
+        response = requests.get(f"{base}/health", headers=headers, timeout=1.8)
         payload = response.json() if response.content else {}
         return {
             "configured": True,
@@ -337,8 +402,8 @@ def mailmate_compute_status():
 
     label = os.getenv(
         "MAILMATE_COMPUTE_LABEL",
-        "Priyam's hotspot"
-    ).strip() or "Priyam's hotspot"
+        "Priyam's Tailscale workstation"
+    ).strip() or "Priyam's Tailscale workstation"
 
     role = "host" if os.getenv("MAILMATE_WORKER_HOST") else "client"
 
@@ -358,7 +423,7 @@ def mailmate_compute_status():
         "message": (
             "Kyle Work is ready."
             if ready
-            else f"Connect to {label} to enable Kyle Work."
+            else f"Connect Tailscale and make sure {label} is online."
             if remote.get("configured")
             else "Kyle Work needs a local or configured team workstation."
         ),
