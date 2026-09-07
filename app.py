@@ -245,7 +245,7 @@ def _mailmate_probe_local_compute():
 
 
 def _mailmate_probe_remote_compute():
-    base = os.getenv("MAILMATE_REMOTE_WORKER_URL", "").strip().rstrip("/")
+    base = os.getenv("MAILMATE_REMOTE_WORKER_URL", "http://192.168.137.1:2810").strip().rstrip("/")
     if not base:
         return {
             "configured": False,
@@ -294,10 +294,13 @@ def mailmate_compute_status():
         "Priyam's hotspot"
     ).strip() or "Priyam's hotspot"
 
+    role = "host" if os.getenv("MAILMATE_WORKER_HOST") else "client"
+
     return jsonify({
         "ok": True,
         "ready": ready,
         "mode": mode,
+        "role": role,
         "local": local,
         "remote": remote,
         "connect_label": label,
@@ -2025,4 +2028,5 @@ if __name__ == '__main__':
     print(f"[Static] project root: {BASE_DIR}")
     print(f"[Static] styles.css: {(BASE_DIR / 'styles.css').is_file()}")
     app.run(port=port, host='0.0.0.0', debug=True, use_reloader=False)
+
 

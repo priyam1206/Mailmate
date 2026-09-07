@@ -1,8 +1,8 @@
-# Mailmate - Team CIPHERSQUAD
+﻿# Mailmate - Team CIPHERSQUAD
 
 Mailmate is a proactive Gmail intelligence & autonomous work preparation workspace built for Code2Create 7.0.
 
-> **“Mailmate displays user-authorized Gmail data transiently, but does not centrally retain mailbox content. Before any AI or autonomous processing, a local privacy gate blocks sensitive and irrelevant messages and passes only the minimum required context.”**
+> **â€œMailmate displays user-authorized Gmail data transiently, but does not centrally retain mailbox content. Before any AI or autonomous processing, a local privacy gate blocks sensitive and irrelevant messages and passes only the minimum required context.â€**
 
 ---
 
@@ -12,38 +12,38 @@ Mailmate enforces a strict boundary between user email viewing and machine intel
 
 ```text
                          Gmail
-                           │
-                           ▼
-                 ┌──────────────────┐
-                 │ DISPLAY PLANE    │
-                 │                  │
-                 │ All authorized   │
-                 │ Gmail content    │
-                 │ can be shown     │
-                 │ in browser RAM   │
-                 └────────┬─────────┘
-                          │
+                           â”‚
+                           â–¼
+                 â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                 â”‚ DISPLAY PLANE    â”‚
+                 â”‚                  â”‚
+                 â”‚ All authorized   â”‚
+                 â”‚ Gmail content    â”‚
+                 â”‚ can be shown     â”‚
+                 â”‚ in browser RAM   â”‚
+                 â””â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                          â”‚
                     Privacy Gate
-                          │
+                          â”‚
                 only required + safe
-                          ▼
-                 ┌──────────────────┐
-                 │ AI / WORK PLANE  │
-                 │                  │
-                 │ Kyle             │
-                 │ LM Studio        │
-                 │ Gemini fallback  │
-                 │ Work Agent       │
-                 │ Auto-drafts      │
-                 └──────────────────┘
+                          â–¼
+                 â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                 â”‚ AI / WORK PLANE  â”‚
+                 â”‚                  â”‚
+                 â”‚ Kyle             â”‚
+                 â”‚ LM Studio        â”‚
+                 â”‚ Gemini fallback  â”‚
+                 â”‚ Work Agent       â”‚
+                 â”‚ Auto-drafts      â”‚
+                 â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ### Boundary Enforcement Rules
-- `Gmail → browser`: Allowed display (transient in browser RAM only; no emails hidden from user).
-- `Gmail → disk/database`: **Prohibited** (zero central mailbox retention; only minimal derived task state is stored).
-- `Gmail → AI / Gemini / LM Studio`: **Gate required** (sensitive, financial, and security emails blocked).
-- `Gmail → Work Agent`: **Gate required** (only actionable academic/work tasks qualify).
-- `Gmail → auto-send`: **Gate + AutoSendPolicy required** (routine acknowledgements only, 20s cancelable countdown).
+- `Gmail â†’ browser`: Allowed display (transient in browser RAM only; no emails hidden from user).
+- `Gmail â†’ disk/database`: **Prohibited** (zero central mailbox retention; only minimal derived task state is stored).
+- `Gmail â†’ AI / Gemini / LM Studio`: **Gate required** (sensitive, financial, and security emails blocked).
+- `Gmail â†’ Work Agent`: **Gate required** (only actionable academic/work tasks qualify).
+- `Gmail â†’ auto-send`: **Gate + AutoSendPolicy required** (routine acknowledgements only, 20s cancelable countdown).
 
 ---
 
@@ -61,7 +61,7 @@ Mailmate enforces a strict boundary between user email viewing and machine intel
 
 ## Requirements
 
-- Python 3.10 or newer & Node.js 18 or newer
+- Python 3.10 or newer
 - A Google Cloud project with Gmail API and Google Calendar API enabled
 - A Google OAuth 2.0 Web application client
 - A Gemini API key
@@ -117,14 +117,6 @@ GMAIL_FETCH_LIMIT=20
 GMAIL_QUERY=newer_than:30d
 ```
 
-Recommended for shared persistence (derived state only):
-
-```env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
-SUPABASE_SECRET_KEY=your_supabase_service_role_key
-SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
-```
 
 ---
 
@@ -141,3 +133,4 @@ SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
 - **Google access blocked:** Add the Gmail account as an OAuth test user or publish the consent screen.
 - **Insufficient Permissions / 403 on Drafts:** Reconnect Google at `http://localhost:5000/auth/google` to grant `gmail.modify` permissions. Older tokens may contain only `gmail.readonly`.
 - **Kyle voice input:** Ensure microphone permissions are granted in Chrome.
+

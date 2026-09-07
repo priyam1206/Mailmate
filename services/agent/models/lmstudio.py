@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import re
 import requests
@@ -11,7 +11,7 @@ class LMStudioModel(BaseModel):
 
     def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None, timeout: int = 35):
         self.base_url = (base_url or os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:2806/v1")).rstrip("/")
-        self.remote_worker_url = os.getenv("MAILMATE_REMOTE_WORKER_URL", "").strip().rstrip("/")
+        self.remote_worker_url = os.getenv("MAILMATE_REMOTE_WORKER_URL", "http://192.168.137.1:2810").strip().rstrip("/")
         self.worker_token = os.getenv("MAILMATE_WORKER_TOKEN", "").strip()
         self.model = model or os.getenv("LM_STUDIO_MODEL", "qwen/qwen3.5-4b")
         self.timeout = timeout
@@ -111,3 +111,4 @@ class LMStudioModel(BaseModel):
                 except Exception:
                     pass
         raise ValueError("No structured action JSON found in model completion.")
+
