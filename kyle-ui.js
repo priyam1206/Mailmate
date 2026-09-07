@@ -486,7 +486,11 @@
         subjectInput.value = activeDraft.subject || '';
         bodyInput.value = activeDraft.body || '';
         setComposerState('draft_ready', 'Draft ready · Edit anytime or click Send');
-        sendBtn.disabled = !isValidEmail(activeDraft.to);
+        const rawTo = String(activeDraft.to || activeDraft.recipient || '');
+        const emailMatch = rawTo.match(/<([^>]+)>/) || [null, rawTo];
+        const cleanTo = emailMatch[1].trim();
+        activeDraft.to = cleanTo; // normalize to bare email
+        sendBtn.disabled = !isValidEmail(cleanTo);
       });
 
       panelFooter.style.display = 'flex';
@@ -779,7 +783,19 @@
         window.KyleExecutor?.approvePending?.();
         return;
       }
-      if (currentPanelMode === 'email_review') sendCurrentComposer();
+      if (currentPanelMode === 'email_review') {
+        // If still in 'generating' state (animation running), wait for it to settle
+        if (composerState === 'generating' || composerState === 'preparing') {
+          // Force complete the fill and send
+          const rawTo = String((activeDraft?.to || activeDraft?.recipient || ''));
+          const emailMatch = rawTo.match(/<([^>]+)>/) || [null, rawTo];
+          activeDraft.to = emailMatch[1].trim();
+          subjectInput.value = activeDraft?.subject || subjectInput.value;
+          bodyInput.value = activeDraft?.body || bodyInput.value;
+          ++fillGeneration; // cancel any running animation
+        }
+        sendCurrentComposer();
+      }
     });
 
     function bind(handlers) {
