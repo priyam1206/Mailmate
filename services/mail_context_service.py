@@ -50,10 +50,10 @@ def classify_message(message, gate=None):
     money_claim = _contains(r'\b(prize|lottery|jackpot|casino|gambling|bet|crypto giveaway|claim reward)\b', text)
     credential_request = _contains(r'\b(password|otp|one[- ]time password|verify your account|login immediately|credentials?)\b', text)
     suspicious_link = _contains(r'https?://(?:\d{1,3}\.){3}\d{1,3}|\b(bit\.ly|tinyurl\.com|t\.co)/', text)
-    action_signal = _contains(r'\b(action required|please|can you|could you|reply|respond|review|approve|submit|submission|assignment|send|provide|meeting|schedule)\b', text)
-    deadline_signal = _contains(r'\b(due|deadline|today|tonight|tomorrow|within \d+ (?:hours?|days?))\b', text)
-    work_signal = _contains(r'\b(assignment|submission|deliverable|project|report|document|spreadsheet|presentation|proposal|code|repository)\b', text)
-    calendar_signal = _contains(r'\b(meeting|appointment|call|schedule|calendar|due|deadline)\b', text)
+    action_signal = _contains(r'\b(action required|please|can you|could you|reply|respond|review|approve|submit|submission|assignment|send|provide|meeting|schedule|note that|inform you|writing to inform)\b', text)
+    deadline_signal = _contains(r'\b(due|deadline|today|tonight|tomorrow|within \d+ (?:hours?|days?)|next month|take place|scheduled for|will be held)\b', text)
+    work_signal = _contains(r'\b(assignment|submission|deliverable|project|report|document|spreadsheet|presentation|proposal|code|repository|exam|lab exam|quiz|marks|grade|test)\b', text)
+    calendar_signal = _contains(r'\b(meeting|appointment|call|schedule|calendar|due|deadline|exam|scheduled|take place|will be held)\b', text)
 
     deterministic_phishing = (
         (0.35 if credential_request else 0)
@@ -151,7 +151,6 @@ class MailContextService:
         secret = self._config()['secret']
         return {
             'apikey': secret,
-            'Authorization': f'Bearer {secret}',
             'Content-Type': 'application/json',
         }
 

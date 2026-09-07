@@ -700,7 +700,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ? 'Kyle is waiting for required input before it can continue.'
           : active
             ? 'Kyle Work is currently active for this source email.'
-            : 'This message can become a Work item, but no active run is currently attached.';
+            : 'Kyle will prepare a Work item for this email on the next sync. Reload the page to check.';
       const label = done ? 'Work done' : needs ? 'Needs input' : active ? 'Work Active' : 'Eligible';
       const icon = done ? 'fa-check' : needs ? 'fa-circle-exclamation' : active ? 'fa-robot' : 'fa-bolt';
       return `
