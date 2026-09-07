@@ -801,6 +801,7 @@ class WorkAgentService:
                 job["activity_label"] = step_record.get("action") or "Working"
                 job["step_index"] = session.step_count
                 job["step_count"] = session.step_count
+            job["checkpoint"] = session.to_dict()
             job["updated_at"] = _now()
             self._write_jobs(jobs)
 
@@ -845,12 +846,34 @@ class WorkAgentService:
             source_email=source,
             routing=routing,
             autonomy_level=autonomy_level,
-            max_steps=12,
+            max_steps=20,
             max_tool_failures=3,
             max_research_calls=4,
             max_generated_files=5,
             on_step=lambda s, step: self._on_session_step(job_id, s, step)
         )
+
+        # Restore the last successfully persisted agent checkpoint.
+        # This lets a paused Tailscale/LM Studio job continue instead of replaying
+        # already-completed research/file/tool actions.
+        checkpoint = job.get("checkpoint") or {}
+        if checkpoint:
+            try:
+                session.steps = list(checkpoint.get("steps") or [])
+                session.artifacts = list(checkpoint.get("artifacts") or [])
+                session.notes = list(checkpoint.get("notes") or [])
+                session.checklist = list(checkpoint.get("checklist") or [])
+                session.reply_draft = dict(checkpoint.get("reply_draft") or {})
+                session.summary = str(checkpoint.get("summary") or "")
+                counters = checkpoint.get("counters") or {}
+                session.step_count = min(int(checkpoint.get("step_count") or len(session.steps)), session.max_steps - 1)
+                session.tool_failures = int(counters.get("tool_failures") or 0)
+                session.research_calls = int(counters.get("research_calls") or 0)
+                session.generated_files = int(counters.get("generated_files") or 0)
+                session.status = "running"
+                session.finish_reason = None
+            except Exception as checkpoint_exc:
+                print(f"[WorkAgent] Checkpoint restore notice: {checkpoint_exc}")
 
         # Step 3: Run Agent Loop
         loop = AgentLoop(session)
@@ -884,9 +907,14 @@ class WorkAgentService:
                 jobs = self._read_jobs()
                 if job_id in jobs:
                     jobs[job_id]["status"] = "waiting_local_model"
-                    jobs[job_id]["summary"] = "Job waiting: local model unavailable. Cloud fallback prohibited by Privacy Gate."
+                    jobs[job_id]["summary"] = "Kyle paused because local compute is temporarily unavailable. Progress is saved."
                     jobs[job_id]["routing"] = routing
                     jobs[job_id]["steps"] = final_session.steps
+                    jobs[job_id]["artifacts"] = final_session.artifacts
+                    jobs[job_id]["checkpoint"] = final_session.to_dict()
+                    jobs[job_id]["pause_reason"] = "compute_unavailable"
+                    jobs[job_id]["paused_at"] = _now()
+                    jobs[job_id]["current_step"] = "Waiting for local AI · progress saved"
                     jobs[job_id]["updated_at"] = _now()
                     self._write_jobs(jobs)
             return

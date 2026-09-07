@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     calendarWeekStart: startOfWeek(new Date()),
     calendarSelectedEventId: null,
     calendarSyncTimer: null,
+    inboxSyncTimer: null,
     calendarSyncing: false,
     calendarLastSyncAt: null,
     calendarSyncSeq: 0,
@@ -86,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const automationsPromise = loadAutomations();
     await Promise.allSettled([inboxPromise, healthPromise, automationsPromise]);
     startCalendarAutoSync();
+    startInboxAutoSync();
   }
 
   function sessionSnapshotKey() {
@@ -271,6 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.Kyle?.setContext({
         ...(state.data || {}),
         calendarEvents: state.calendarEvents,
+        workJobs: workJobs,
         health: state.health,
         currentPage: state.currentPage
       });
@@ -356,6 +359,16 @@ document.addEventListener('DOMContentLoaded', () => {
       state.data = data;
       state.calendarDismissedMarkers = new Set(data.calendar_dismissed_markers || []);
       renderDashboard(data);
+
+      try {
+        const workResponse = await fetch(`${API_BASE}/api/work/jobs?ensure=1`, { cache: 'no-store' });
+        if (workResponse.ok) {
+          workJobs = await workResponse.json();
+          renderOverviewWorkingNow();
+        }
+      } catch (workSyncError) {
+        console.debug('Work sync notice:', workSyncError);
+      }
       saveSessionSnapshot(data);
       if (data.user) setProfile(data.user);
 
@@ -377,6 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.Kyle?.setContext({
         ...data,
         calendarEvents: state.calendarEvents,
+        workJobs: workJobs,
         health: state.health,
         currentPage: state.currentPage
       });
@@ -863,7 +877,7 @@ document.addEventListener('DOMContentLoaded', () => {
       workLivePollTimer = setInterval(async () => {
         if (document.hidden) return;
         try {
-          const res = await fetch(`${API_BASE}/api/work/jobs`);
+          const res = await fetch(`${API_BASE}/api/work/jobs?ensure=1`, { cache: 'no-store' });
           if (res.ok) {
             workJobs = await res.json();
             renderOverviewWorkingNow();
@@ -1496,13 +1510,16 @@ document.addEventListener('DOMContentLoaded', () => {
       ['Gmail read session', h.gmailAuthenticated || Boolean(state.userId)],
       ['Gmail draft & send permission', h.gmailWrite],
       ['Google Calendar read/write', h.calendarReadWrite],
-      ['Gemini', h.geminiConfigured],
+      ['Gemini cloud fallback', h.geminiConfigured],
       ['Local Privacy Gate', true],
       ['Browser speech recognition', Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)],
       ['Browser text-to-speech', 'speechSynthesis' in window],
       ['Kyle action registry', Boolean(window.KyleActions)]
     ];
-    els.statusList.innerHTML = rows.map(([label, ok]) => `<li data-status="${ok ? 'Ready' : 'Unavailable'}"><strong>${escapeHtml(label)}</strong></li>`).join('');
+    els.statusList.innerHTML = rows.map(([label, ok]) => {
+      const statusText = ok ? 'Ready' : (label.startsWith('Gemini') ? 'Optional · off' : 'Unavailable');
+      return `<li data-status="${statusText}"><strong>${escapeHtml(label)}</strong></li>`;
+    }).join('');
 
     try {
       const res = await fetch(`${API_BASE}/api/system/context?reconcile=false`);
@@ -1527,12 +1544,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const rows = [
       ['Google Gmail (Draft & Send)', h.gmailWrite],
       ['Google Calendar', h.calendarReadWrite],
-      ['Gemini', h.geminiConfigured],
+      ['Gemini cloud fallback', h.geminiConfigured],
       ['Local Privacy Gate', true],
       ['Browser speech recognition', Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)],
       ['Browser TTS', 'speechSynthesis' in window]
     ];
-    els.integrationList.innerHTML = rows.map(([label, ok]) => `<li data-status="${ok ? 'Connected' : 'Unavailable'}"><strong>${escapeHtml(label)}</strong></li>`).join('');
+    els.integrationList.innerHTML = rows.map(([label, ok]) => {
+      const statusText = ok ? 'Connected' : (label.startsWith('Gemini') ? 'Optional · off' : 'Unavailable');
+      return `<li data-status="${statusText}"><strong>${escapeHtml(label)}</strong></li>`;
+    }).join('');
   }
 
 
@@ -1867,6 +1887,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.Kyle?.setContext({
         ...(state.data || {}),
         calendarEvents: state.calendarEvents,
+        workJobs: workJobs,
         health: state.health,
         currentPage: state.currentPage
       });
@@ -1881,12 +1902,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function startInboxAutoSync() {
+    if (state.inboxSyncTimer) clearInterval(state.inboxSyncTimer);
+    state.inboxSyncTimer = setInterval(() => {
+      if (document.hidden) return;
+      if (!['overview', 'inbox'].includes(state.currentPage)) return;
+      loadInbox(false);
+    }, 10000);
+  }
+
   function startCalendarAutoSync() {
     if (state.calendarSyncTimer) clearInterval(state.calendarSyncTimer);
-    // Google -> Agent Harness: refresh once a minute while the page is open.
+    // Google Calendar is authoritative; refresh often enough to remove externally deleted events quickly.
     state.calendarSyncTimer = setInterval(() => {
       if (!document.hidden) refreshCalendar(false);
-    }, 60000);
+    }, 10000);
 
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) refreshCalendar(false);

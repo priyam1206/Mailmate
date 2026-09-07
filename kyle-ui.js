@@ -12,9 +12,6 @@
                 <p class="kyle-panel-subtitle" id="kylePanelSubtitle"></p>
               </div>
               <div class="kyle-panel-header-actions">
-                <button class="kyle-panel-btn kyle-panel-mic-btn" id="kylePanelMicBtn" type="button" aria-label="Mute Kyle" title="Mute Kyle">
-                  <i class="fas fa-volume-high"></i>
-                </button>
                 <button class="kyle-panel-btn kyle-panel-close-btn" id="kylePanelCloseBtn" type="button" aria-label="Close panel" title="Close">
                   <i class="fas fa-xmark"></i>
                 </button>
@@ -257,6 +254,7 @@
     }
 
     function setMuted(muted) {
+      if (!panelMicBtn) return;
       panelMicBtn.innerHTML = muted ? '<i class="fas fa-volume-xmark"></i>' : '<i class="fas fa-volume-high"></i>';
       panelMicBtn.setAttribute('aria-label', muted ? 'Unmute Kyle' : 'Mute Kyle');
       panelMicBtn.title = muted ? 'Unmute Kyle' : 'Mute Kyle';
@@ -399,18 +397,30 @@
       setComposerStatus('Sending via Gmail API...');
 
       try {
-        const res = await fetch('/api/mail/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: to,
-            subject: subject,
-            body: body,
-            thread_id: current.thread_id || null,
-            in_reply_to: current.in_reply_to || null
-          })
-        });
+        const payload = {
+          to: to,
+          subject: subject,
+          body: body,
+          thread_id: current.thread_id || null,
+          in_reply_to: current.in_reply_to || null
+        };
 
+        let res = null;
+        let lastNetworkError = null;
+        for (const delay of [0, 450, 1200]) {
+          if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+          try {
+            res = await fetch('/api/mail/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            break;
+          } catch (networkError) {
+            lastNetworkError = networkError;
+          }
+        }
+        if (!res) throw lastNetworkError || new Error('Mailmate backend is unreachable.');
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
           throw new Error(data.error || `Send failed (${res.status})`);
@@ -514,7 +524,7 @@
       if (currentPanelMode === 'calendar_confirmation') window.KyleExecutor?.cancelPending?.();
       closeSurface();
     });
-    panelMicBtn.addEventListener('click', () => boundHandlers.onMute?.());
+    panelMicBtn?.addEventListener('click', () => boundHandlers.onMute?.());
     changeBtn.addEventListener('click', () => {
       if (currentPanelMode === 'calendar_confirmation') {
         window.KyleExecutor?.cancelPending?.();

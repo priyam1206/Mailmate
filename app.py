@@ -9,6 +9,7 @@ import threading
 import time
 import hashlib
 import hmac
+import ipaddress
 import requests
 from dateutil import parser as date_parser
 
@@ -199,6 +200,25 @@ def _prune_payload_to_live_gmail(payload, live_ids):
     result['gmail_pruned_count'] = len(removed_ids)
     return result
 
+# MAILMATE_TAILNET_COMPUTE_ONLY_GUARD
+@app.before_request
+def _mailmate_tailnet_compute_only():
+    """Tailnet peers may use compute only; Priyam's Gmail/session routes stay local."""
+    remote = str(request.remote_addr or "").strip()
+    try:
+        ip = ipaddress.ip_address(remote)
+    except ValueError:
+        return None
+
+    if ip.is_loopback:
+        return None
+    if ip in ipaddress.ip_network("100.64.0.0/10"):
+        if request.path.startswith("/api/compute/"):
+            return None
+        return jsonify({"error": "tailnet_compute_only"}), 403
+    return None
+
+
 @app.route('/')
 def index():
     return send_from_directory(str(BASE_DIR), 'index.html')
@@ -237,6 +257,10 @@ def health():
     return jsonify({
         "ok": True,
         "googleClientConfigured": bool(os.getenv('GOOGLE_CLIENT_ID')),
+        "geminiConfigured": bool(os.getenv('GEMINI_API_KEY')),
+        "geminiFallbackEnabled": str(os.getenv('MAILMATE_CLOUD_FALLBACK', '0')).lower() in {'1', 'true', 'yes', 'on'},
+        "localModelConfigured": bool(os.getenv('LM_STUDIO_BASE_URL', 'http://127.0.0.1:2806/v1')),
+        "whisper": whisper_service.get_status(),
         "supabaseConfigured": False,
         "supabase": {"enabled": False, "configured": False, "ready": False, "mode": "disabled"},
         "privacyGate": {"enabled": True, "mode": "deterministic-local", "centralRetention": "disabled"},
@@ -247,7 +271,7 @@ def health():
         "gmailWrite": get_gmail_permissions().get("can_write", False),
         "gmailPermissions": get_gmail_permissions(),
         "appTimezone": APP_TIMEZONE,
-        "voiceInput": "browser-speech-recognition",
+        "voiceInput": "local-whisper-with-browser-fallback" if whisper_service.get_status().get("available") else "browser-speech-recognition",
         "staticFiles": {
             "index.html": (BASE_DIR / "index.html").is_file(),
             "styles.css": (BASE_DIR / "styles.css").is_file(),
@@ -275,6 +299,16 @@ def config():
 MAILMATE_COMPUTE_MAX_BYTES = 2 * 1024 * 1024
 
 def _mailmate_compute_authorized():
+    # Same-machine and Tailscale devices may use the inference-only route.
+    remote = str(request.remote_addr or "").strip()
+    try:
+        ip = ipaddress.ip_address(remote)
+        if ip.is_loopback or ip in ipaddress.ip_network("100.64.0.0/10"):
+            return True
+    except ValueError:
+        pass
+
+    # Optional bearer token remains supported for explicit non-Tailscale routes.
     expected = os.getenv("MAILMATE_WORKER_TOKEN", "").strip()
     if not expected:
         return False
@@ -801,6 +835,17 @@ def list_work_jobs():
         return jsonify({"error": "Not authenticated"}), 401
     user_id = profile.get('email') or profile.get('id')
     jobs = work_agent_service.list_jobs(user_id)
+
+    ensure = str(request.args.get('ensure', '')).lower() in {'1', 'true', 'yes'}
+    if ensure and not jobs:
+        try:
+            live_payload = _build_live_dashboard(profile, force_ai=False)
+            work_agent_service.sync_and_enqueue(user_id, live_payload)
+            jobs = work_agent_service.list_jobs(user_id, reconcile=False)
+            system_context_service.increment_version()
+        except Exception as ensure_exc:
+            app.logger.debug('Work ensure sync notice: %s', ensure_exc)
+
     return jsonify(jobs)
 
 

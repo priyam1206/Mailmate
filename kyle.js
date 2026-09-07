@@ -72,12 +72,20 @@
     window.dispatchEvent(new CustomEvent('kyle:mute-change', { detail: { muted: store.muted } }));
   });
 
+  const whisperStatusCache = { ready: null, checkedAt: 0 };
+
   async function whisperReady() {
+    const now = Date.now();
+    if (whisperStatusCache.ready !== null && now - whisperStatusCache.checkedAt < 30000) {
+      return whisperStatusCache.ready;
+    }
     try {
       const response = await fetch(`${API_BASE}/api/stt/status`, { cache: 'no-store' });
       if (!response.ok) return false;
       const status = await response.json();
-      return Boolean(status.loaded || status.available);
+      whisperStatusCache.ready = Boolean(status.loaded || status.available);
+      whisperStatusCache.checkedAt = now;
+      return whisperStatusCache.ready;
     } catch (_) {
       return false;
     }
@@ -91,17 +99,30 @@
     activeRun += 1;
     const run = activeRun;
     recognitionTranscript = '';
+    const startedAt = performance.now();
 
-    if (await whisperReady()) {
-      return startWhisperListening(run);
+    store.set(store.states.LISTENING);
+    ui.setLiveText('Listening…');
+
+    const micPromise = audio.openMic();
+    const whisperPromise = whisperReady();
+
+    try {
+      await micPromise;
+      if (run !== activeRun) return;
+      console.log(`[Kyle Voice] mic ready after ${Math.round(performance.now() - startedAt)} ms`);
+      const useWhisper = await whisperPromise;
+      if (useWhisper) return startWhisperListening(run, true);
+      return startBrowserListening(run, true);
+    } catch (error) {
+      console.warn('[Kyle Voice] mic startup failed:', error.message || error);
+      return startBrowserListening(run, false);
     }
-
-    return startBrowserListening(run);
   }
 
-  async function startWhisperListening(run) {
+  async function startWhisperListening(run, micReady = false) {
     try {
-      await audio.openMic();
+      if (!micReady) await audio.openMic();
       if (run !== activeRun) return;
 
       store.set(store.states.LISTENING);
@@ -125,7 +146,7 @@
     clearTimeout(recognitionTimer);
     recognitionTimer = null;
     currentRecorder = null;
-    audio.cleanupMic();
+    audio.scheduleMicClose?.(10000);
 
     if (run !== activeRun) return;
     if (!blob || blob.size < 1000) {
@@ -169,14 +190,14 @@
     }
   }
 
-  async function startBrowserListening(run) {
+  async function startBrowserListening(run, micReady = false) {
     if (!SpeechRecognition) {
       fail('Voice input is unavailable. You can still type to Kyle.');
       return;
     }
 
     try {
-      await audio.openMic();
+      if (!micReady) await audio.openMic();
       if (run !== activeRun) return;
 
       recognition = new SpeechRecognition();
@@ -241,7 +262,7 @@
     clearTimeout(recognitionTimer);
     recognitionTimer = null;
     recognition = null;
-    audio.cleanupMic();
+    audio.scheduleMicClose?.(10000);
     ui.setAmplitude(0, 0);
     if (run !== activeRun) return;
 
@@ -270,6 +291,28 @@
       bargePeaks = 0;
       interrupt(true);
     }
+  }
+
+  async function guardWorkNarration(reply, voice) {
+    const combined = `${reply || ''} ${voice || ''}`;
+    const makesWorkClaim = /\b(drafts? (?:are )?waiting|prepared work|ready for review|waiting for review|tasks? waiting.*work|work tab.*(?:draft|prepared|review))\b/i.test(combined);
+    if (!makesWorkClaim) return { reply, voice };
+
+    try {
+      const response = await fetch(`${API_BASE}/api/work/jobs`, { cache: 'no-store' });
+      if (!response.ok) return { reply, voice };
+      const jobs = await response.json();
+      const live = (Array.isArray(jobs) ? jobs : []).filter(job => [
+        'queued','reading_context','planning','researching','generating','drafting_reply',
+        'creating_files','verifying','preparing','working','waiting_local_model',
+        'waiting_approval','auto_send_countdown','needs_input'
+      ].includes(job.status));
+      if (live.length === 0) {
+        const truth = 'There are no prepared Work items waiting for review right now.';
+        return { reply: truth, voice: truth };
+      }
+    } catch (_) {}
+    return { reply, voice };
   }
 
   async function handlePrompt(prompt, run = ++activeRun) {
@@ -342,6 +385,8 @@
       const data = await response.json();
       let reply = String(data.reply || data.text || '').trim() || 'Done.';
       let voice = String(data.voice || compactVoice(reply)).trim();
+
+      ({ reply, voice } = await guardWorkNarration(reply, voice));
 
       if (run !== activeRun) return;
 

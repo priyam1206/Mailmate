@@ -27,35 +27,51 @@ class LMStudioModel(BaseModel):
         return f"{base}/chat/completions"
 
     def _request_completion(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Local-first completion with transient-network retries."""
         errors = []
-        try:
-            res = requests.post(self._completion_url(self.base_url), json=payload, timeout=self.timeout)
-            if res.ok:
-                self.last_provider = "local_lm_studio"
-                return res.json()
-            errors.append(f"local LM Studio HTTP {res.status_code}")
-        except Exception as exc:
-            errors.append(f"local LM Studio unavailable: {exc}")
+
+        def attempt(url, provider, delays, headers=None):
+            headers = headers or {}
+            for delay in delays:
+                if delay:
+                    import time
+                    time.sleep(delay)
+                try:
+                    res = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
+                    if res.ok:
+                        self.last_provider = provider
+                        return res.json()
+                    if 400 <= res.status_code < 500:
+                        errors.append(f"{provider} HTTP {res.status_code}")
+                        return None
+                    errors.append(f"{provider} transient HTTP {res.status_code}")
+                except requests.RequestException as exc:
+                    errors.append(f"{provider} unavailable: {exc}")
+            return None
+
+        is_host = bool(os.getenv("MAILMATE_WORKER_HOST"))
+        local = attempt(
+            self._completion_url(self.base_url),
+            "local_lm_studio",
+            [0, 1, 2, 4] if is_host else [0],
+        )
+        if local is not None:
+            return local
 
         if self.remote_worker_url:
-            if not self.worker_token:
-                errors.append("remote worker configured but MAILMATE_WORKER_TOKEN is missing")
-            else:
-                try:
-                    res = requests.post(
-                        self._completion_url(self.remote_worker_url, worker=True),
-                        json=payload,
-                        headers={"Authorization": f"Bearer {self.worker_token}"},
-                        timeout=self.timeout,
-                    )
-                    if res.ok:
-                        self.last_provider = "remote_local_worker"
-                        return res.json()
-                    errors.append(f"remote local worker HTTP {res.status_code}")
-                except Exception as exc:
-                    errors.append(f"remote local worker unavailable: {exc}")
+            headers = {}
+            if self.worker_token:
+                headers["Authorization"] = f"Bearer {self.worker_token}"
+            remote = attempt(
+                self._completion_url(self.remote_worker_url, worker=True),
+                "remote_local_worker",
+                [0, 2, 4, 8],
+                headers=headers,
+            )
+            if remote is not None:
+                return remote
 
-        raise RuntimeError("; ".join(errors) or "No local model route is available.")
+        raise RuntimeError("; ".join(errors[-8:]) or "No local model route is available.")
 
     def plan(self, goal: str, context: str, tools: Dict[str, Any], session: Any) -> Dict[str, Any]:
         tool_descriptions = "\n".join([f"- {name}: {t['description']}" for name, t in tools.items()])
