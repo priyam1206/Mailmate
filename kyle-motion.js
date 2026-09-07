@@ -71,15 +71,21 @@
       await wait(reducedMotion?.matches ? 0 : 80);
     }
 
+    if (mount._dragController?.resnap) {
+      mount._dragController.resnap(false);
+    }
+    mount.style.transform = '';
+
     const targetRect = element.getBoundingClientRect();
+    const homeRect = mount.getBoundingClientRect();
     const orbWidth = mount.offsetWidth || 76;
     const orbHeight = mount.offsetHeight || 76;
     const winW = window.innerWidth || 1200;
     const winH = window.innerHeight || 800;
 
-    // Fixed dock home is bottom-right (right: 26px, bottom: 26px)
-    const homeLeft = winW - orbWidth - 26;
-    const homeTop = winH - orbHeight - 26;
+    // Preserve the user's actual magnetic corner as Kyle's home.
+    const homeLeft = homeRect.left;
+    const homeTop = homeRect.top;
 
     // Prefer placing Kyle to the right of target
     let candidateX = targetRect.right + 16;
@@ -338,6 +344,11 @@
     }
     const progress = observation?.satisfied ? 'Done.' : 'I could not verify that change.';
     window.dispatchEvent(new CustomEvent('kyle:action-progress', { detail: { action, progress, observation } }));
+
+    if (action.args?.reference) {
+      await moveOrbHome({ duration: 260, pauseAfter: 0 });
+      window.dispatchEvent(new CustomEvent('kyle:layout-changed'));
+    }
   }
 
   window.KyleMotion = { queue, caption, acquire, emphasizeSelection, navigate, focus, reveal, annotate, previewMove, previewCreate, before, after, wait, moveOrbTo, moveOrbHome };

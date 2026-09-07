@@ -2810,29 +2810,27 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Savingâ€¦';
       }
-      let payload;
       try {
-        payload = automationPayload();
-      } catch (_) {
-        addError('Automation: choose a valid future date and time.');
-        return;
-      }
-      const id = $('automationId').value;
-      const response = await fetch(id ? `${API_BASE}/api/automations/${encodeURIComponent(id)}` : `${API_BASE}/api/automations`, {
-        method: id ? 'PATCH' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}));
-        addError(`Automation: ${detail.error || response.statusText}`);
-        return;
-      }
-      closeAutomationModal();
-      await loadAutomations();
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Save automation';
+        const payload = automationPayload();
+        const id = $('automationId').value;
+        const response = await fetch(id ? `${API_BASE}/api/automations/${encodeURIComponent(id)}` : `${API_BASE}/api/automations`, {
+          method: id ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.error || response.statusText || `HTTP ${response.status}`);
+        }
+        closeAutomationModal();
+        await loadAutomations();
+      } catch (error) {
+        addError(`Automation: ${error.message || 'Could not save automation.'}`);
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Save automation';
+        }
       }
     });
     $('automationDeleteBtn')?.addEventListener('click', async () => {

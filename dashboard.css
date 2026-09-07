@@ -3115,3 +3115,46 @@ body.modal-open {
     flex: 1 1 0;
   }
 }
+
+
+/* MAILMATE_REVIEW2_RUNTIME_V3 */
+
+/* In floating mode the prompt is the bottom anchor. Conversation history grows
+   upward, so minimizing it never leaves Kyle suspended in the viewport. */
+.kyle-floating-mount .kyle-widget {
+  flex-direction: column-reverse;
+  align-items: flex-end;
+}
+
+.kyle-floating-mount .kyle-transcript {
+  transform-origin: bottom right;
+}
+
+.kyle-floating-mount .kyle-widget.is-conversation-minimized .kyle-transcript,
+.kyle-floating-mount .kyle-widget.is-conversation-minimized .kyle-caption-bubble {
+  display: none !important;
+}
+
+.kyle-floating-mount .kyle-widget.is-conversation-minimized {
+  gap: 6px;
+}
+
+/* Composer is detached to body and is always a true viewport surface. */
+body > .kyle-action-panel {
+  position: fixed !important;
+  z-index: 1600 !important;
+  max-width: calc(100vw - 24px);
+}
+
+body > .kyle-action-panel.is-open {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+@media (max-width: 680px) {
+  body > .kyle-action-panel {
+    width: calc(100vw - 24px) !important;
+    max-height: min(72vh, 580px) !important;
+  }
+}

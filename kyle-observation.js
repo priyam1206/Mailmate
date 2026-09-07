@@ -3,6 +3,38 @@
     return window.MailmateContext?.snapshot?.() || {};
   }
 
+  function safeRect(element) {
+    if (element && typeof element.getBoundingClientRect === 'function') {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: Number(rect.left || 0),
+        top: Number(rect.top || 0),
+        width: Number(rect.width || 0),
+        height: Number(rect.height || 0),
+        right: Number(rect.right ?? ((rect.left || 0) + (rect.width || 0))),
+        bottom: Number(rect.bottom ?? ((rect.top || 0) + (rect.height || 0)))
+      };
+    }
+
+    const width = Number(element?.offsetWidth || 440);
+    const height = Number(element?.offsetHeight || 320);
+    return {
+      left: 0,
+      top: 0,
+      width,
+      height,
+      right: width,
+      bottom: height
+    };
+  }
+
+  function viewportSize() {
+    return {
+      width: Number(window.innerWidth || document.documentElement?.clientWidth || 1920),
+      height: Number(window.innerHeight || document.documentElement?.clientHeight || 1080)
+    };
+  }
+
   function composerSnapshot() {
     const panel = document.getElementById('kyleActionPanel');
     const subject = document.getElementById('kyleComposerSubject');
@@ -20,15 +52,22 @@
     }
 
     const style = window.getComputedStyle(panel);
-    const rect = panel.getBoundingClientRect();
+    const rect = safeRect(panel);
+    const viewport = viewportSize();
     const visible =
       panel.isConnected &&
+      panel.classList.contains('is-open') &&
       panel.getAttribute('aria-hidden') !== 'true' &&
+      panel.dataset.mode === 'email_review' &&
       style.display !== 'none' &&
       style.visibility !== 'hidden' &&
       Number(style.opacity || 1) > 0 &&
       rect.width > 20 &&
-      rect.height > 20;
+      rect.height > 20 &&
+      rect.right > 0 &&
+      rect.bottom > 0 &&
+      rect.left < viewport.width &&
+      rect.top < viewport.height;
 
     return {
       exists: true,

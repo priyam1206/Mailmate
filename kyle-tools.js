@@ -63,20 +63,19 @@
 
   async function openComposerVerified(draft, mode) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (window.KyleUi?.active?.openComposer) {
-        window.KyleUi.active.openComposer(draft, mode);
-      } else {
-        window.dispatchEvent(new CustomEvent('kyle:composer-open', {
-          detail: { draft, mode }
-        }));
+      if (!window.KyleUi?.active?.openComposer) {
+        throw new Error('Kyle composer UI is not initialized.');
       }
+
+      window.KyleUi.active.openComposer(draft, mode);
+      window.KyleUi.active.ensureComposerVisible?.();
 
       const receipt = await waitFor(() => {
         const current = composerReceipt();
         return current?.composer_open && current?.mode === 'email_review'
           ? current
           : null;
-      }, 1250);
+      }, 900);
 
       if (receipt) {
         return {
@@ -87,7 +86,7 @@
 
       if (attempt === 0) {
         window.KyleUi?.active?.setSubtitle?.('Composer did not open. Retrying...');
-        window.KyleUi?.active?.openPreparingComposer?.(mode);
+        window.KyleUi?.active?.ensureComposerVisible?.();
         await sleep(180);
       }
     }

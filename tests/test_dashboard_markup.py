@@ -19,15 +19,15 @@ def test_automation_modal_has_backdrop_and_complete_form():
 def test_kyle_composer_assets_are_cache_bumped():
     html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
-    assert 'dashboard.css?v=38' in html
+    assert 'dashboard.css?v=39' in html
     assert 'mailmate-master-polish.css?v=2' in html
-    assert 'kyle-ui.js?v=38' in html
-    assert 'kyle.js?v=35' in html
+    assert 'kyle-ui.js?v=40' in html
+    assert 'kyle.js?v=37' in html
 
 
 def test_inbox_hides_unattached_work_and_display_only_noise():
     js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
-    assert 'dashboard.js?v=37' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    assert 'dashboard.js?v=38' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
     assert 'Safe for local AI overview' not in js
     assert 'Kyle will prepare a Work item for this email on the next sync' not in js
     assert "if (work.state === 'eligible') return '';" in js
@@ -57,3 +57,24 @@ def test_kyle_windows_have_space_saving_controls():
 
 
 
+
+
+def test_kyle_runtime_v3_keeps_composer_and_chat_in_viewport():
+    ui = (ROOT / 'kyle-ui.js').read_text(encoding='utf-8')
+    tools = (ROOT / 'kyle-tools.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+    js = (ROOT / 'kyle.js').read_text(encoding='utf-8')
+
+    assert 'document.body.appendChild(panel)' in ui
+    assert 'ensureComposerVisible' in ui
+    assert "window.dispatchEvent(new CustomEvent('kyle:layout-changed'))" in ui
+    assert "flex-direction: column-reverse" in css
+    assert "transaction.status === 'complete'" in js
+    assert "openPreparingComposer?.(mode)" not in tools
+
+
+def test_recent_mail_read_intent_is_not_forced_into_composer():
+    js = (ROOT / 'kyle.js').read_text(encoding='utf-8')
+    assert 'const readOnlyMailIntent' in js
+    assert 'show me the most recent mail' in js
+    assert '!readOnlyMailIntent' in js

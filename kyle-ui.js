@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   function createKyleUi(store) {
     const mount = createFloatingMount();
     mount.innerHTML = `
@@ -141,6 +141,14 @@
     const hudTitle = mount.querySelector('#kyleHudTitle');
     const hudStatus = mount.querySelector('#kyleHudStatus');
     const hudSteps = mount.querySelector('#kyleHudSteps');
+
+    // The composer/action panel is a viewport-level surface, not part of the
+    // draggable chat stack. Keeping it under document.body prevents prompt
+    // transforms, transcript growth, page navigation, and Overview reparenting
+    // from hiding or clipping it.
+    if (panel && panel.parentElement !== document.body) {
+      document.body.appendChild(panel);
+    }
 
     let activeDraft = null;
     let currentPanelMode = 'none'; // 'composer' | 'hud' | 'none'
@@ -296,6 +304,88 @@
       if (panel) panel.dataset.mode = mode;
     }
 
+    function getElementRect(element) {
+      if (element && typeof element.getBoundingClientRect === 'function') {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: Number(rect.left || 0),
+          top: Number(rect.top || 0),
+          width: Number(rect.width || 0),
+          height: Number(rect.height || 0),
+          right: Number(rect.right ?? ((rect.left || 0) + (rect.width || 0))),
+          bottom: Number(rect.bottom ?? ((rect.top || 0) + (rect.height || 0)))
+        };
+      }
+
+      const width = Number(element?.offsetWidth || 440);
+      const height = Number(element?.offsetHeight || 320);
+      return {
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height
+      };
+    }
+
+    function viewportSize() {
+      return {
+        width: Number(window.innerWidth || document.documentElement?.clientWidth || 1920),
+        height: Number(window.innerHeight || document.documentElement?.clientHeight || 1080)
+      };
+    }
+
+    function scheduleFrame(callback) {
+      const raf = window.requestAnimationFrame;
+      if (typeof raf === 'function') {
+        return raf.call(window, callback);
+      }
+      return setTimeout(callback, 0);
+    }
+
+    function dockActionPanel() {
+      if (!panel) return;
+      scheduleFrame(() => {
+        if (panel._dragController?.resnap) {
+          panel._dragController.resnap(false);
+          return;
+        }
+        panel.style.left = 'auto';
+        panel.style.top = 'auto';
+        panel.style.right = '24px';
+        panel.style.bottom = '116px';
+      });
+    }
+
+    function ensureComposerVisible() {
+      if (!panel) return false;
+      panel.classList.add('is-open');
+      panel.classList.remove('is-minimized');
+      panel.setAttribute('aria-hidden', 'false');
+      panel.dataset.mode = 'email_review';
+      currentPanelMode = 'email_review';
+      dockActionPanel();
+
+      const rect = getElementRect(panel);
+      const viewport = viewportSize();
+      const inViewport =
+        rect.width > 20 &&
+        rect.height > 20 &&
+        rect.right > 0 &&
+        rect.bottom > 0 &&
+        rect.left < viewport.width &&
+        rect.top < viewport.height;
+
+      if (!inViewport) {
+        panel.style.left = 'auto';
+        panel.style.top = 'auto';
+        panel.style.right = '24px';
+        panel.style.bottom = '116px';
+      }
+      return true;
+    }
+
     function openSurface(mode, title = 'Kyle', subtitle = '') {
       clearTimeout(surfaceTimer);
       selectSurfaceView(mode);
@@ -304,6 +394,7 @@
       if (panel) {
         panel.classList.add('is-open');
         panel.setAttribute('aria-hidden', 'false');
+        dockActionPanel();
       }
     }
 
@@ -335,6 +426,7 @@
       activeDraft = { recipient: '', to: '', subject: '', body: '', thread_id: null, in_reply_to: null, operation_id: null, mode };
       setPresentationMode('floating', { immediate: true });
       openSurface('email_review', mode === 'reply' ? 'Preparing reply' : 'Preparing email', 'Kyle is working');
+      ensureComposerVisible();
       subjectInput.value = '';
       bodyInput.value = '';
       panelFooter.style.display = 'flex';
@@ -537,6 +629,7 @@
       setPresentationMode('floating', { immediate: true });
       const displayName = (activeDraft.recipient || activeDraft.to || '').split('<')[0].trim() || activeDraft.to || 'Contact';
       openSurface('email_review', mode === 'reply' ? `Reply to ${displayName}` : `Email ${displayName}`, activeDraft.to || activeDraft.recipient || '');
+      ensureComposerVisible();
       panel.classList.remove('is-minimized');
       const generation = ++fillGeneration;
       setComposerState('generating', 'Filling message...');
@@ -579,6 +672,7 @@
       panelMinimizeBtn.innerHTML = '<i class="fas fa-plus"></i>';
       panelMinimizeBtn.setAttribute('aria-label', 'Restore Kyle window');
       panelMinimizeBtn.title = 'Restore';
+      dockActionPanel();
     }
 
     function restoreComposer() {
@@ -592,6 +686,7 @@
           ? 'Preparing your draft...'
           : 'Draft ready Â· Edit anytime or click Send');
       }
+      dockActionPanel();
     }
 
     function setComposerDraft(draft = {}) {
@@ -830,6 +925,13 @@
       historyToggle.innerHTML = minimized ? '<i class="fas fa-plus"></i>' : '<i class="fas fa-minus"></i>';
       historyToggle.setAttribute('aria-label', minimized ? 'Restore Kyle conversation' : 'Minimize Kyle conversation');
       historyToggle.title = minimized ? 'Restore conversation' : 'Minimize conversation';
+
+      scheduleFrame(() => {
+        window.dispatchEvent(new CustomEvent('kyle:layout-changed'));
+      });
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('kyle:layout-changed'));
+      }, 340);
     });
     panelMicBtn?.addEventListener?.('click', () => boundHandlers.onMute?.());
     subjectInput?.addEventListener?.('input', () => {
@@ -1108,14 +1210,25 @@
     function isComposerOpen() {
       if (!panel || !activeDraft) return false;
       const style = window.getComputedStyle(panel);
-      const rect = panel.getBoundingClientRect();
+      const rect = getElementRect(panel);
+      const viewport = viewportSize();
+
+      const inViewport =
+        rect.width > 20 &&
+        rect.height > 20 &&
+        rect.right > 0 &&
+        rect.bottom > 0 &&
+        rect.left < viewport.width &&
+        rect.top < viewport.height;
 
       return (
+        panel.classList.contains('is-open') &&
         panel.getAttribute('aria-hidden') !== 'true' &&
+        panel.dataset.mode === 'email_review' &&
         style.display !== 'none' &&
         style.visibility !== 'hidden' &&
-        rect.width > 20 &&
-        rect.height > 20
+        Number(style.opacity || 1) > 0 &&
+        inViewport
       );
     }
 
@@ -1150,6 +1263,8 @@
       sendCurrentComposer,
       isComposerOpen,
       getComposerSnapshot,
+      ensureComposerVisible,
+      dockActionPanel,
       renderActivityHud,
       showCalendarConfirmation,
       showDeleteResult,

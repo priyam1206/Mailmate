@@ -406,11 +406,36 @@
       ui.setSubtitle?.('Understanding your request...');
       const activeDraft = window.KyleUi?.active?.getActiveDraft?.() || null;
       const selectedEmail = window.AgentMail?.getSelectedEmail?.() || null;
+      // Composer intent must represent a WRITE/SEND action, not a read-only
+      // mention of the word "mail". This keeps commands such as
+      // "show me the most recent mail" on the Inbox guidance path.
+      const directRecipient =
+        /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\bto\s+[A-Z0-9._%+@-]+|\b(?:him|her|them)\b/i.test(cleanPrompt);
+
+      const readOnlyMailIntent =
+        /\b(?:show|find|open|read|search|summarize|summary|latest|recent|newest|most\s+recent|what|which)\b/i.test(cleanPrompt);
+
       const composerRequest =
-        /\b(reply|compose|draft|email|mail)\b/i.test(cleanPrompt) ||
+        /\breply\b/i.test(cleanPrompt) ||
+        (
+          /\b(?:draft|compose|write)\b/i.test(cleanPrompt) &&
+          (
+            /\b(?:email|mail|message|reply)\b/i.test(cleanPrompt) ||
+            directRecipient
+          )
+        ) ||
         (
           /\bsend\b/i.test(cleanPrompt) &&
-          /(?:@|\bto\b|\bsaying\b|\bmessage\b|\bthem\b|\bhim\b|\bher\b)/i.test(cleanPrompt)
+          (
+            Boolean(activeDraft) ||
+            directRecipient ||
+            /\bsaying\b|\bsubject\b|\bbody\b/i.test(cleanPrompt)
+          )
+        ) ||
+        (
+          /\b(?:email|mail)\b/i.test(cleanPrompt) &&
+          directRecipient &&
+          !readOnlyMailIntent
         );
       if (composerRequest && !activeDraft) {
         window.KyleUi?.active?.openPreparingComposer?.(/\breply\b/i.test(cleanPrompt) ? 'reply' : 'compose');
@@ -518,7 +543,7 @@
       if (transaction?.status === 'waiting-approval') {
         reply = 'The preview is ready. Say confirm to save it, or cancel to leave your calendar unchanged.';
         voice = reply;
-      } else {
+      } else if (!transaction || transaction.status === 'complete') {
         const observed = transaction?.narration || narrateObservedActions(data.actions || []);
         if (observed) {
           reply = observed;
@@ -607,7 +632,10 @@
       await elevenAudio.play();
       return true;
     } catch (error) {
-      if (error?.name !== 'AbortError') console.info('[Kyle Voice] ElevenLabs unavailable; using browser voice.');
+      if (error?.name !== 'AbortError') {
+        console.warn('[Kyle Voice] ElevenLabs failed:', error);
+        ui.setSubtitle?.('Cloud voice unavailable. Using device voice...');
+      }
       return false;
     } finally {
       if (speechRequest === controller) speechRequest = null;

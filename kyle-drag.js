@@ -1,4 +1,4 @@
-﻿/**
+/**
  * kyle-drag.js
  * Magnetic corner drag for FLOATING elements only.
  * The Overview page embedded prompt bar is intentionally excluded -- it stays static.
@@ -71,6 +71,8 @@
 
       currentCorner = corner;
       snapped = true;
+      el.style.transform = '';
+      el.classList.remove('kyle-traveling');
       el.style.right  = 'auto';
       el.style.bottom = 'auto';
 
@@ -200,6 +202,8 @@
         requestAnimationFrame(function () {
           var mount = document.getElementById('kyleMount');
           if (mount && !isInOverviewMount(mount) && mount._dragController) {
+            mount.style.transform = '';
+            mount.classList.remove('kyle-traveling');
             mount._dragController.resnap(false);
           }
 
