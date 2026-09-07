@@ -54,7 +54,8 @@ Mailmate enforces a strict boundary between user email viewing and machine intel
 - **Deterministic Local Privacy Gate**: Screens out banking, OTPs, and personal records before AI
 - **Proactive Work Agent**: Autonomously prepares checklists (`.md`, `.docx`) and response drafts
 - **Autopilot Safety Engine (`AutoSendPolicy`)**: 20-second cancelable auto-send countdown for routine acknowledgements only
-- **Local CUDA-Accelerated Whisper STT & Kyle Browser Voice Assistant**
+- **Kyle Browser Voice Assistant** with native browser speech input and speech synthesis
+- **Persistent Kyle Automations** with once, daily, weekly, and interval schedules; every run is recorded in Work
 - **Overview, Inbox, Work, Calendar, Automations, Status, Integrations, and Settings views**
 
 ---
@@ -122,9 +123,15 @@ GMAIL_QUERY=newer_than:30d
 
 ## Kyle Voice Assistant
 
-- Local speech-to-text via CUDA-accelerated `faster-whisper` (`small` model).
-- Automatic fallback to browser `webkitSpeechRecognition`.
-- Kyle's voice responses spoken via browser speech synthesis.
+- Speech-to-text uses the browser's built-in `SpeechRecognition` / `webkitSpeechRecognition` support.
+- Kyle's voice responses use browser speech synthesis, so ElevenLabs is not required for local testing.
+- Calendar deletions always show the exact event or grouped event list before Kyle makes the change.
+
+---
+
+## Automations
+
+Create an automation from the Automations view and choose a once, daily, weekly, or interval schedule. Schedules are stored locally in `data/automations.json`, restored after restarts, and run in the background while Mailmate is open. Each run creates a visible Work record with progress steps and its final summary.
 
 ---
 

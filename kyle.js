@@ -8,13 +8,26 @@
   let recognition = null;
   let recognitionTranscript = '';
   let recognitionTimer = null;
-  let currentRecorder = null;
   let activeRun = 0;
   let utterance = null;
   let speakingRaf = null;
   let speakingStartedAt = 0;
   let smoothedSpeechEnergy = 0;
   let bargePeaks = 0;
+
+  function saveMutePreference() {
+    try {
+      localStorage.setItem?.('kyle_muted', store.muted ? 'true' : 'false');
+    } catch (_) {
+      // Muting still works when storage is unavailable or blocked.
+    }
+  }
+
+  const storedMuted = localStorage.getItem('kyle_muted');
+  if (storedMuted !== null) {
+    store.muted = storedMuted === 'true';
+    ui.setMuted(store.muted);
+  }
 
   ui.bind({
     onOrb: () => {
@@ -30,14 +43,24 @@
     },
     onMute: () => {
       store.muted = !store.muted;
+      saveMutePreference();
       ui.setMuted(store.muted);
       if (store.muted) interrupt(false);
+      window.dispatchEvent(new CustomEvent('kyle:mute-change', { detail: { muted: store.muted } }));
     },
     onTextFocus: () => stopAudioForText(),
     onText: prompt => {
       stopAudioForText();
       handlePrompt(prompt);
     }
+  });
+
+  window.addEventListener('kyle:toggle-mute', () => {
+    store.muted = !store.muted;
+    saveMutePreference();
+    ui.setMuted(store.muted);
+    if (store.muted) interrupt(false);
+    window.dispatchEvent(new CustomEvent('kyle:mute-change', { detail: { muted: store.muted } }));
   });
 
   async function startListening() {
@@ -49,68 +72,7 @@
     const run = activeRun;
     recognitionTranscript = '';
 
-    try {
-      const sttRes = await fetch(`${API_BASE}/api/stt/status`).catch(() => null);
-      if (sttRes && sttRes.ok) {
-        const status = await sttRes.json();
-        if (status.loaded || status.available) {
-          return startWhisperListening(run);
-        }
-      }
-    } catch (_) {}
-
     return startBrowserListening(run);
-  }
-
-  async function startWhisperListening(run) {
-    try {
-      await audio.openMic();
-      if (run !== activeRun) return;
-
-      store.set(store.states.LISTENING);
-      ui.setLiveText('Listening (Whisper)...');
-      console.log('[Kyle Voice] local Whisper recording started');
-
-      currentRecorder = audio.startRecording(
-        () => {},
-        async blob => {
-          currentRecorder = null;
-          audio.cleanupMic();
-          if (run !== activeRun) return;
-          if (!blob || blob.size < 1000) {
-            store.set(store.states.IDLE);
-            ui.setLiveText('');
-            return;
-          }
-          store.set(store.states.TRANSCRIBING);
-          ui.setLiveText('Transcribing with Whisper...');
-          try {
-            const formData = new FormData();
-            formData.append('audio', blob, 'recording.webm');
-            const res = await fetch(`${API_BASE}/api/stt/transcribe`, {
-              method: 'POST',
-              body: formData
-            });
-            if (!res.ok) throw new Error(`Whisper STT returned ${res.status}`);
-            const data = await res.json();
-            const transcript = String(data.text || '').trim();
-            if (transcript) {
-              handlePrompt(transcript, run);
-            } else {
-              store.set(store.states.IDLE);
-              ui.setLiveText('');
-            }
-          } catch (e) {
-            console.warn('[Kyle Voice] Whisper transcription error:', e);
-            fail('Whisper transcription failed. Try speaking again.');
-          }
-        }
-      );
-      recognitionTimer = setTimeout(() => stopListening(), 15000);
-    } catch (error) {
-      console.warn('[Kyle Voice] local recording failed, falling back to browser:', error);
-      startBrowserListening(run);
-    }
   }
 
   async function startBrowserListening(run) {
@@ -166,11 +128,6 @@
   function stopListening() {
     clearTimeout(recognitionTimer);
     recognitionTimer = null;
-
-    if (currentRecorder && currentRecorder.state !== 'inactive') {
-      try { currentRecorder.stop(); } catch (_) {}
-      return;
-    }
 
     if (recognition) {
       try { recognition.stop(); } catch (_) { finishBrowserRecognition(activeRun); }
@@ -264,6 +221,9 @@
 
     try {
       store.set(store.states.THINKING);
+      const activeDraft = window.KyleUi?.active?.getActiveDraft?.() || null;
+      const selectedEmail = window.AgentMail?.getSelectedEmail?.() || null;
+
       const response = await fetch(`${API_BASE}/api/kyle/agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -273,7 +233,9 @@
           context: store.context,
           uiContext: window.MailmateContext?.snapshot?.() || {},
           resolvedReferences: resolution.references,
-          selectedCalendarEventId: window.AgentCalendar?.getSelectedEventId?.() || null
+          selectedCalendarEventId: window.AgentCalendar?.getSelectedEventId?.() || null,
+          activeDraft: activeDraft,
+          selectedEmail: selectedEmail
         })
       });
       if (!response.ok) throw new Error(`Kyle returned ${response.status}`);
@@ -428,14 +390,6 @@
     activeRun += 1;
     clearTimeout(recognitionTimer);
     recognitionTimer = null;
-
-    if (currentRecorder && currentRecorder.state !== 'inactive') {
-      try {
-        currentRecorder.onstop = null;
-        currentRecorder.stop();
-      } catch (_) {}
-      currentRecorder = null;
-    }
 
     if (recognition) {
       recognition.onend = null;

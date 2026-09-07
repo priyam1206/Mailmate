@@ -609,6 +609,42 @@ def send_gmail_draft(draft_id):
         raise err
 
 
+def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None):
+    """Send an exact email message directly via Gmail API users.messages.send."""
+    from email.message import EmailMessage
+    creds = get_credentials()
+    if not creds:
+        raise RuntimeError("Google account not connected")
+    service = build('gmail', 'v1', credentials=creds)
+
+    msg = EmailMessage()
+    msg.set_content(body or '')
+    msg['To'] = to or ''
+    msg['Subject'] = subject or 'No Subject'
+    if in_reply_to:
+        msg['In-Reply-To'] = in_reply_to
+        msg['References'] = in_reply_to
+
+    encoded_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+    body_payload = {
+        'raw': encoded_message
+    }
+    if thread_id:
+        body_payload['threadId'] = thread_id
+
+    try:
+        sent = service.users().messages().send(userId='me', body=body_payload).execute()
+        return {
+            'id': sent.get('id'),
+            'thread_id': sent.get('threadId'),
+            'labels': sent.get('labelIds', [])
+        }
+    except HttpError as err:
+        if err.resp.status == 403 or 'insufficient' in str(err).lower():
+            raise GmailInsufficientPermissionError()
+        raise err
+
+
 def get_gmail_thread(thread_id):
     """
     Fetch a single Gmail thread with parsed messages, directions, and timestamps.

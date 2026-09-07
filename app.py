@@ -32,16 +32,10 @@ from services.google_service import get_auth_url, handle_callback, get_user_prof
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.work_agent_service import work_agent_service
-from services.whisper_service import whisper_service
 from services.privacy_gate import PrivacyGate
 from services.system_context_service import system_context_service
-
-
-# Kick off local Whisper model preparation in background
-try:
-    whisper_service.initialize()
-except Exception as _w_err:
-    print(f"[Whisper] Background init notice: {_w_err}")
+from services.automation_service import automation_service
+from services.calendar_conflicts import calculate_conflicts
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-secret-key-123')
@@ -69,6 +63,54 @@ AI_CALENDAR_SYNC_SECONDS = max(30, int(os.getenv('AI_CALENDAR_SYNC_SECONDS', '18
 _ai_calendar_last_sync = {}
 CALENDAR_DISMISSALS_FILE = DATA_DIR / 'calendar_dismissals.json'
 _calendar_dismissal_lock = threading.Lock()
+
+
+def _run_scheduled_kyle_goal(automation):
+    user_id = str((automation or {}).get('user_id') or 'default')
+    run = work_agent_service.create_automation_run(user_id, automation)
+    run_id = run['id']
+    try:
+        threads, _ = get_gmail_threads()
+        work_agent_service.add_automation_run_step(run_id, user_id, 'Checked current Gmail context')
+        overview = get_dashboard_overview(threads or [])
+        attention = list(overview.get('needs_attention') or [])
+        work_agent_service.add_automation_run_step(
+            run_id,
+            user_id,
+            f'Found {len(attention)} item{"s" if len(attention) != 1 else ""} needing attention',
+        )
+
+        calendar_events, conflict_pairs = calculate_conflicts(calendar_list_events(limit=100) or [])
+        real_events = [event for event in calendar_events if event.get('source') == 'google']
+        conflicts = len(conflict_pairs)
+        work_agent_service.add_automation_run_step(run_id, user_id, 'Checked Google Calendar and schedule clashes')
+
+        goal = str(((automation or {}).get('action') or {}).get('goal') or '').strip()
+        summary = (
+            f'Kyle completed "{goal}" ' if goal else 'Kyle completed the scheduled workspace check. '
+        )
+        summary += (
+            f'{len(threads or [])} recent Gmail thread{"s" if len(threads or []) != 1 else ""}, '
+            f'{len(attention)} attention item{"s" if len(attention) != 1 else ""}, and '
+            f'{len(real_events)} Google Calendar event{"s" if len(real_events) != 1 else ""} were checked.'
+        )
+        if conflicts:
+            summary += f' {conflicts} genuine schedule clash{"es" if conflicts != 1 else ""} need review.'
+        checklist = [
+            str(item.get('description') or item.get('title') or 'Review attention item')[:240]
+            for item in attention[:6]
+        ]
+        work_agent_service.finish_automation_run(run_id, user_id, summary, checklist=checklist)
+        system_context_service.increment_version()
+        return run_id
+    except Exception as exc:
+        work_agent_service.finish_automation_run(run_id, user_id, 'The scheduled run could not finish.', error=str(exc))
+        system_context_service.increment_version()
+        raise
+
+
+automation_service.set_runner(_run_scheduled_kyle_goal)
+automation_service.start()
 
 
 def _calendar_account_key(profile=None):
@@ -770,6 +812,56 @@ def work_settings():
     return jsonify(work_agent_service.get_settings())
 
 
+def _automation_user_id():
+    profile = get_user_profile()
+    return (profile or {}).get('email') or (profile or {}).get('id')
+
+
+@app.route('/api/automations', methods=['GET', 'POST'])
+def automations_collection():
+    user_id = _automation_user_id()
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        if request.method == 'POST':
+            return jsonify(automation_service.create(user_id, request.get_json(silent=True) or {})), 201
+        return jsonify(automation_service.list(user_id))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/automations/<automation_id>', methods=['GET', 'PATCH', 'DELETE'])
+def automation_detail(automation_id):
+    user_id = _automation_user_id()
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        if request.method == 'DELETE':
+            if not automation_service.delete(automation_id, user_id):
+                return jsonify({'error': 'Automation not found'}), 404
+            return jsonify({'ok': True, 'deleted': automation_id})
+        if request.method == 'PATCH':
+            automation = automation_service.update(automation_id, user_id, request.get_json(silent=True) or {})
+        else:
+            automation = automation_service.get(automation_id, user_id)
+        if not automation:
+            return jsonify({'error': 'Automation not found'}), 404
+        return jsonify(automation)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/automations/<automation_id>/run', methods=['POST'])
+def automation_run_now(automation_id):
+    user_id = _automation_user_id()
+    if not user_id:
+        return jsonify({'error': 'Not authenticated'}), 401
+    result = automation_service.run_now(automation_id, user_id)
+    if not result:
+        return jsonify({'error': 'Automation not found'}), 404
+    return jsonify(result), 202
+
+
 @app.route('/api/work/jobs/<job_id>/cancel-countdown', methods=['POST'])
 def cancel_work_countdown(job_id):
     profile = get_user_profile()
@@ -857,45 +949,6 @@ def work_reconcile_endpoint():
         "jobs": jobs,
         "context_version": system_context_service.get_version()
     })
-
-
-@app.route('/api/stt/status', methods=['GET'])
-def stt_status():
-    return jsonify(whisper_service.get_status())
-
-
-@app.route('/api/stt/init', methods=['POST'])
-def stt_init():
-    whisper_service.initialize()
-    return jsonify({"message": "Whisper initialization started", "status": whisper_service.get_status()})
-
-
-@app.route('/api/stt/transcribe', methods=['POST'])
-def stt_transcribe():
-    file = request.files.get('audio') or request.files.get('file')
-    if not file or file.filename == '':
-        return jsonify({"error": "No audio file provided"}), 400
-
-    import tempfile
-    suffix = Path(file.filename).suffix or '.webm'
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        file.save(tmp.name)
-        tmp_path = tmp.name
-
-    try:
-        result = whisper_service.transcribe(tmp_path)
-        return jsonify(result)
-    except Exception as e:
-        if str(e) == "whisper_model_loading":
-            return jsonify({"error": "Whisper model is still loading"}), 503
-        app.logger.warning(f"Whisper transcription failed: {e}")
-        return jsonify({"error": str(e)}), 500
-    finally:
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
 
 
 @app.route('/api/cache/status')
@@ -1026,6 +1079,49 @@ def calendar_events():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route('/api/calendar/events/delete-batch', methods=['POST'])
+def calendar_delete_batch():
+    payload = request.get_json(silent=True) or {}
+    event_ids = list(dict.fromkeys(str(value).strip() for value in (payload.get('event_ids') or []) if str(value).strip()))[:20]
+    if not event_ids:
+        return jsonify({'error': 'event_ids is required'}), 400
+    profile = get_user_profile() or {}
+    deleted = []
+    failed = []
+    for event_id in event_ids:
+        try:
+            result = calendar_delete_event(event_id)
+            marker = str((result or {}).get('marker') or '').strip()
+            if marker:
+                _remember_calendar_dismissal(profile, marker)
+                result['dismissed_marker'] = marker
+            deleted.append(result)
+        except Exception as exc:
+            failed.append({'id': event_id, 'error': str(exc)})
+    system_context_service.increment_version()
+    return jsonify({
+        'ok': not failed,
+        'deleted': deleted,
+        'deleted_count': len(deleted),
+        'failed': failed,
+        'failed_count': len(failed),
+    }), 200 if deleted else 500
+
+
+@app.route('/api/calendar/deadlines/dismiss', methods=['POST'])
+def dismiss_calendar_deadline():
+    payload = request.get_json(silent=True) or {}
+    marker = str(payload.get('marker') or '').strip()
+    if not marker:
+        return jsonify({'error': 'marker is required'}), 400
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({'error': 'Not authenticated'}), 401
+    _remember_calendar_dismissal(profile, marker)
+    system_context_service.increment_version()
+    return jsonify({'ok': True, 'dismissed_marker': marker})
+
+
 @app.route('/api/calendar/events/<event_id>', methods=['PATCH', 'DELETE'])
 def calendar_event_detail(event_id):
     try:
@@ -1036,6 +1132,7 @@ def calendar_event_detail(event_id):
                 profile = get_user_profile() or {}
                 _remember_calendar_dismissal(profile, marker)
                 result['dismissed_marker'] = marker
+            system_context_service.increment_version()
             return jsonify(result)
         payload = request.get_json(silent=True) or {}
         return jsonify(calendar_update_event(event_id, payload))
@@ -1299,17 +1396,9 @@ def _kyle_fast_path(message, context, selected_event_id=None):
 
     # Selected-event mutations.
     if selected_event_id and re.search(r'\b(delete|remove|cancel)\b', lower):
-        delete_result = calendar_delete_event(selected_event_id)
-        marker = str((delete_result or {}).get('marker') or '').strip()
-        if marker:
-            try:
-                _remember_calendar_dismissal(get_user_profile() or {}, marker)
-            except Exception as dismissal_exc:
-                app.logger.warning('Could not persist AI deadline dismissal: %s', dismissal_exc)
         return {
-            "reply": "Deleted the selected Google Calendar event.",
-            "voice": "Done. I deleted it.",
-            "command": {"type": "calendar_refresh"},
+            "reply": "Please review and confirm the selected event in the Kyle action window before deleting it.",
+            "voice": "I need your confirmation before deleting that event.",
             "handled": True,
         }
 
@@ -1521,6 +1610,19 @@ def _sanitize_agent_action(action, known):
     if tool == 'ui.toast':
         message = _agent_text(args.get('message'), 180)
         return {'tool': tool, 'args': {'message': message}} if message else None
+    if tool == 'calendar.refresh':
+        return {'tool': tool, 'args': {}}
+    if tool == 'calendar.delete_prepare':
+        requested = args.get('references') or [args.get('reference') or args]
+        references = []
+        for item in requested[:20]:
+            reference = _agent_reference(item)
+            if not reference or reference.get('type') != 'calendar-event':
+                continue
+            exact = known.get(f"calendar-event:{reference['id']}")
+            if exact and exact not in references:
+                references.append(exact)
+        return {'tool': tool, 'args': {'references': references}} if references else None
     if tool == 'calendar.preview_create':
         payload = args.get('payload') or {}
         title = _agent_text(payload.get('title'), 160)
@@ -1573,8 +1675,12 @@ def _sanitize_agent_action(action, known):
     expected = {
         'inbox.open_email': 'email',
         'calendar.open_event': 'calendar-event',
+        'calendar.inspect_event': 'calendar-event',
         'calendar.preview_move': 'calendar-event',
         'work.focus': 'work-item',
+        'automation.run_now': 'automation',
+        'automation.enable': 'automation',
+        'automation.disable': 'automation',
         'ui.highlight': None,
         'ui.scroll_to': None,
         'ui.annotate': None,
@@ -1624,6 +1730,13 @@ def _infer_agent_actions(message, resolved, context=None):
         if not any(action.get('args', {}).get('page') == 'inbox' for action in actions):
             actions.append({'tool': 'navigation.open', 'args': {'page': 'inbox'}})
         actions.append({'tool': 'inbox.set_filter', 'args': {'filter': filter_name}})
+
+    calendar_references = [item for item in resolved if item.get('type') == 'calendar-event']
+    if calendar_references and re.search(r'\b(delete|remove|cancel)\b', lower):
+        if not any(action.get('args', {}).get('page') == 'calendar' for action in actions):
+            actions.append({'tool': 'navigation.open', 'args': {'page': 'calendar'}})
+        actions.append({'tool': 'calendar.delete_prepare', 'args': {'references': calendar_references[:20]}})
+        return actions
 
     put_on_calendar = bool(re.search(r'\b(put|add|save|schedule)\b.*\b(calendar|schedule)\b', lower))
     if reference and reference['type'] == 'email' and put_on_calendar:
@@ -1680,6 +1793,13 @@ def _infer_agent_actions(message, resolved, context=None):
             actions.append({'tool': 'calendar.open_event', 'args': {'reference': reference}})
     elif reference and reference['type'] == 'work-item' and re.search(r'\b(open|show|do|work|focus)\b', lower):
         actions.append({'tool': 'work.focus', 'args': {'reference': reference}})
+    elif reference and reference['type'] == 'automation':
+        if re.search(r'\b(run|start|do)\b', lower):
+            actions.append({'tool': 'automation.run_now', 'args': {'reference': reference}})
+        elif re.search(r'\b(enable|turn on)\b', lower):
+            actions.append({'tool': 'automation.enable', 'args': {'reference': reference}})
+        elif re.search(r'\b(disable|turn off|pause)\b', lower):
+            actions.append({'tool': 'automation.disable', 'args': {'reference': reference}})
 
     if reference and re.search(r'\b(where|which|highlight|point)\b', lower):
         actions.extend([
@@ -1900,6 +2020,15 @@ def kyle_agent_endpoint():
     resolved = [
         item for item in (_agent_reference(ref) for ref in (data.get('resolvedReferences') or [])[:4]) if item
     ]
+    selected_calendar_id = _agent_text(data.get('selectedCalendarEventId'), 160)
+    if selected_calendar_id and not any(item.get('type') == 'calendar-event' and item.get('id') == selected_calendar_id for item in resolved):
+        browser_events = ((data.get('context') or {}).get('calendarEvents') or []) if isinstance(data.get('context'), dict) else []
+        selected_event = next((event for event in browser_events if str(event.get('id')) == selected_calendar_id), None)
+        resolved.append({
+            'type': 'calendar-event',
+            'id': selected_calendar_id,
+            'label': _agent_text((selected_event or {}).get('title') or 'Selected calendar event', 180),
+        })
     known = _agent_known_references(ui_context, resolved)
 
     active_draft = data.get('activeDraft')
@@ -1969,7 +2098,7 @@ def kyle_agent_endpoint():
         'reply': reply,
         'text': reply,
         'voice': _compact_voice(reply),
-        'actions': actions[:5],
+        'actions': actions[:24],
         'mode': 'deterministic-context',
         'context_version': system_ctx.get('context_version', 1),
     })

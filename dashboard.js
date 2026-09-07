@@ -52,7 +52,8 @@ document.addEventListener('DOMContentLoaded', () => {
     calendarSyncing: false,
     calendarLastSyncAt: null,
     calendarSyncSeq: 0,
-    calendarDismissedMarkers: new Set()
+    calendarDismissedMarkers: new Set(),
+    automations: []
   };
 
   const pageCopy = {
@@ -73,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bindEvents();
     registerStaticObjects();
     initCalendarControls();
+    initAutomationControls();
     setProfile();
     bindAutopilotSettings();
     loadWorkSettings();
@@ -81,7 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
     hydrateSessionSnapshot();
     const inboxPromise = loadInbox(false);
     const healthPromise = loadHealth();
-    await Promise.allSettled([inboxPromise, healthPromise]);
+    const automationsPromise = loadAutomations();
+    await Promise.allSettled([inboxPromise, healthPromise, automationsPromise]);
     startCalendarAutoSync();
   }
 
@@ -198,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentPage: name
     });
     if (name === 'calendar') refreshCalendar(false);
+    if (name === 'automations') loadAutomations();
     if (name === 'work') renderWork(state.data);
     if (name === 'status') renderStatus();
     updateWorkLivePolling();
@@ -761,6 +765,8 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'sent':
       case 'approved_sent':
         return { label: 'Sent via Gmail', cls: 'badge-sent' };
+      case 'completed':
+        return { label: 'Complete', cls: 'badge-sent' };
       case 'cancelled':
         return { label: 'Cancelled', cls: 'badge-cancelled' };
       case 'failed':
@@ -810,7 +816,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
           console.debug('Work live poll notice:', e);
         }
-      }, 1500);
+      }, 4000);
     } else if (!shouldPoll && workLivePollTimer) {
       clearInterval(workLivePollTimer);
       workLivePollTimer = null;
@@ -825,7 +831,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
     const readyStatuses = new Set(['waiting_approval', 'auto_send_countdown']);
     const needsInputStatuses = new Set(['needs_input']);
-    const historyStatuses = new Set(['sent', 'approved_sent', 'resolved_external', 'ignored_outbound', 'cancelled', 'failed']);
+    const historyStatuses = new Set(['sent', 'approved_sent', 'resolved_external', 'ignored_outbound', 'completed', 'cancelled', 'failed']);
 
     const activeList = list.filter(j => activeStatuses.has(j.status));
     const readyList = list.filter(j => readyStatuses.has(j.status));
@@ -953,6 +959,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusEl = $('workRunStatus');
     const emptyPlaceholder = $('workEmptyPlaceholder');
     const preparedCard = $('workPreparedCard');
+    const preparedSummary = $('workPreparedSummary');
     const collapsiblesGroup = $('workCollapsiblesGroup');
 
     const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
@@ -978,16 +985,39 @@ document.addEventListener('DOMContentLoaded', () => {
     const isNeedsInput = job.status === 'needs_input';
     const isSent = job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal;
     const isCountdown = job.status === 'auto_send_countdown';
+    const isAutomation = job.type === 'automation_run';
     const verdict = job.policy_verdict || {};
+    const preparedArtifacts = (job.artifacts || []).filter(artifact => artifact.type === 'file');
+    if (preparedSummary) {
+      if (job.type === 'automation_run') {
+        preparedSummary.textContent = job.status === 'working'
+          ? 'Kyle is checking Gmail and Calendar now. Progress appears below.'
+          : (job.output?.summary || 'Kyle completed this scheduled workspace check.');
+      } else {
+        const fileCopy = preparedArtifacts.length ? ` and ${preparedArtifacts.length} supporting file${preparedArtifacts.length === 1 ? '' : 's'}` : '';
+        preparedSummary.textContent = `Kyle prepared a reply${fileCopy}.`;
+      }
+    }
 
     // 1. Policy Banner
     const policyBanner = $('workPolicyBanner');
     const policyBadge = $('workPolicyBadge');
     const policyCat = $('workPolicyCategory');
     const policyExpl = $('workPolicyExplanation');
+    const preparedTag = $('workPreparedTag');
+    const replyBox = $('workReplyBox');
+    const sourceDetails = $('workSourceDetails');
+    if (preparedTag) preparedTag.innerHTML = isAutomation
+      ? '<i class="fas fa-check"></i> SCHEDULED RUN'
+      : '<i class="fas fa-sparkles"></i> READY FOR REVIEW';
+    if (replyBox) replyBox.style.display = isAutomation ? 'none' : 'flex';
+    if (sourceDetails) sourceDetails.hidden = isAutomation;
 
     if (policyBanner) {
-      if (isResolvedExternal) {
+      policyBanner.style.display = isAutomation ? 'none' : '';
+      if (isAutomation) {
+        // Automation summaries are already presented above; no mail-send policy applies.
+      } else if (isResolvedExternal) {
         policyBanner.className = 'policy-banner auto-sent';
         if (policyBadge) policyBadge.textContent = 'VERIFIED IN GMAIL';
         if (policyCat) policyCat.textContent = 'Replied manually';
@@ -1015,9 +1045,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (policyExpl) policyExpl.textContent = verdict.explanation || 'Low risk · Simple acknowledgement · No attachment · No commitment · Known sender';
       } else {
         policyBanner.className = 'policy-banner requires-approval';
-        if (policyBadge) policyBadge.textContent = 'HUMAN APPROVAL REQUIRED';
-        if (policyCat) policyCat.textContent = (verdict.category || 'Review needed').replace(/_/g, ' ');
-        if (policyExpl) policyExpl.textContent = verdict.explanation || 'Contains commitments or generated attachments that require human review.';
+        if (policyBadge) policyBadge.textContent = 'READY FOR REVIEW';
+        if (policyCat) policyCat.textContent = 'Prepared by Kyle';
+        if (policyExpl) policyExpl.textContent = preparedArtifacts.length
+          ? `Review the reply and ${preparedArtifacts.length} supporting file${preparedArtifacts.length === 1 ? '' : 's'} before sending.`
+          : 'Review the prepared reply before sending.';
       }
     }
 
@@ -1241,7 +1273,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const timeline = $('agentTimeline');
     const steps = job.steps || [];
 
-    if (stepsSummaryTitle) stepsSummaryTitle.textContent = `What Kyle did (${steps.length} steps)`;
+    if (stepsSummaryTitle) stepsSummaryTitle.textContent = `What Kyle did · ${steps.length} action${steps.length === 1 ? '' : 's'}`;
     if (stepsStatusBadge) {
       stepsStatusBadge.textContent = (job.status === 'sent' || job.status === 'approved_sent') ? 'Complete' :
                                      job.status === 'auto_send_countdown' ? 'Countdown active' : 'Ready for review';
@@ -1623,6 +1655,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!start) return null;
     const end = allDay ? addDays(start, 1) : new Date(start.getTime() + 20 * 60000);
 
+    const sourceId = attentionSourceId(item);
     return {
       id: `deadline-${item.source_message_id || item.id || index}`,
       title: item.subject || item.title || conciseActionTitle(item.description) || 'Email deadline',
@@ -1634,6 +1667,7 @@ document.addEventListener('DOMContentLoaded', () => {
       blocking: false,
       conflict: false,
       conflict_with: [],
+      marker: sourceId ? `gmail-${sourceId}` : '',
       deadline_label: raw
     };
   }
@@ -1763,6 +1797,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const allDay = $('calendarAllDay');
     if (!grid || !allDay) return;
 
+    const previousScrollTop = grid.scrollTop;
+    const hadTimeline = grid.dataset.rendered === 'true';
     const { start: weekStart, end: weekEnd } = calendarRange();
     const visibleItems = combinedCalendarItems().filter(event => {
       const start = parseEventStart(event);
@@ -1780,11 +1816,15 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAllDayRow(allDay, weekStart, weekItems);
     renderTimedGrid(grid, weekStart, weekItems);
     renderConflictAlert();
+    grid.dataset.rendered = 'true';
+    requestAnimationFrame(() => {
+      grid.scrollTop = hadTimeline ? previousScrollTop : 7 * 56;
+    });
   }
 
   function renderAllDayRow(container, weekStart, items) {
     const today = new Date();
-    let html = '<div class="calendar-all-day-label">all-day</div>';
+    let html = '<div class="calendar-all-day-label">all-day / deadlines</div>';
 
     for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
       const day = addDays(weekStart, dayIndex);
@@ -1832,12 +1872,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderTimedGrid(container, weekStart, items) {
-    const visibleTimed = items
-      .filter(event => !event.all_day)
-      .map(event => parseEventStart(event))
-      .filter(Boolean);
-    const earliestHour = visibleTimed.length ? Math.min(...visibleTimed.map(d => d.getHours())) : 7;
-    const START_HOUR = Math.max(0, Math.min(7, earliestHour));
+    const START_HOUR = 0;
     const END_HOUR = 24;
     const HOUR_HEIGHT = 56;
     const today = new Date();
@@ -1866,7 +1901,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const start = parseEventStart(event);
         const end = parseEventEnd(event) || new Date(start.getTime() + 30 * 60000);
         const startMinutes = start.getHours() * 60 + start.getMinutes();
-        const endMinutes = end.getHours() * 60 + end.getMinutes();
+        const crossesDay = end.toDateString() !== start.toDateString() || end <= start;
+        const endMinutes = crossesDay ? END_HOUR * 60 : end.getHours() * 60 + end.getMinutes();
         const visibleStart = Math.max(START_HOUR * 60, startMinutes);
         const visibleEnd = Math.min(END_HOUR * 60, Math.max(endMinutes, visibleStart + 15));
         if (visibleEnd <= START_HOUR * 60 || visibleStart >= END_HOUR * 60) return;
@@ -2026,30 +2062,18 @@ document.addEventListener('DOMContentLoaded', () => {
   async function deleteSelectedCalendarEvent() {
     const id = $('calendarEventId').value;
     if (!id) return;
-    if (!window.confirm('Delete this Google Calendar event?')) return;
-
-    const response = await fetch(`${API_BASE}/api/calendar/events/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const detail = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      addError(detail.error || `Calendar delete returned ${response.status}`);
+    const selected = state.calendarEvents.find(item => String(item.id) === String(id));
+    const reference = { type: 'calendar-event', id: String(id), label: selected?.title || 'Calendar event' };
+    closeCalendarModal();
+    if (window.KyleExecutor) {
+      await window.KyleExecutor.execute({
+        id: `calendar_delete_${Date.now().toString(36)}`,
+        goal: `Delete ${reference.label}`,
+        steps: [{ tool: 'calendar.delete_prepare', args: { references: [reference] } }]
+      });
       return;
     }
-
-    const marker = detail.dismissed_marker || detail.marker;
-    if (marker) {
-      state.calendarDismissedMarkers.add(marker);
-      if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
-      saveSessionSnapshot(state.data);
-    }
-
-    // Remove it immediately so an older in-flight calendar GET cannot make the
-    // deleted event appear to flash back into the UI.
-    state.calendarEvents = state.calendarEvents.filter(item => String(item.id) !== String(id));
-    state.calendarSelectedEventId = null;
-    closeCalendarModal();
-    renderCalendar();
-    await refreshCalendar(true);
-    window.dispatchEvent(new CustomEvent('harness:calendar-changed'));
+    addError('Calendar deletion confirmation is unavailable. Reload Mailmate and try again.');
   }
 
   async function createCalendarEvent(payload) {
@@ -2092,6 +2116,223 @@ document.addEventListener('DOMContentLoaded', () => {
     return true;
   }
 
+  async function dismissCalendarDeadline(marker) {
+    if (!marker) throw new Error('Deadline marker is missing');
+    const response = await fetch(`${API_BASE}/api/calendar/deadlines/dismiss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marker })
+    });
+    const detail = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(detail.error || `Deadline dismissal returned ${response.status}`);
+    state.calendarDismissedMarkers.add(marker);
+    if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
+    saveSessionSnapshot(state.data);
+    renderCalendar();
+    return detail;
+  }
+
+  function automationScheduleLabel(schedule = {}) {
+    const type = schedule.type || 'daily';
+    if (type === 'interval') return `Every ${schedule.minutes || 60} minutes`;
+    if (type === 'once') return `Once · ${formatAutomationDate(schedule.at)}`;
+    const [hour = '08', minute = '00'] = String(schedule.time || '08:00').split(':');
+    const time = new Date(2000, 0, 1, Number(hour), Number(minute)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (type === 'weekly') {
+      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      return `Every ${days[Number(schedule.weekday || 0)]} · ${time}`;
+    }
+    return `Every day · ${time}`;
+  }
+
+  function formatAutomationDate(value) {
+    if (!value) return 'Not scheduled';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Not scheduled';
+    return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  async function loadAutomations() {
+    try {
+      const response = await fetch(`${API_BASE}/api/automations`);
+      if (!response.ok) throw new Error(`Automations returned ${response.status}`);
+      state.automations = await response.json();
+      renderAutomations();
+      return state.automations;
+    } catch (error) {
+      const list = $('automationList');
+      if (list) list.innerHTML = `<p class="automation-empty">${escapeHtml(error.message)}</p>`;
+      return [];
+    }
+  }
+
+  function renderAutomations() {
+    const list = $('automationList');
+    if (!list) return;
+    if (!state.automations.length) {
+      list.innerHTML = '<p class="automation-empty">No scheduled runs yet. Create one to have Kyle check your workspace automatically.</p>';
+      return;
+    }
+    list.innerHTML = state.automations.map(automation => `
+      <article class="automation-row" data-automation-id="${escapeHtml(automation.id)}" data-kyle-type="automation" data-kyle-id="${escapeHtml(automation.id)}" data-kyle-label="${escapeHtml(automation.name)}">
+        <div>
+          <small>${escapeHtml(automationScheduleLabel(automation.schedule))}</small>
+          <h2>${escapeHtml(automation.name)}</h2>
+          <p>${escapeHtml(automation.action?.goal || '')}</p>
+          <div class="automation-meta"><span>Last: ${escapeHtml(formatAutomationDate(automation.last_run))}</span><span>Next: ${escapeHtml(formatAutomationDate(automation.next_run))}</span></div>
+        </div>
+        <dl class="automation-rule">
+          <div><dt>When</dt><dd>${escapeHtml(automationScheduleLabel(automation.schedule))}</dd></div>
+          <div><dt>Kyle does</dt><dd>${escapeHtml(automation.action?.goal || '')}</dd></div>
+          <div><dt>Output</dt><dd>Create a Work summary</dd></div>
+        </dl>
+        <div class="automation-controls">
+          <button class="icon-btn plain-icon automation-run" type="button" title="Run now" aria-label="Run now"><i class="fas fa-play"></i></button>
+          <button class="icon-btn plain-icon automation-edit" type="button" title="Edit" aria-label="Edit automation"><i class="fas fa-pen"></i></button>
+          <label class="switch" title="${automation.enabled ? 'Disable' : 'Enable'} ${escapeHtml(automation.name)}"><input class="automation-toggle" type="checkbox" ${automation.enabled ? 'checked' : ''}><span></span></label>
+        </div>
+      </article>
+    `).join('');
+
+    list.querySelectorAll('.automation-row').forEach(row => {
+      const automation = state.automations.find(item => item.id === row.dataset.automationId);
+      if (!automation) return;
+      window.MailmateObjects?.register({ type: 'automation', id: automation.id, label: automation.name, page: 'automations' }, row);
+      row.querySelector('.automation-edit')?.addEventListener('click', () => openAutomationModal(automation));
+      row.querySelector('.automation-run')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        await fetch(`${API_BASE}/api/automations/${encodeURIComponent(automation.id)}/run`, { method: 'POST' });
+        await loadAutomations();
+        setTimeout(() => renderWork(state.data), 350);
+      });
+      row.querySelector('.automation-toggle')?.addEventListener('change', async event => {
+        await updateAutomation(automation.id, { enabled: event.target.checked });
+      });
+    });
+  }
+
+  function updateAutomationScheduleFields() {
+    const type = $('automationScheduleType')?.value || 'daily';
+    $('automationTimeField').hidden = !['daily', 'weekly'].includes(type);
+    $('automationWeekdayField').hidden = type !== 'weekly';
+    $('automationOnceField').hidden = type !== 'once';
+    $('automationIntervalField').hidden = type !== 'interval';
+  }
+
+  function openAutomationModal(automation = null) {
+    const modal = $('automationModal');
+    if (!modal) return;
+    const schedule = automation?.schedule || { type: 'daily', time: '08:00', timezone: 'Asia/Kolkata' };
+    $('automationModalTitle').textContent = automation ? 'Edit automation' : 'New automation';
+    $('automationId').value = automation?.id || '';
+    $('automationName').value = automation?.name || '';
+    $('automationGoal').value = automation?.action?.goal || '';
+    $('automationScheduleType').value = schedule.type || 'daily';
+    $('automationTime').value = schedule.time || '08:00';
+    $('automationWeekday').value = String(schedule.weekday ?? 0);
+    $('automationIntervalMinutes').value = String(schedule.minutes || 240);
+    if (schedule.at) {
+      const at = new Date(schedule.at);
+      const local = new Date(at.getTime() - at.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      $('automationOnceAt').value = local;
+    } else {
+      $('automationOnceAt').value = '';
+    }
+    $('automationDeleteBtn').hidden = !automation;
+    updateAutomationScheduleFields();
+    modal.hidden = false;
+    setTimeout(() => $('automationName')?.focus(), 20);
+  }
+
+  function closeAutomationModal() {
+    const modal = $('automationModal');
+    if (modal) modal.hidden = true;
+  }
+
+  function automationPayload() {
+    const type = $('automationScheduleType').value;
+    const schedule = { type, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata' };
+    if (type === 'daily') schedule.time = $('automationTime').value || '08:00';
+    if (type === 'weekly') {
+      schedule.time = $('automationTime').value || '08:00';
+      schedule.weekday = Number($('automationWeekday').value || 0);
+    }
+    if (type === 'once') schedule.at = new Date($('automationOnceAt').value).toISOString();
+    if (type === 'interval') schedule.minutes = Number($('automationIntervalMinutes').value || 240);
+    return {
+      name: $('automationName').value.trim(),
+      schedule,
+      action: { type: 'kyle_goal', goal: $('automationGoal').value.trim() },
+      output: { type: 'work_summary' }
+    };
+  }
+
+  async function updateAutomation(id, payload) {
+    const response = await fetch(`${API_BASE}/api/automations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error(`Automation update returned ${response.status}`);
+    await loadAutomations();
+    return response.json().catch(() => ({}));
+  }
+
+  function initAutomationControls() {
+    $('newAutomationBtn')?.addEventListener('click', () => openAutomationModal());
+    $('automationScheduleType')?.addEventListener('change', updateAutomationScheduleFields);
+    $('automationModalClose')?.addEventListener('click', closeAutomationModal);
+    $('automationCancelBtn')?.addEventListener('click', closeAutomationModal);
+    $('automationModal')?.addEventListener('click', event => {
+      if (event.target === $('automationModal')) closeAutomationModal();
+    });
+    $('automationForm')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      let payload;
+      try {
+        payload = automationPayload();
+      } catch (_) {
+        addError('Automation: choose a valid future date and time.');
+        return;
+      }
+      const id = $('automationId').value;
+      const response = await fetch(id ? `${API_BASE}/api/automations/${encodeURIComponent(id)}` : `${API_BASE}/api/automations`, {
+        method: id ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        addError(`Automation: ${detail.error || response.statusText}`);
+        return;
+      }
+      closeAutomationModal();
+      await loadAutomations();
+    });
+    $('automationDeleteBtn')?.addEventListener('click', async () => {
+      const id = $('automationId').value;
+      if (!id || !window.confirm('Delete this scheduled Kyle run?')) return;
+      await fetch(`${API_BASE}/api/automations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      closeAutomationModal();
+      await loadAutomations();
+    });
+  }
+
+  window.AgentAutomations = {
+    list: () => [...state.automations],
+    refresh: loadAutomations,
+    open: () => showTab('automations'),
+    runNow: async id => {
+      const response = await fetch(`${API_BASE}/api/automations/${encodeURIComponent(id)}/run`, { method: 'POST' });
+      if (!response.ok) throw new Error(`Automation run returned ${response.status}`);
+      await loadAutomations();
+      return response.json();
+    },
+    setEnabled: (id, enabled) => updateAutomation(id, { enabled })
+  };
+
   window.AgentCalendar = {
     refresh: () => refreshCalendar(true),
     createEvent: createCalendarEvent,
@@ -2100,6 +2341,8 @@ document.addEventListener('DOMContentLoaded', () => {
     getSelectedEvent: () => state.calendarEvents.find(event => event.id === state.calendarSelectedEventId) || null,
     getSelectedEventId: () => state.calendarSelectedEventId,
     getEvents: () => [...state.calendarEvents],
+    getVisibleEvents: () => combinedCalendarItems(),
+    dismissDeadline: dismissCalendarDeadline,
     open: () => showTab('calendar')
   };
 

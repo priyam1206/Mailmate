@@ -370,8 +370,76 @@ class WorkAgentService:
         return [j for j in self.list_jobs(user_id, reconcile=False) if j.get("status") == "needs_input"]
 
     def get_completed_jobs(self, user_id):
-        completed_statuses = {"sent", "approved_sent", "resolved_external", "ignored_outbound", "cancelled", "failed"}
+        completed_statuses = {"sent", "approved_sent", "resolved_external", "ignored_outbound", "completed", "cancelled", "failed"}
         return [j for j in self.list_jobs(user_id, reconcile=False) if j.get("status") in completed_statuses]
+
+    def create_automation_run(self, user_id, automation):
+        automation_id = str((automation or {}).get("id") or "automation")
+        stamp = _now()
+        digest = hashlib.sha256(f"{automation_id}:{stamp}".encode("utf-8")).hexdigest()[:12]
+        job_id = f"automation_{digest}"
+        job = {
+            "id": job_id,
+            "type": "automation_run",
+            "automation_id": automation_id,
+            "user_id": user_id,
+            "title": str((automation or {}).get("name") or "Scheduled Kyle run"),
+            "clean_title": str((automation or {}).get("name") or "Scheduled Kyle run"),
+            "status": "working",
+            "created_at": stamp,
+            "updated_at": stamp,
+            "source": {
+                "kind": "automation",
+                "automation_id": automation_id,
+                "schedule": (automation or {}).get("schedule") or {},
+            },
+            "goal": ((automation or {}).get("action") or {}).get("goal") or "Check the workspace and prepare a summary.",
+            "steps": [{"type": "automation_start", "label": "Started scheduled Kyle run", "status": "done", "at": stamp}],
+            "artifacts": [],
+            "output": {},
+        }
+        with self._lock:
+            jobs = self._read_jobs()
+            jobs[job_id] = job
+            self._write_jobs(jobs)
+        return dict(job)
+
+    def add_automation_run_step(self, job_id, user_id, label, status="done", detail=None):
+        with self._lock:
+            jobs = self._read_jobs()
+            job = jobs.get(str(job_id))
+            if not job or job.get("user_id") != user_id or job.get("type") != "automation_run":
+                return None
+            step = {"type": "automation_action", "label": _clean(label, 240), "status": status, "at": _now()}
+            if detail:
+                step["detail"] = _clean(detail, 500)
+            job.setdefault("steps", []).append(step)
+            job["updated_at"] = _now()
+            self._write_jobs(jobs)
+            return dict(job)
+
+    def finish_automation_run(self, job_id, user_id, summary, checklist=None, error=None):
+        with self._lock:
+            jobs = self._read_jobs()
+            job = jobs.get(str(job_id))
+            if not job or job.get("user_id") != user_id or job.get("type") != "automation_run":
+                return None
+            job["status"] = "failed" if error else "completed"
+            job["updated_at"] = _now()
+            job["output"] = {
+                "summary": _clean(summary, 2000),
+                "checklist": [_clean(item, 240) for item in (checklist or [])[:12]],
+            }
+            if error:
+                job["output"]["error"] = _clean(error, 800)
+            _append_step_once(
+                job,
+                "automation_complete" if not error else "automation_failed",
+                "Work summary ready" if not error else "Scheduled run could not finish",
+                status="done" if not error else "error",
+            )
+            self._write_jobs(jobs)
+            return dict(job)
 
     def get_job(self, job_id, user_id):
         with self._lock:
