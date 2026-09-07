@@ -28,3 +28,5 @@ README_*.txt
 VERIFY_*.bat
 .mailmate-*-backup/
 mailmate_remote_worker_dropin/
+FIX_*.py
+SETUP_*.py

@@ -46,11 +46,147 @@
     return labels[action.tool] || 'Working on it...';
   }
 
+  let currentOrbDelta = { x: 0, y: 0 };
+
+  async function moveOrbTo(target, options = {}) {
+    const mount = document.getElementById('kyleMount') || document.querySelector('.kyle-floating-mount');
+    if (!mount) return false;
+
+    let element = null;
+    if (typeof target === 'string') {
+      element = document.querySelector(target);
+    } else if (target && typeof target.getBoundingClientRect === 'function') {
+      element = target;
+    } else if (target && target.type) {
+      element = window.MailmateObjects?.getElement(target);
+    }
+    if (!element) return false;
+
+    if (options.scroll !== false && typeof element.scrollIntoView === 'function') {
+      element.scrollIntoView({
+        behavior: reducedMotion?.matches ? 'auto' : 'smooth',
+        block: options.scrollBlock || 'nearest',
+        inline: 'nearest'
+      });
+      await wait(reducedMotion?.matches ? 0 : 80);
+    }
+
+    const targetRect = element.getBoundingClientRect();
+    const orbWidth = mount.offsetWidth || 76;
+    const orbHeight = mount.offsetHeight || 76;
+    const winW = window.innerWidth || 1200;
+    const winH = window.innerHeight || 800;
+
+    // Fixed dock home is bottom-right (right: 26px, bottom: 26px)
+    const homeLeft = winW - orbWidth - 26;
+    const homeTop = winH - orbHeight - 26;
+
+    // Prefer placing Kyle to the right of target
+    let candidateX = targetRect.right + 16;
+    let candidateY = targetRect.top + Math.max(0, (targetRect.height - orbHeight) / 2);
+
+    // If overflowing right, place to the left of target
+    if (candidateX + orbWidth > winW - 16) {
+      candidateX = targetRect.left - orbWidth - 16;
+    }
+
+    // If still overflowing left, place above or below
+    if (candidateX < 16) {
+      candidateX = Math.min(winW - orbWidth - 16, Math.max(16, targetRect.left + 16));
+      candidateY = targetRect.top > orbHeight + 20 ? targetRect.top - orbHeight - 12 : targetRect.bottom + 12;
+    }
+
+    // Viewport collision bounds protection
+    candidateX = Math.max(12, Math.min(winW - orbWidth - 12, candidateX));
+    candidateY = Math.max(12, Math.min(winH - orbHeight - 12, candidateY));
+
+    const deltaX = Math.round(candidateX - homeLeft);
+    const deltaY = Math.round(candidateY - homeTop);
+
+    mount.classList.add('kyle-traveling');
+
+    if (reducedMotion?.matches) {
+      currentOrbDelta = { x: deltaX, y: deltaY };
+      mount.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0)`;
+      return true;
+    }
+
+    const prevX = currentOrbDelta.x;
+    const prevY = currentOrbDelta.y;
+    currentOrbDelta = { x: deltaX, y: deltaY };
+
+    if (typeof mount.animate === 'function') {
+      const midX = Math.round((prevX + deltaX) / 2);
+      const midY = Math.round((prevY + deltaY) / 2 - Math.min(35, Math.abs(deltaX - prevX) * 0.1 + 15));
+      const anim = mount.animate([
+        { transform: `translate3d(${prevX}px, ${prevY}px, 0)` },
+        { transform: `translate3d(${midX}px, ${midY}px, 0)`, offset: 0.45 },
+        { transform: `translate3d(${deltaX}px, ${deltaY}px, 0)` }
+      ], {
+        duration: duration(options.duration || 420),
+        easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+        fill: 'forwards'
+      });
+      await new Promise(resolve => {
+        anim.onfinish = resolve;
+        setTimeout(resolve, duration(options.duration || 420) + 20);
+      });
+      try { anim.cancel(); } catch (_) {}
+    }
+
+    mount.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0)`;
+    await wait(options.pauseAfter || 60);
+    return true;
+  }
+
+  async function moveOrbHome(options = {}) {
+    const mount = document.getElementById('kyleMount') || document.querySelector('.kyle-floating-mount');
+    if (!mount) return false;
+
+    if (currentOrbDelta.x === 0 && currentOrbDelta.y === 0 && !mount.style.transform) {
+      mount.classList.remove('kyle-traveling');
+      return true;
+    }
+
+    if (reducedMotion?.matches) {
+      currentOrbDelta = { x: 0, y: 0 };
+      mount.style.transform = '';
+      mount.classList.remove('kyle-traveling');
+      return true;
+    }
+
+    const prevX = currentOrbDelta.x;
+    const prevY = currentOrbDelta.y;
+    currentOrbDelta = { x: 0, y: 0 };
+
+    if (typeof mount.animate === 'function') {
+      const anim = mount.animate([
+        { transform: `translate3d(${prevX}px, ${prevY}px, 0)` },
+        { transform: 'translate3d(0px, 0px, 0)' }
+      ], {
+        duration: duration(options.duration || 400),
+        easing: 'cubic-bezier(0.34, 1.4, 0.64, 1)',
+        fill: 'forwards'
+      });
+      await new Promise(resolve => {
+        anim.onfinish = resolve;
+        setTimeout(resolve, duration(options.duration || 400) + 20);
+      });
+      try { anim.cancel(); } catch (_) {}
+    }
+
+    mount.style.transform = '';
+    mount.classList.remove('kyle-traveling');
+    await wait(options.pauseAfter || 40);
+    return true;
+  }
+
   async function acquire(reference) {
     const element = window.MailmateObjects?.getElement(reference);
     if (!element) return false;
     element.scrollIntoView({ behavior: reducedMotion?.matches ? 'auto' : 'smooth', block: 'center' });
     element.classList.add('kyle-acquiring');
+    await moveOrbTo(element, { scroll: false });
     await wait(140);
     element.classList.remove('kyle-acquiring');
     return true;
@@ -204,5 +340,5 @@
     window.dispatchEvent(new CustomEvent('kyle:action-progress', { detail: { action, progress, observation } }));
   }
 
-  window.KyleMotion = { queue, caption, acquire, emphasizeSelection, navigate, focus, reveal, annotate, previewMove, previewCreate, before, after, wait };
+  window.KyleMotion = { queue, caption, acquire, emphasizeSelection, navigate, focus, reveal, annotate, previewMove, previewCreate, before, after, wait, moveOrbTo, moveOrbHome };
 })();

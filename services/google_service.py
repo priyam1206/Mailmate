@@ -529,6 +529,26 @@ def mark_gmail_message_read(message_id):
     }
 
 
+def mark_gmail_message_important(message_id):
+    """Add Gmail's IMPORTANT and STARRED labels to one exact message."""
+    if not message_id:
+        raise ValueError('message_id is required')
+    service = _gmail_service()
+    if not service:
+        raise RuntimeError('Google credentials are not available')
+    result = service.users().messages().modify(
+        userId='me',
+        id=str(message_id),
+        body={'addLabelIds': ['IMPORTANT', 'STARRED']},
+    ).execute()
+    return {
+        'id': result.get('id') or str(message_id),
+        'thread_id': result.get('threadId'),
+        'is_important': True,
+        'labels': result.get('labelIds') or [],
+    }
+
+
 def _address_list(raw):
     return [{'name': name, 'email': email} for name, email in getaddresses([raw or '']) if email]
 

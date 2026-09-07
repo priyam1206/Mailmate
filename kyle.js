@@ -369,10 +369,16 @@
       return;
     }
 
-    const senderMatch = cleanPrompt.match(/\b(?:show\s+|find\s+)?(?:mails?|emails?|messages?)\s+from\s+([a-zA-Z]+)\b/i);
-    if (senderMatch && !['this', 'that', 'me', 'it'].includes(senderMatch[1].toLowerCase())) {
-      await executeSenderEmailGuidance(senderMatch[1], cleanPrompt, run);
-      return;
+    const senderMatch = cleanPrompt.match(/\b(?:show\s+|find\s+)?(?:mails?|emails?|messages?)\s+from\s+(.+)$/i);
+    if (senderMatch) {
+      let candidate = senderMatch[1]
+        .replace(/[?.!]+$/, '')
+        .replace(/\b(please|in\s+(?:my\s+)?inbox|today|this\s+week)\b/gi, '')
+        .trim();
+      if (candidate && !['this', 'that', 'me', 'it', 'them'].includes(candidate.toLowerCase())) {
+        await executeSenderEmailGuidance(candidate, cleanPrompt, run);
+        return;
+      }
     }
 
     const isCalendar = /\b(open|show|go\s+to)\s+(?:my\s+)?calendar\b/i.test(cleanPrompt);
@@ -490,7 +496,12 @@
     }
 
     store.set(store.states.SPEAKING);
-    utterance = new SpeechSynthesisUtterance(text);
+    const UtteranceClass = window.SpeechSynthesisUtterance || (typeof SpeechSynthesisUtterance !== 'undefined' ? SpeechSynthesisUtterance : null);
+    if (!UtteranceClass) {
+      finishSpeech(run);
+      return;
+    }
+    utterance = new UtteranceClass(text);
     utterance.rate = 1.02;
     utterance.pitch = 0.97;
     utterance.volume = 1;
@@ -681,6 +692,29 @@
     showStructuredError(message);
   }
 
+  function getEmailTimestamp(email) {
+    if (!email) return 0;
+    if (email.internal_date) {
+      const ms = Number(email.internal_date);
+      if (!Number.isNaN(ms) && ms > 0) return ms;
+    }
+    if (email.internalDate) {
+      const ms = Number(email.internalDate);
+      if (!Number.isNaN(ms) && ms > 0) return ms;
+    }
+    if (email.timestamp) {
+      const t = Number(email.timestamp);
+      if (!Number.isNaN(t) && t > 1000000000) return t > 1000000000000 ? t : t * 1000;
+      const parsed = Date.parse(email.timestamp);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    if (email.date) {
+      const parsed = Date.parse(email.date);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    return 0;
+  }
+
   async function executeRecentEmailGuidance(cleanPrompt, run) {
     store.set(store.states.THINKING);
 
@@ -696,9 +730,13 @@
       ]
     });
 
-    // 1. Navigate to Inbox
+    // 1. Navigate to Inbox with physical orb travel
     store.set(store.states.NAVIGATING);
-    await window.KyleMotion?.wait?.(150);
+    const inboxTab = document.querySelector('.nav-item[data-page="inbox"]') ||
+                     document.querySelector('[data-page="inbox"]');
+    if (inboxTab && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(inboxTab);
+    }
     window.KyleActions?.openPage('inbox');
     ui.updateCommandStep?.('step_nav', { status: 'done', label: 'Switched to Inbox' });
 
@@ -717,6 +755,7 @@
     }
 
     if (!emails.length) {
+      if (window.KyleMotion?.moveOrbHome) await window.KyleMotion.moveOrbHome();
       ui.updateCommandStep?.('step_fetch', { status: 'failed', label: 'No messages found in inbox' });
       showStructuredError({
         title: 'Inbox is empty or loading',
@@ -730,32 +769,49 @@
     }
     ui.updateCommandStep?.('step_fetch', { status: 'done', label: 'Checked latest messages' });
 
-    // 3. Spotlight top email row
+    // Sort by timestamp descending - never rely solely on array index
+    const sortedEmails = [...emails].sort((a, b) => getEmailTimestamp(b) - getEmailTimestamp(a));
+    const topEmail = sortedEmails[0] || emails[0];
+
+    // 3. Spotlight and travel beside top email row
     ui.updateCommandStep?.('step_spotlight', { status: 'active', label: 'Highlighting newest message…' });
-    const topEmail = emails[0];
-    const topEmailRow = document.querySelector('.email-item[data-index="0"]') ||
+    const topEmailId = topEmail?.id || topEmail?.gmail_id;
+    const topEmailRow = (topEmailId ? document.querySelector(`[data-kyle-id="${topEmailId}"]`) : null) ||
+                        (topEmailId ? document.querySelector(`[data-email-id="${topEmailId}"]`) : null) ||
+                        document.querySelector('.email-item[data-index="0"]') ||
                         document.querySelector('.email-item');
+
+    if (topEmailRow && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(topEmailRow);
+    }
     if (topEmailRow && window.KyleSpotlight?.spotlight) {
-      window.KyleSpotlight.spotlight(topEmailRow, { duration: 2500, scroll: true });
-      await window.KyleMotion?.wait?.(400);
+      window.KyleSpotlight.spotlight(topEmailRow, { duration: 2500, scroll: false });
+      await window.KyleMotion?.wait?.(350);
     }
     ui.updateCommandStep?.('step_spotlight', { status: 'done', label: 'Highlighted newest message' });
 
-    // 4. Open email thread
+    // 4. Open email thread and glide beside detail view
     ui.updateCommandStep?.('step_open', { status: 'active', label: 'Opening thread…' });
     if (topEmail && window.AgentMail?.openEmail) {
       await window.AgentMail.openEmail(topEmail);
-      await window.KyleMotion?.wait?.(350);
+      await window.KyleMotion?.wait?.(300);
     } else if (topEmailRow) {
       topEmailRow.click();
-      await window.KyleMotion?.wait?.(350);
+      await window.KyleMotion?.wait?.(300);
+    }
+
+    const emailHeader = document.querySelector('.email-detail-header');
+    if (emailHeader && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(emailHeader);
+    }
+    if (emailHeader && window.KyleSpotlight?.spotlight) {
+      window.KyleSpotlight.spotlight(emailHeader, { duration: 3500, scroll: false });
     }
     ui.updateCommandStep?.('step_open', { status: 'done', label: 'Opened message thread' });
 
-    // 5. Spotlight email detail header
-    const emailHeader = document.querySelector('.email-detail-header');
-    if (emailHeader && window.KyleSpotlight?.spotlight) {
-      window.KyleSpotlight.spotlight(emailHeader, { duration: 3500, scroll: false });
+    // 5. Return orb to dock when presenting results and command card
+    if (window.KyleMotion?.moveOrbHome) {
+      await window.KyleMotion.moveOrbHome();
     }
 
     // 6. Present result & contextual action chips
@@ -800,8 +856,41 @@
         {
           label: 'Mark important',
           icon: 'fas fa-star',
-          onClick: () => {
-            ui.setLiveText('Marked as important.', 2500);
+          onClick: async () => {
+            const emailId = topEmail?.id || topEmail?.gmail_id;
+            if (!emailId) {
+              ui.setLiveText('Could not find email ID to mark as important.', 3000);
+              return;
+            }
+            ui.setLiveText('Marking email as important in Gmail…');
+            try {
+              const res = await fetch(`${API_BASE}/api/gmail/messages/${emailId}/important`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+              });
+              if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || `Server returned ${res.status}`);
+              }
+              const data = await res.json();
+              if (topEmail) {
+                topEmail.is_important = true;
+                topEmail.labels = data.labels || [...(topEmail.labels || []), 'IMPORTANT', 'STARRED'];
+              }
+              await window.AgentMail?.refresh?.();
+              const msg = 'Marked as important and starred in Gmail.';
+              ui.setLiveText(msg, 3500);
+              store.addMessage('kyle', msg);
+            } catch (err) {
+              console.error('[Kyle] Mark important failed:', err);
+              showStructuredError({
+                title: 'Could not mark email as important',
+                reason: err.message || 'Gmail label update failed.',
+                actions: [
+                  { label: 'Try again', primary: true, icon: 'fas fa-star', onClick: () => { /* retry */ } }
+                ]
+              });
+            }
           }
         }
       ]
@@ -829,7 +918,11 @@
       ]
     });
 
-    await window.KyleMotion?.wait?.(150);
+    const calTab = document.querySelector('.nav-item[data-page="calendar"]') ||
+                   document.querySelector('[data-page="calendar"]');
+    if (calTab && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(calTab);
+    }
     window.KyleActions?.openPage('calendar');
     ui.updateCommandStep?.('step_cal_nav', { status: 'done', label: 'Switched to Calendar' });
 
@@ -838,10 +931,17 @@
 
     const todayCol = document.querySelector('.calendar-day-column.is-today') ||
                      document.querySelector('.calendar-day-column');
+    if (todayCol && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(todayCol);
+    }
     if (todayCol && window.KyleSpotlight?.spotlight) {
-      window.KyleSpotlight.spotlight(todayCol, { duration: 3000, scroll: true });
+      window.KyleSpotlight.spotlight(todayCol, { duration: 3000, scroll: false });
     }
     ui.updateCommandStep?.('step_cal_spot', { status: 'done', label: 'Calendar ready' });
+
+    if (window.KyleMotion?.moveOrbHome) {
+      await window.KyleMotion.moveOrbHome();
+    }
 
     store.set(store.states.SUCCESS);
     const reply = "Here is your calendar for this week.";
@@ -867,7 +967,11 @@
       ]
     });
 
-    await window.KyleMotion?.wait?.(150);
+    const inboxTab = document.querySelector('.nav-item[data-page="inbox"]') ||
+                     document.querySelector('[data-page="inbox"]');
+    if (inboxTab && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(inboxTab);
+    }
     window.KyleActions?.openPage('inbox');
     ui.updateCommandStep?.('step_s_nav', { status: 'done', label: 'Switched to Inbox' });
 
@@ -875,9 +979,25 @@
     ui.updateCommandStep?.('step_s_find', { status: 'active', label: `Searching messages from ${senderName}…` });
 
     let emails = window.AgentMail?.getEmails?.() || store.context?.emails || [];
-    const matched = emails.filter(e => (e.sender || '').toLowerCase().includes(senderName.toLowerCase()));
+    const query = String(senderName || '').trim().toLowerCase();
+    const queryTokens = query.split(/[\s._+-]+/).filter(Boolean);
+
+    const matched = emails.filter(e => {
+      const rawSender = (e.sender || '').toLowerCase();
+      const fromName = (e.from?.name || '').toLowerCase();
+      const fromEmail = (e.from?.email || '').toLowerCase();
+      if (rawSender.includes(query) || fromName.includes(query) || fromEmail.includes(query)) {
+        return true;
+      }
+      if (queryTokens.length > 1) {
+        const combined = `${rawSender} ${fromName} ${fromEmail}`;
+        return queryTokens.every(tok => combined.includes(tok));
+      }
+      return false;
+    });
 
     if (!matched.length) {
+      if (window.KyleMotion?.moveOrbHome) await window.KyleMotion.moveOrbHome();
       ui.updateCommandStep?.('step_s_find', { status: 'failed', label: `No emails found from ${senderName}` });
       showStructuredError({
         title: `No emails from ${senderName}`,
@@ -889,20 +1009,37 @@
       return;
     }
 
+    // Sort matched by timestamp descending so newest is opened
+    matched.sort((a, b) => getEmailTimestamp(b) - getEmailTimestamp(a));
     ui.updateCommandStep?.('step_s_find', { status: 'done', label: `Found ${matched.length} email${matched.length === 1 ? '' : 's'}` });
 
     const topMatch = matched[0];
     const topRow = document.querySelector(`[data-kyle-id="${topMatch.id || topMatch.gmail_id}"]`) ||
+                   document.querySelector(`[data-email-id="${topMatch.id || topMatch.gmail_id}"]`) ||
                    document.querySelector('.email-item');
+
+    if (topRow && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(topRow);
+    }
     if (topRow && window.KyleSpotlight?.spotlight) {
-      window.KyleSpotlight.spotlight(topRow, { duration: 2500, scroll: true });
+      window.KyleSpotlight.spotlight(topRow, { duration: 2500, scroll: false });
     }
 
     ui.updateCommandStep?.('step_s_open', { status: 'active', label: 'Opening thread…' });
     if (window.AgentMail?.openEmail) {
       await window.AgentMail.openEmail(topMatch);
+      await window.KyleMotion?.wait?.(300);
+    }
+
+    const emailHeader = document.querySelector('.email-detail-header');
+    if (emailHeader && window.KyleMotion?.moveOrbTo) {
+      await window.KyleMotion.moveOrbTo(emailHeader);
     }
     ui.updateCommandStep?.('step_s_open', { status: 'done', label: 'Opened thread' });
+
+    if (window.KyleMotion?.moveOrbHome) {
+      await window.KyleMotion.moveOrbHome();
+    }
 
     store.set(store.states.SUCCESS);
     const reply = `I found ${matched.length} email${matched.length === 1 ? '' : 's'} from ${senderName} and opened the latest one.`;

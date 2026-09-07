@@ -33,7 +33,7 @@ os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 from email.utils import parseaddr
 from services.whisper_service import whisper_service
-from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_history_id, get_gmail_thread_changes, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft, find_sent_message_by_rfc_id
+from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_history_id, get_gmail_thread_changes, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, mark_gmail_message_important, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft, find_sent_message_by_rfc_id
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.work_agent_service import work_agent_service
@@ -1305,6 +1305,22 @@ def gmail_message_read(message_id):
         }), status
 
 
+@app.route('/api/gmail/messages/<message_id>/important', methods=['POST'])
+def gmail_message_important(message_id):
+    if not get_user_profile():
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        return jsonify(mark_gmail_message_important(message_id))
+    except Exception as exc:
+        app.logger.exception('Gmail mark-important failed')
+        detail = str(exc)
+        status = 403 if ('insufficient' in detail.lower() or 'permission' in detail.lower() or 'scope' in detail.lower()) else 500
+        return jsonify({
+            'error': detail,
+            'hint': 'Reconnect Google once so Mailmate can receive the gmail.modify scope.' if status == 403 else None,
+        }), status
+
+
 @app.route('/api/mail/send', methods=['POST'])
 def send_mail_endpoint():
     profile = get_user_profile()
@@ -1326,9 +1342,7 @@ def send_mail_endpoint():
         return jsonify({'code': 'invalid_recipient', 'error': 'A valid recipient email is required.'}), 400
     if not body:
         return jsonify({'code': 'empty_body', 'error': 'Message body is required.'}), 400
-    if not operation_id:
-        operation_id = f"op_{int(time.time() * 1000)}_{uuid.uuid4().hex[:12]}"
-    elif not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', operation_id):
+    if not operation_id or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', operation_id):
         return jsonify({'code': 'invalid_operation_id', 'error': 'A valid operation_id is required.'}), 400
 
     user_id = str(profile.get('email') or profile.get('id') or 'default').lower()
@@ -2222,6 +2236,33 @@ def _infer_agent_actions(message, resolved, context=None):
     return actions
 
 
+def _email_timestamp(email):
+    if not isinstance(email, dict):
+        return 0
+    internal = email.get('internal_date') or email.get('internalDate')
+    if internal:
+        try:
+            val = int(internal)
+            if val > 0:
+                return val
+        except (ValueError, TypeError):
+            pass
+    ts = email.get('timestamp') or email.get('date')
+    if ts:
+        try:
+            val = int(ts)
+            return val if val > 1000000000000 else val * 1000
+        except (ValueError, TypeError):
+            pass
+        try:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(str(ts))
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            pass
+    return 0
+
+
 def _find_contacts_by_name(query, emails):
     query_clean = str(query or '').strip().lower()
     if not query_clean:
@@ -2240,8 +2281,13 @@ def _find_contacts_by_name(query, emails):
                 'full': sender
             }
     matched = []
+    query_tokens = [t for t in re.split(r'[\s._+-]+', query_clean) if t]
     for key, c in contacts.items():
-        if query_clean in c['name'].lower() or query_clean in c['email'].lower():
+        c_name = c['name'].lower()
+        c_email = c['email'].lower()
+        if query_clean in c_name or query_clean in c_email:
+            matched.append(c)
+        elif query_tokens and all(token in c_name or token in c_email for token in query_tokens):
             matched.append(c)
     return matched
 
@@ -2260,6 +2306,7 @@ def _email_display_name(address):
 def _handle_mail_intent(message, active_draft, selected_email, context_emails, user_profile):
     lower = message.lower().strip()
     user_name = user_profile.get('name') or 'Priyam'
+    sorted_context = sorted(context_emails or [], key=_email_timestamp, reverse=True)
 
     # Case 1: Active draft editing or sending in contextual composer
     if active_draft and active_draft.get('body'):
@@ -2305,9 +2352,11 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
     if re.search(r'\breply\b', lower):
         target_name = None
         explicit_address = _explicit_email_address(message)
-        name_match = re.search(r'\breply\s+to\s+([A-Za-z]+)\b', lower)
+        name_match = re.search(r'\breply\s+to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z]+(?:\s+[A-Za-z]+)*?)(?:\s+(?:saying|that|to\s+say|\.|$))', lower)
+        if not name_match:
+            name_match = re.search(r'\breply\s+to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z]+(?:\s+[A-Za-z]+)*)\b', lower)
         if name_match and name_match.group(1).lower() not in {'this', 'that', 'the', 'it', 'me'}:
-            target_name = name_match.group(1)
+            target_name = name_match.group(1).strip()
 
         target_contact = None
         thread_id = None
@@ -2315,14 +2364,14 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
         thread_subject = 'Update'
 
         if explicit_address:
-            contacts = _find_contacts_by_name(explicit_address, context_emails)
+            contacts = _find_contacts_by_name(explicit_address, sorted_context)
             target_contact = contacts[0] if contacts else {
                 'name': _email_display_name(explicit_address),
                 'email': explicit_address,
                 'full': explicit_address,
             }
         elif target_name:
-            contacts = _find_contacts_by_name(target_name, context_emails)
+            contacts = _find_contacts_by_name(target_name, sorted_context)
             if len(contacts) > 1:
                 options_str = ", ".join([f"{c['name']} ({c['email']})" for c in contacts])
                 return {
@@ -2333,7 +2382,7 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 }
             elif len(contacts) == 1:
                 target_contact = contacts[0]
-                matching_email = next((e for e in context_emails if target_contact['email'] in (e.get('sender') or '').lower()), None)
+                matching_email = next((e for e in sorted_context if target_contact['email'] in (e.get('sender') or '').lower()), None)
                 if matching_email:
                     thread_id = matching_email.get('threadId') or matching_email.get('thread_id') or matching_email.get('id')
                     in_reply_to = matching_email.get('rfc_message_id') or None
@@ -2388,11 +2437,13 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
     # Case 3: Compose new email intent
     # Matches: "Email Aarush and ask if he finished the report", "write an email to Aarush asking..."
     explicit_address = _explicit_email_address(message)
-    compose_match = re.search(r'\b(?:email|write\s+(?:an?\s+)?email\s+to|compose\s+(?:an?\s+)?email\s+to|send\s+(?:an?\s+)?email\s+to)\s+([A-Za-z]+)\b', lower)
+    compose_match = re.search(r'\b(?:email|write\s+(?:an?\s+)?email\s+to|compose\s+(?:an?\s+)?email\s+to|send\s+(?:an?\s+)?email\s+to)\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z]+(?:\s+[A-Za-z]+)*?)(?:\s+(?:and\s+ask|asking|about|saying|that|\.|$))', lower)
+    if not compose_match:
+        compose_match = re.search(r'\b(?:email|write\s+(?:an?\s+)?email\s+to|compose\s+(?:an?\s+)?email\s+to|send\s+(?:an?\s+)?email\s+to)\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z]+(?:\s+[A-Za-z]+)*)\b', lower)
     if compose_match:
-        target_name = compose_match.group(1)
+        target_name = compose_match.group(1).strip()
         if target_name.lower() not in {'this', 'that', 'the', 'it', 'me'}:
-            contacts = _find_contacts_by_name(explicit_address or target_name, context_emails)
+            contacts = _find_contacts_by_name(explicit_address or target_name, sorted_context)
             if len(contacts) > 1:
                 options_str = ", ".join([f"{c['name']} ({c['email']})" for c in contacts])
                 return {
