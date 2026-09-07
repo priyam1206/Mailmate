@@ -522,6 +522,33 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>`;
   }
 
+  const prefetchTimers = new WeakMap();
+
+  function prefetchEmail(email) {
+    const id = String(emailKey(email) || '');
+    if (!id || state.fullMessages.has(id) || state.loadingMessageIds.has(id)) return;
+    state.loadingMessageIds.add(id);
+    fetch(`${API_BASE}/api/gmail/messages/${encodeURIComponent(id)}`, { cache: 'no-store' })
+      .then(async response => {
+        if (!response.ok) return null;
+        return response.json();
+      })
+      .then(detail => {
+        if (!detail || detail.error) return;
+        state.fullMessages.set(id, detail);
+        const source = state.data?.emails?.find(item => emailKey(item) === id);
+        if (source) Object.assign(source, detail, { is_read: source.is_read });
+        if (state.selectedEmailId === id) {
+          const fullSelected = { ...email, ...detail };
+          renderEmailDetail(fullSelected, false);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        state.loadingMessageIds.delete(id);
+      });
+  }
+
   function renderEmails(emails) {
     window.MailmateObjects?.unregisterType('email');
     const filtered = emails.filter(email => {
@@ -564,7 +591,25 @@ document.addEventListener('DOMContentLoaded', () => {
           important: isImportant(email)
         }
       }, item);
+      item.addEventListener('mouseenter', () => {
+        const timer = setTimeout(() => {
+          prefetchEmail(email);
+        }, 200);
+        prefetchTimers.set(item, timer);
+      });
+      item.addEventListener('mouseleave', () => {
+        const timer = prefetchTimers.get(item);
+        if (timer) {
+          clearTimeout(timer);
+          prefetchTimers.delete(item);
+        }
+      });
       item.addEventListener('click', () => {
+        const timer = prefetchTimers.get(item);
+        if (timer) {
+          clearTimeout(timer);
+          prefetchTimers.delete(item);
+        }
         openEmail(email);
       });
     });
@@ -602,7 +647,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderEmails(state.data?.emails || []);
-    if (state.fullMessages.has(id) || state.loadingMessageIds.has(id)) return;
+    if (state.fullMessages.has(id)) return;
+    if (state.loadingMessageIds.has(id)) {
+      renderEmailDetail(email, true);
+      return;
+    }
 
     state.loadingMessageIds.add(id);
     renderEmailDetail(email, true);
@@ -626,6 +675,19 @@ document.addEventListener('DOMContentLoaded', () => {
       els.emailDetail.innerHTML = '<div class="empty-detail"><i class="far fa-envelope-open"></i><p>Select an email to read it here.</p></div>';
       return;
     }
+
+    const hasFullBody = Boolean(email.body);
+    let bodyContent = '';
+    if (hasFullBody) {
+      bodyContent = escapeHtml(email.body);
+    } else if (loading) {
+      bodyContent = `
+        <div class="email-prefetch-indicator"><i class="fas fa-circle-notch fa-spin"></i> Loading full message...</div>
+        <div class="email-snippet-content">${escapeHtml(email.snippet || 'Loading preview...')}</div>`;
+    } else {
+      bodyContent = escapeHtml(email.body || email.snippet || 'This message has no readable text body.');
+    }
+
     els.emailDetail.innerHTML = `
       <header class="email-detail-header">
         <div class="email-detail-title-row">
@@ -639,7 +701,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="email-detail-meta"><span>${escapeHtml(email.sender || 'Unknown sender')}</span><time>${escapeHtml(formatDate(email.date || email.timestamp, true))}</time></div>
         ${privacyDetailBox(email.privacy_gate)}
       </header>
-      <div class="email-body" ${loading ? 'aria-busy="true"' : ''}>${loading ? '<span class="email-loading">Loading full message...</span>' : escapeHtml(email.body || email.snippet || 'This message has no readable text body.')}</div>`;
+      <div class="email-body" ${loading ? 'aria-busy="true"' : ''}>${bodyContent}</div>`;
     $('emailTrashBtn')?.addEventListener('click', () => trashEmail(email));
     const reference = emailReference(email);
     window.MailmateObjects?.register({

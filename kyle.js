@@ -15,16 +15,25 @@
   let smoothedSpeechEnergy = 0;
   let bargePeaks = 0;
 
+  let currentRecorder = null;
+
   function saveMutePreference() {
     try {
-      localStorage.setItem?.('kyle_muted', store.muted ? 'true' : 'false');
+      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+        localStorage.setItem('kyle_muted', store.muted ? 'true' : 'false');
+      }
     } catch (_) {
       // Muting still works when storage is unavailable or blocked.
     }
   }
 
-  const storedMuted = localStorage.getItem('kyle_muted');
-  if (storedMuted !== null) {
+  let storedMuted = null;
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      storedMuted = localStorage.getItem('kyle_muted');
+    }
+  } catch (_) {}
+  if (storedMuted !== null && storedMuted !== '') {
     store.muted = storedMuted === 'true';
     ui.setMuted(store.muted);
   }
@@ -63,6 +72,17 @@
     window.dispatchEvent(new CustomEvent('kyle:mute-change', { detail: { muted: store.muted } }));
   });
 
+  async function whisperReady() {
+    try {
+      const response = await fetch(`${API_BASE}/api/stt/status`, { cache: 'no-store' });
+      if (!response.ok) return false;
+      const status = await response.json();
+      return Boolean(status.loaded || status.available);
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function startListening() {
     if (store.muted) return;
     if (store.current === store.states.LISTENING || store.current === store.states.TRANSCRIBING) return;
@@ -72,7 +92,81 @@
     const run = activeRun;
     recognitionTranscript = '';
 
+    if (await whisperReady()) {
+      return startWhisperListening(run);
+    }
+
     return startBrowserListening(run);
+  }
+
+  async function startWhisperListening(run) {
+    try {
+      await audio.openMic();
+      if (run !== activeRun) return;
+
+      store.set(store.states.LISTENING);
+      ui.setLiveText('Listening (Whisper)...');
+      console.log('[Kyle Voice] local Whisper recording started');
+
+      currentRecorder = audio.startRecording(
+        null,
+        blob => transcribeWithWhisper(blob, run)
+      );
+
+      recognitionTimer = setTimeout(() => stopListening(), 15000);
+    } catch (error) {
+      console.warn('[Kyle Voice] local recording unavailable:', error.message || error);
+      audio.cleanupMic();
+      startBrowserListening(run);
+    }
+  }
+
+  async function transcribeWithWhisper(blob, run) {
+    clearTimeout(recognitionTimer);
+    recognitionTimer = null;
+    currentRecorder = null;
+    audio.cleanupMic();
+
+    if (run !== activeRun) return;
+    if (!blob || blob.size < 1000) {
+      store.set(store.states.IDLE);
+      ui.setLiveText('');
+      return;
+    }
+
+    store.set(store.states.TRANSCRIBING);
+    ui.setLiveText('Transcribing with Whisper...');
+
+    const form = new FormData();
+    form.append('audio', blob, 'kyle.webm');
+
+    try {
+      const response = await fetch(`${API_BASE}/api/stt/transcribe`, {
+        method: 'POST',
+        body: form
+      });
+      if (!response.ok) throw new Error(`STT returned ${response.status}`);
+      const data = await response.json();
+      const transcript = String(data.text || '').trim();
+
+      if (!transcript) {
+        store.set(store.states.IDLE);
+        ui.setLiveText('');
+        return;
+      }
+
+      console.log('[Kyle Voice] Whisper transcript ready:', transcript);
+      ui.setLiveText(transcript);
+      handlePrompt(transcript, run);
+    } catch (error) {
+      console.warn('[Kyle Voice] Whisper failed:', error.message || error);
+      if (SpeechRecognition) {
+        ui.setLiveText('Local STT failed. Using browser fallback…', 1800);
+        setTimeout(() => startBrowserListening(run), 150);
+      } else {
+        fail('Voice transcription failed. You can still type to Kyle.');
+      }
+    }
   }
 
   async function startBrowserListening(run) {
@@ -128,6 +222,11 @@
   function stopListening() {
     clearTimeout(recognitionTimer);
     recognitionTimer = null;
+
+    if (currentRecorder && currentRecorder.state !== 'inactive') {
+      try { currentRecorder.stop(); } catch (_) {}
+      return;
+    }
 
     if (recognition) {
       try { recognition.stop(); } catch (_) { finishBrowserRecognition(activeRun); }
@@ -391,6 +490,14 @@
     clearTimeout(recognitionTimer);
     recognitionTimer = null;
 
+    if (currentRecorder && currentRecorder.state !== 'inactive') {
+      try {
+        currentRecorder.onstop = null;
+        currentRecorder.stop();
+      } catch (_) {}
+      currentRecorder = null;
+    }
+
     if (recognition) {
       recognition.onend = null;
       try { recognition.abort(); } catch (_) {}
@@ -425,7 +532,14 @@
   }
 
   function stopAudioForText() {
-    const active = recognition || currentRecorder || [store.states.LISTENING, store.states.TRANSCRIBING, store.states.SPEAKING].includes(store.current);
+    const active =
+      recognition ||
+      [
+        store.states.LISTENING,
+        store.states.TRANSCRIBING,
+        store.states.SPEAKING
+      ].includes(store.current);
+
     if (active) interrupt(false);
   }
 

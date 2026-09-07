@@ -1366,12 +1366,14 @@ h2 { font-size: 1rem; }
   min-height: 0;
   overflow-y: auto;
   background: #fbfbf9;
+  padding-bottom: 28px;
 }
 
 .calendar-time-column {
   position: relative;
-  height: calc(var(--calendar-hour-height) * 24);
+  height: calc(var(--calendar-hour-height) * 24 + 28px);
   border-right: 1px solid var(--line);
+  padding-bottom: 28px;
 }
 
 .calendar-time-label {
@@ -1384,8 +1386,9 @@ h2 { font-size: 1rem; }
 
 .calendar-day-column {
   position: relative;
-  height: calc(var(--calendar-hour-height) * 24);
+  height: calc(var(--calendar-hour-height) * 24 + 28px);
   border-right: 1px solid var(--line);
+  padding-bottom: 28px;
   background-image:
     repeating-linear-gradient(
       to bottom,
@@ -2198,3 +2201,30 @@ h2 { font-size: 1rem; }
 
 
 
+
+
+/* Non-blocking hover prefetch & snippet display */
+.email-prefetch-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 6px;
+}
+
+.email-prefetch-indicator i {
+  font-size: 0.75rem;
+  animation: fa-spin 1s linear infinite;
+}
+
+.email-snippet-content {
+  color: var(--text, #1e293b);
+  opacity: 0.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}

@@ -160,11 +160,30 @@ def handle_callback(url, state=None, code_verifier=None):
     return creds
 
 
+_GMAIL_CLIENT_CACHE = {
+    'service': None,
+    'token': None,
+}
+
+
 def _gmail_service():
     creds = get_credentials()
     if not creds:
+        _GMAIL_CLIENT_CACHE['service'] = None
+        _GMAIL_CLIENT_CACHE['token'] = None
         return None
-    return build('gmail', 'v1', credentials=creds, cache_discovery=False)
+
+    current_token = getattr(creds, 'token', None)
+    cached_service = _GMAIL_CLIENT_CACHE.get('service')
+    cached_token = _GMAIL_CLIENT_CACHE.get('token')
+
+    if cached_service and current_token and current_token == cached_token and getattr(creds, 'valid', True):
+        return cached_service
+
+    service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
+    _GMAIL_CLIENT_CACHE['service'] = service
+    _GMAIL_CLIENT_CACHE['token'] = current_token
+    return service
 
 
 def get_user_profile():
@@ -516,10 +535,9 @@ def get_gmail_threads():
 def create_gmail_draft(to, subject, body, thread_id=None, in_reply_to=None):
     """Create an actual Gmail draft tied to a thread so it appears in Gmail and can be reviewed."""
     from email.message import EmailMessage
-    creds = get_credentials()
-    if not creds:
+    service = _gmail_service()
+    if not service:
         raise RuntimeError("Google account not connected")
-    service = build('gmail', 'v1', credentials=creds)
 
     msg = EmailMessage()
     msg.set_content(body or '')
@@ -554,10 +572,9 @@ def create_gmail_draft(to, subject, body, thread_id=None, in_reply_to=None):
 def update_gmail_draft(draft_id, to, subject, body, thread_id=None, in_reply_to=None):
     """Update an existing Gmail draft with new or edited content before sending."""
     from email.message import EmailMessage
-    creds = get_credentials()
-    if not creds:
+    service = _gmail_service()
+    if not service:
         raise RuntimeError("Google account not connected")
-    service = build('gmail', 'v1', credentials=creds)
 
     msg = EmailMessage()
     msg.set_content(body or '')
@@ -612,10 +629,9 @@ def send_gmail_draft(draft_id):
 def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None):
     """Send an exact email message directly via Gmail API users.messages.send."""
     from email.message import EmailMessage
-    creds = get_credentials()
-    if not creds:
+    service = _gmail_service()
+    if not service:
         raise RuntimeError("Google account not connected")
-    service = build('gmail', 'v1', credentials=creds)
 
     msg = EmailMessage()
     msg.set_content(body or '')

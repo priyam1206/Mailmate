@@ -28,6 +28,7 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 from email.utils import parseaddr
+from services.whisper_service import whisper_service
 from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
@@ -44,6 +45,9 @@ app.config.update(
     SESSION_COOKIE_SAMESITE='Lax'
 )
 CORS(app)
+
+# Initialize local Whisper STT in background
+whisper_service.initialize()
 
 APP_TIMEZONE = os.getenv('APP_TIMEZONE', 'Asia/Kolkata')
 
@@ -1044,6 +1048,38 @@ def send_mail_endpoint():
     except Exception as exc:
         app.logger.exception('Send mail failed')
         return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/stt/status', methods=['GET'])
+def stt_status():
+    return jsonify(whisper_service.get_status())
+
+
+@app.route('/api/stt/transcribe', methods=['POST'])
+def stt_transcribe():
+    if 'audio' not in request.files:
+        return jsonify({'error': 'No audio file provided'}), 400
+    audio_file = request.files['audio']
+    if not audio_file.filename:
+        return jsonify({'error': 'Empty audio file'}), 400
+
+    import tempfile
+    ext = os.path.splitext(audio_file.filename)[1] or '.webm'
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp_path = tmp.name
+        audio_file.save(tmp_path)
+
+    try:
+        result = whisper_service.transcribe(tmp_path)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 
 @app.route('/api/calendar/ai-sync', methods=['POST'])
