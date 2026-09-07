@@ -1,24 +1,30 @@
-/**
+﻿/**
  * kyle-drag.js
- * Magnetic corner snapping + drag for:
- *   1. The Kyle floating mount (.kyle-floating-mount) — orb + input bar
- *   2. The Kyle action panel (.kyle-action-panel) — composer / command card
+ * Magnetic corner drag for FLOATING elements only.
+ * The Overview page embedded prompt bar is intentionally excluded -- it stays static.
+ * Only:
+ *   1. #kyleMount when it is NOT inside .kyle-overview-mount
+ *   2. .kyle-action-panel (composer/command card)
+ * are made draggable.
  */
 (function () {
-  const SNAP_MARGIN = 24;        // px from viewport edge when snapped
-  const SNAP_THRESHOLD = 80;     // px from corner to trigger magnetic snap
-  const SPRING_DURATION = 380;   // ms for snap spring animation
+  const SNAP_MARGIN = 24;
+  const SNAP_THRESHOLD = 80;
+  const SPRING_DURATION = 380;
 
-  /* ── helpers ──────────────────────────────────────────────────── */
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function isInOverviewMount(el) {
+    return !!(el && el.closest('.kyle-overview-mount'));
+  }
 
   function nearestCorner(x, y, w, h) {
     const vw = window.innerWidth, vh = window.innerHeight;
     const corners = [
-      { label: 'bl', x: SNAP_MARGIN, y: vh - h - SNAP_MARGIN },
-      { label: 'br', x: vw - w - SNAP_MARGIN, y: vh - h - SNAP_MARGIN },
-      { label: 'tl', x: SNAP_MARGIN, y: SNAP_MARGIN },
-      { label: 'tr', x: vw - w - SNAP_MARGIN, y: SNAP_MARGIN },
+      { label: 'bl', x: SNAP_MARGIN,              y: vh - h - SNAP_MARGIN },
+      { label: 'br', x: vw - w - SNAP_MARGIN,     y: vh - h - SNAP_MARGIN },
+      { label: 'tl', x: SNAP_MARGIN,              y: SNAP_MARGIN },
+      { label: 'tr', x: vw - w - SNAP_MARGIN,     y: SNAP_MARGIN },
     ];
     let best = corners[0], bestDist = Infinity;
     for (const c of corners) {
@@ -28,210 +34,170 @@
     return { ...best, dist: bestDist };
   }
 
-  function springTo(el, tx, ty, callback) {
-    el.style.transition = `transform ${SPRING_DURATION}ms cubic-bezier(0.22, 1.2, 0.36, 1), left ${SPRING_DURATION}ms cubic-bezier(0.22, 1.2, 0.36, 1), top ${SPRING_DURATION}ms cubic-bezier(0.22, 1.2, 0.36, 1)`;
+  function springTo(el, tx, ty, cb) {
+    el.style.transition = 'left ' + SPRING_DURATION + 'ms cubic-bezier(0.22,1.2,0.36,1), top ' + SPRING_DURATION + 'ms cubic-bezier(0.22,1.2,0.36,1)';
     el.style.left = tx + 'px';
-    el.style.top = ty + 'px';
-    if (callback) setTimeout(callback, SPRING_DURATION);
+    el.style.top  = ty + 'px';
+    if (cb) setTimeout(cb, SPRING_DURATION);
   }
 
-  /* ── makeDraggable ────────────────────────────────────────────── */
-  function makeDraggable(el, opts = {}) {
-    const {
-      handle = el,
-      magnetic = true,
-      onSnap = null,
-      initialCorner = 'br',  // bl | br | tl | tr
-      zBase = 1400,
-    } = opts;
+  function makeDraggable(el, opts) {
+    opts = opts || {};
+    var handle        = opts.handle || el;
+    var magnetic      = opts.magnetic !== false;
+    var onSnap        = opts.onSnap || null;
+    var initialCorner = opts.initialCorner || 'br';
+    var zBase         = opts.zBase || 1400;
 
-    let dragging = false;
-    let startPointerX = 0, startPointerY = 0;
-    let startElX = 0, startElY = 0;
-    let snapped = true;
-    let currentCorner = initialCorner;
+    var dragging = false;
+    var startPX = 0, startPY = 0, startEX = 0, startEY = 0;
+    var snapped = true;
+    var currentCorner = initialCorner;
 
-    // Put element in absolute positioning mode
     function getRect() { return el.getBoundingClientRect(); }
 
-    function snapToCorner(corner, animate = true) {
-      const rect = getRect();
-      const vw = window.innerWidth, vh = window.innerHeight;
-      let tx, ty;
-      if (corner === 'bl') { tx = SNAP_MARGIN; ty = vh - rect.height - SNAP_MARGIN; }
+    function snapToCorner(corner, animate) {
+      var rect = getRect();
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var tx, ty;
+      if      (corner === 'bl') { tx = SNAP_MARGIN;             ty = vh - rect.height - SNAP_MARGIN; }
       else if (corner === 'br') { tx = vw - rect.width - SNAP_MARGIN; ty = vh - rect.height - SNAP_MARGIN; }
-      else if (corner === 'tl') { tx = SNAP_MARGIN; ty = SNAP_MARGIN; }
-      else { tx = vw - rect.width - SNAP_MARGIN; ty = SNAP_MARGIN; }
+      else if (corner === 'tl') { tx = SNAP_MARGIN;             ty = SNAP_MARGIN; }
+      else                      { tx = vw - rect.width - SNAP_MARGIN; ty = SNAP_MARGIN; }
 
       currentCorner = corner;
       snapped = true;
-
-      // Switch from fixed right/bottom to fixed left/top positioning
-      el.style.right = 'auto';
+      el.style.right  = 'auto';
       el.style.bottom = 'auto';
 
       if (animate) {
-        springTo(el, tx, ty, () => {
+        springTo(el, tx, ty, function () {
           el.style.transition = '';
-          onSnap?.(corner);
+          el.classList.add('snapped');
+          setTimeout(function () { el.classList.remove('snapped'); }, 420);
+          if (onSnap) onSnap(corner);
         });
       } else {
         el.style.transition = 'none';
         el.style.left = tx + 'px';
-        el.style.top = ty + 'px';
-        requestAnimationFrame(() => { el.style.transition = ''; });
-        onSnap?.(corner);
+        el.style.top  = ty + 'px';
+        requestAnimationFrame(function () { el.style.transition = ''; });
+        if (onSnap) onSnap(corner);
       }
     }
 
-    // Initialize position
-    requestAnimationFrame(() => {
-      snapToCorner(initialCorner, false);
-    });
-
-    // Re-snap on window resize
-    window.addEventListener('resize', () => {
-      if (snapped) snapToCorner(currentCorner, true);
-    });
+    requestAnimationFrame(function () { snapToCorner(initialCorner, false); });
+    window.addEventListener('resize', function () { if (snapped) snapToCorner(currentCorner, false); });
 
     handle.style.cursor = 'grab';
     handle.addEventListener('pointerdown', startDrag);
 
     function startDrag(e) {
-      // Don't intercept button clicks inside the handle
-      if (e.target.closest('button, input, textarea, select, a')) return;
+      if (e.target.closest('button, input, textarea, select, a, [role="button"]')) return;
       if (e.button !== 0 && e.pointerType === 'mouse') return;
-
       dragging = true;
-      snapped = false;
-      const rect = getRect();
-
-      // Convert from fixed right/bottom to fixed left/top
-      el.style.right = 'auto';
+      snapped  = false;
+      var rect = getRect();
+      el.style.right  = 'auto';
       el.style.bottom = 'auto';
-      el.style.left = rect.left + 'px';
-      el.style.top = rect.top + 'px';
+      el.style.left   = rect.left + 'px';
+      el.style.top    = rect.top  + 'px';
       el.style.transition = 'none';
       el.style.zIndex = String(zBase + 10);
-
-      startPointerX = e.clientX;
-      startPointerY = e.clientY;
-      startElX = rect.left;
-      startElY = rect.top;
-
+      startPX = e.clientX; startPY = e.clientY;
+      startEX = rect.left; startEY = rect.top;
       handle.style.cursor = 'grabbing';
       el.setPointerCapture(e.pointerId);
-      el.addEventListener('pointermove', onMove);
-      el.addEventListener('pointerup', endDrag);
+      el.addEventListener('pointermove',   onMove);
+      el.addEventListener('pointerup',     endDrag);
       el.addEventListener('pointercancel', endDrag);
     }
 
     function onMove(e) {
       if (!dragging) return;
-      const dx = e.clientX - startPointerX;
-      const dy = e.clientY - startPointerY;
-      const rect = getRect();
-      const vw = window.innerWidth, vh = window.innerHeight;
-      const nx = clamp(startElX + dx, 0, vw - rect.width);
-      const ny = clamp(startElY + dy, 0, vh - rect.height);
+      var dx = e.clientX - startPX, dy = e.clientY - startPY;
+      var rect = getRect();
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var nx = clamp(startEX + dx, 0, vw - rect.width);
+      var ny = clamp(startEY + dy, 0, vh - rect.height);
       el.style.left = nx + 'px';
-      el.style.top = ny + 'px';
-
-      // Magnetic pull: highlight nearest corner if close
+      el.style.top  = ny + 'px';
       if (magnetic) {
-        const nearest = nearestCorner(nx + rect.width / 2, ny + rect.height / 2, rect.width, rect.height);
+        var nearest = nearestCorner(nx + rect.width / 2, ny + rect.height / 2, rect.width, rect.height);
         el.classList.toggle('kyle-drag-near-corner', nearest.dist < SNAP_THRESHOLD);
       }
     }
 
-    function endDrag(e) {
+    function endDrag() {
       if (!dragging) return;
       dragging = false;
       handle.style.cursor = 'grab';
       el.style.zIndex = String(zBase);
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', endDrag);
+      el.removeEventListener('pointermove',   onMove);
+      el.removeEventListener('pointerup',     endDrag);
       el.removeEventListener('pointercancel', endDrag);
-
-      if (!magnetic) return;
-
-      const rect = getRect();
-      const nearest = nearestCorner(rect.left + rect.width / 2, rect.top + rect.height / 2, rect.width, rect.height);
-
+      el.classList.remove('kyle-drag-near-corner');
+      if (!magnetic) { snapped = false; el.style.transition = ''; return; }
+      var rect    = getRect();
+      var nearest = nearestCorner(rect.left + rect.width / 2, rect.top + rect.height / 2, rect.width, rect.height);
       if (nearest.dist < SNAP_THRESHOLD) {
-        // Magnetic snap
-        el.classList.remove('kyle-drag-near-corner');
-        // Small bounce before snapping
         el.style.transition = 'left 60ms ease-in, top 60ms ease-in';
-        setTimeout(() => snapToCorner(nearest.label, true), 60);
+        setTimeout(function () { snapToCorner(nearest.label, true); }, 60);
       } else {
         snapped = false;
         el.style.transition = '';
       }
     }
 
-    return { snapToCorner };
+    return { snapToCorner: snapToCorner };
   }
 
-  /* ── init (wait for DOM + Kyle to be ready) ──────────────────── */
+  /* ── init ─────────────────────────────────────────────────────── */
   function init() {
-    const floatingMount = document.getElementById('kyleMount');
-    const actionPanel = document.querySelector('.kyle-action-panel');
+    var floatingMount = document.getElementById('kyleMount');
+    if (!floatingMount) { setTimeout(init, 300); return; }
 
-    if (!floatingMount) {
-      // Kyle not yet initialized — retry
-      setTimeout(init, 300);
-      return;
-    }
-
-    // 1. Make the entire floating mount (orb + input bar) draggable
-    //    The handle is the orb button itself
-    const orbHandle = floatingMount.querySelector('.kyle-orb');
-    if (orbHandle && !floatingMount._dragInit) {
+    // 1. Floating orb: SKIP if it is currently embedded in the Overview bar
+    if (!isInOverviewMount(floatingMount) && !floatingMount._dragInit) {
       floatingMount._dragInit = true;
-      makeDraggable(floatingMount, {
-        handle: orbHandle,
-        magnetic: true,
-        initialCorner: 'br',
-        zBase: 1400,
-      });
+      var orbHandle = floatingMount.querySelector('.kyle-orb');
+      if (orbHandle) {
+        makeDraggable(floatingMount, {
+          handle: orbHandle, magnetic: true, initialCorner: 'br', zBase: 1400,
+        });
+      }
     }
 
-    // 2. Make the action panel (composer) draggable
-    //    The handle is the panel header
+    // 2. Action panel (composer/command card) -- always position:fixed, always draggable
+    var actionPanel = document.querySelector('.kyle-action-panel');
     if (actionPanel && !actionPanel._dragInit) {
       actionPanel._dragInit = true;
-      // Switch from fixed right/bottom to left/top managed by drag
-      actionPanel.style.right = 'auto';
+      actionPanel.style.right  = 'auto';
       actionPanel.style.bottom = 'auto';
-
-      const header = actionPanel.querySelector('.kyle-panel-header');
+      var header = actionPanel.querySelector('.kyle-panel-header');
       makeDraggable(actionPanel, {
-        handle: header || actionPanel,
-        magnetic: true,
-        initialCorner: 'br',
-        zBase: 1050,
-        onSnap: (corner) => {
-          // When snapping to a corner, choose whether panel opens upward or downward
-          const isTop = corner.startsWith('t');
-          actionPanel.classList.toggle('opens-downward', isTop);
-        }
+        handle: header || actionPanel, magnetic: true, initialCorner: 'br', zBase: 1300,
+        onSnap: function (corner) {
+          actionPanel.classList.toggle('opens-downward', corner.charAt(0) === 't');
+        },
       });
     }
 
-    // 3. Handle dynamically created panels (when composer opens)
-    const observer = new MutationObserver(() => {
-      const panel = document.querySelector('.kyle-action-panel');
+    // 3. Watch for Overview -> floating transition and new panels
+    var observer = new MutationObserver(function () {
+      var mount = document.getElementById('kyleMount');
+      if (mount && !mount._dragInit && !isInOverviewMount(mount)) init();
+      var panel = document.querySelector('.kyle-action-panel');
       if (panel && !panel._dragInit) init();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 600));
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 600); });
   } else {
     setTimeout(init, 600);
   }
 
-  window.KyleDrag = { init, makeDraggable };
+  window.KyleDrag = { init: init, makeDraggable: makeDraggable };
 })();
