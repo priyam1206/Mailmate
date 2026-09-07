@@ -1,7 +1,7 @@
 import base64
 from unittest.mock import Mock, patch
 
-from services.google_service import _readable_message_body, mark_gmail_message_read
+from services.google_service import _readable_message_body, _safe_message_html, mark_gmail_message_read
 
 
 def _encoded(value):
@@ -27,6 +27,25 @@ def test_html_fallback_is_readable_and_drops_script_content():
     }
 
     assert _readable_message_body(payload) == 'Hello & welcome\nNext'
+
+
+def test_safe_html_preserves_layout_and_blocks_executable_or_tracking_content():
+    payload = {
+        'mimeType': 'text/html',
+        'body': {'data': _encoded(
+            '<table style="width: 100%; position: fixed"><tr><td>'
+            '<a href="https://example.com" onclick="bad()">Open</a>'
+            '<img src="https://tracker.example/pixel.png">'
+            '<script>steal()</script></td></tr></table>'
+        )},
+    }
+    rendered = _safe_message_html(payload)
+    assert '<table style="width: 100%">' in rendered
+    assert 'href="https://example.com"' in rendered
+    assert 'onclick' not in rendered
+    assert '<img' not in rendered
+    assert 'tracker.example' not in rendered
+    assert 'steal()' not in rendered
 
 
 def test_mark_read_removes_only_the_unread_label():

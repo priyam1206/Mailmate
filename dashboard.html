@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=30">
+  <link rel="stylesheet" href="./dashboard.css?v=31">
   <link rel="stylesheet" href="/remote-worker-ui.css?v=8">
   <link rel="stylesheet" href="/compute-ui-fix.css?v=1">
   <link rel="stylesheet" href="./mailmate-master-polish.css?v=1">
@@ -117,7 +117,7 @@
         <div class="work-permission-banner" id="workPermissionBanner" style="display:none;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.35);border-radius:10px;padding:12px 16px;margin-bottom:16px;align-items:center;justify-content:space-between;gap:12px;">
           <div style="display:flex;align-items:center;gap:10px;font-size:0.85rem;color:#fef08a;">
             <i class="fas fa-triangle-exclamation" style="color:#eab308;font-size:1.1rem;"></i>
-            <span><strong>Google reconnection required for Gmail drafts &amp; sending</strong> â€” Your current Google login is read-only. Reconnect Google once to grant <code>gmail.modify</code> so Kyle can stage and send Gmail replies.</span>
+            <span><strong>Google reconnection required for Gmail drafts &amp; sending</strong> &mdash; Your current Google login is read-only. Reconnect Google once to grant <code>gmail.modify</code> so Kyle can stage and send Gmail replies.</span>
           </div>
           <a href="/auth/google" class="btn btn-primary" style="padding:6px 14px;font-size:0.8rem;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:6px;"><i class="fas fa-rotate"></i> Reconnect Google</a>
         </div>
@@ -133,7 +133,7 @@
               <div>
                 <h2 id="runTitle">Select a Work Task</h2>
                 <p class="work-submeta" id="workSubMeta" style="margin:4px 0 0;font-size:0.82rem;color:var(--muted);display:none;">
-                  <span id="workSourceSender">Sender</span> Â· <span>Gmail</span> Â· <span id="workDeadlineBadge" class="work-deadline-pill">Due</span>
+                  <span id="workSourceSender">Sender</span> &middot; <span>Gmail</span> &middot; <span id="workDeadlineBadge" class="work-deadline-pill">Due</span>
                 </p>
               </div>
               <span class="run-status badge-queued" id="workRunStatus">Idle</span>
@@ -153,6 +153,9 @@
                   <small id="workDraftBadge" class="draft-badge"></small>
                 </div>
                 <p class="work-prepared-summary" id="workPreparedSummary">Kyle prepared a reply for your review.</p>
+                <button class="secondary-btn compact-btn work-review-source" id="workReviewEmailBtn" type="button" title="Open the source email in Inbox">
+                  <i class="fas fa-envelope-open-text"></i> Review source email
+                </button>
 
                 <!-- Policy Verdict / Eligibility Banner -->
                 <div class="policy-banner" id="workPolicyBanner">
@@ -170,7 +173,7 @@
                       <i class="fas fa-clock fa-spin" style="color:var(--accent);"></i>
                       <strong>AUTO-SEND APPROVED BY POLICY</strong>
                     </div>
-                    <span class="countdown-timer-text" id="countdownTimerText">Sending in 20sâ€¦</span>
+                    <span class="countdown-timer-text" id="countdownTimerText">Sending in 20s&hellip;</span>
                   </div>
                   <div class="countdown-progress-track">
                     <div class="countdown-progress-bar" id="countdownProgressBar"></div>
@@ -239,7 +242,7 @@
                   </summary>
                   <div class="collapsible-body">
                     <div class="work-source-card" id="workSourceCard">
-                      <p><strong id="workSourceSenderFull">Sender</strong> Â· <span id="workSourceSubjectFull">Subject</span></p>
+                      <p><strong id="workSourceSenderFull">Sender</strong> &middot; <span id="workSourceSubjectFull">Subject</span></p>
                       <p class="source-snippet" id="workSourceSnippet" style="margin-top:6px;font-size:0.85rem;color:var(--text);"></p>
                       <small id="workSourceMeta" style="color:var(--muted);display:block;margin-top:4px;"></small>
                     </div>
@@ -507,7 +510,7 @@
   <script src="./kyle-ui.js?v=30"></script>
   <script src="./kyle.js?v=30"></script>
   <script src="./calendar-conflicts.js?v=21"></script>
-  <script src="./dashboard.js?v=30"></script>
+  <script src="./dashboard.js?v=31"></script>
   <script src="/remote-worker-ui.js?v=5"></script>
 </body>
 </html>

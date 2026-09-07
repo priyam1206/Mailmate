@@ -321,6 +321,82 @@ class _ReadableHtmlParser(HTMLParser):
             self.parts.append(data)
 
 
+class _SafeEmailHtmlParser(HTMLParser):
+    """Preserve useful email layout without scripts, handlers, or remote tracking."""
+
+    _TAGS = {
+        'a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'h1', 'h2', 'h3',
+        'h4', 'h5', 'h6', 'i', 'li', 'ol', 'p', 'pre', 'span', 'strong',
+        'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
+    }
+    _VOID_TAGS = {'br'}
+    _STYLE_PROPERTIES = {
+        'background-color', 'border', 'border-collapse', 'color', 'display',
+        'font-family', 'font-size', 'font-style', 'font-weight', 'height',
+        'line-height', 'margin', 'margin-bottom', 'margin-left', 'margin-right',
+        'margin-top', 'max-width', 'padding', 'padding-bottom', 'padding-left',
+        'padding-right', 'padding-top', 'text-align', 'text-decoration',
+        'vertical-align', 'white-space', 'width',
+    }
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self._ignored_depth = 0
+
+    def _safe_style(self, value):
+        declarations = []
+        for declaration in str(value or '').split(';'):
+            if ':' not in declaration:
+                continue
+            name, raw_value = declaration.split(':', 1)
+            name, raw_value = name.strip().lower(), raw_value.strip()
+            if name not in self._STYLE_PROPERTIES:
+                continue
+            if re.search(r'(?i)(javascript|expression|behavior|url\s*\(|@import)', raw_value):
+                continue
+            declarations.append(f'{name}: {raw_value}')
+        return '; '.join(declarations)
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in {'script', 'style', 'noscript', 'iframe', 'object', 'embed', 'form'}:
+            self._ignored_depth += 1
+            return
+        if self._ignored_depth or tag not in self._TAGS:
+            return
+        safe_attrs = []
+        for name, value in attrs:
+            name, value = str(name).lower(), str(value or '')
+            if name == 'href' and re.match(r'^(https?|mailto):', value, re.I):
+                safe_attrs.extend([('href', value), ('target', '_blank'), ('rel', 'noopener noreferrer')])
+            elif name in {'alt', 'title', 'width', 'height', 'colspan', 'rowspan', 'align', 'valign', 'border', 'cellpadding', 'cellspacing', 'bgcolor', 'role'}:
+                safe_attrs.append((name, value))
+            elif name == 'style':
+                safe_style = self._safe_style(value)
+                if safe_style:
+                    safe_attrs.append(('style', safe_style))
+        rendered = ''.join(f' {name}="{html.escape(value, quote=True)}"' for name, value in safe_attrs)
+        self.parts.append(f'<{tag}{rendered}>')
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in {'script', 'style', 'noscript', 'iframe', 'object', 'embed', 'form'} and self._ignored_depth:
+            self._ignored_depth -= 1
+        elif not self._ignored_depth and tag in self._TAGS and tag not in self._VOID_TAGS:
+            self.parts.append(f'</{tag}>')
+
+    def handle_data(self, data):
+        if not self._ignored_depth:
+            self.parts.append(html.escape(data))
+
+    def handle_comment(self, data):
+        pass
+
+
 def _decode_gmail_body(data):
     if not data:
         return ''
@@ -387,6 +463,16 @@ def _readable_message_body(payload, fallback=''):
     return _clean_message_text(fallback)
 
 
+def _safe_message_html(payload):
+    _, rich = _message_body_parts(payload)
+    if not rich:
+        return ''
+    parser = _SafeEmailHtmlParser()
+    parser.feed(_strip_mso_conditionals('\n'.join(rich)))
+    parser.close()
+    return ''.join(parser.parts).strip()
+
+
 def get_gmail_message(message_id):
     """Fetch one full Gmail message only when the user opens it."""
     if not message_id:
@@ -414,6 +500,7 @@ def get_gmail_message(message_id):
         'timestamp': headers.get('Date', ''),
         'snippet': message.get('snippet') or '',
         'body': _readable_message_body(payload, message.get('snippet') or ''),
+        'body_html': _safe_message_html(payload),
         'is_read': 'UNREAD' not in labels,
         'is_starred': 'STARRED' in labels,
         'labels': labels,

@@ -509,19 +509,30 @@ document.addEventListener('DOMContentLoaded', () => {
           const title = decodeHtml(item.subject || item.title || conciseActionTitle(item.description || item.reason) || 'Your task');
           const description = decodeHtml(item.description || item.reason || 'Needs follow-up');
           const deadline = item.deadline ? `<small>${escapeHtml(decodeHtml(item.deadline))}</small>` : '';
-          return `<li data-kyle-type="work-item" data-kyle-id="attention-${index}" data-kyle-label="${escapeHtml(title)}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span>${deadline}</li>`;
+          const sourceId = attentionSourceId(item);
+          return `<li class="attention-link" role="button" tabindex="0" data-source-id="${escapeHtml(sourceId)}" data-kyle-type="work-item" data-kyle-id="attention-${index}" data-kyle-label="${escapeHtml(title)}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span>${deadline}<i class="fas fa-chevron-right" aria-hidden="true"></i></li>`;
         }).join('')
       : '<li><strong>Inbox clear</strong><span>No urgent dependencies detected in this scan.</span></li>';
 
     renderOverviewWorkingNow();
 
     els.attentionList.querySelectorAll('[data-kyle-id]')
-      .forEach(element => window.MailmateObjects?.register({
+      .forEach(element => {
+        window.MailmateObjects?.register({
         type: element.dataset.kyleType,
         id: element.dataset.kyleId,
         label: element.dataset.kyleLabel,
         page: 'overview'
-      }, element));
+        }, element);
+        const openSource = () => openSourceEmail(element.dataset.sourceId);
+        element.addEventListener('click', openSource);
+        element.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openSource();
+          }
+        });
+      });
 
     renderUpcomingFromContext();
 
@@ -539,6 +550,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // Ordinary safe mail has no badge to eliminate visual noise
     return '';
+  }
+
+  function emailOverviewText(email) {
+    return email.pdf_summary || email.summary || email.ai_summary || email.snippet || 'No preview available.';
+  }
+
+  async function openSourceEmail(sourceId, fallback = {}) {
+    sourceId = String(sourceId || '');
+    if (!sourceId) return;
+    const emails = state.data?.emails || [];
+    const source = emails.find(email => String(emailKey(email)) === sourceId) || {
+      id: sourceId,
+      gmail_id: sourceId,
+      sender: fallback.sender || 'Unknown sender',
+      subject: fallback.subject || 'No subject',
+      snippet: fallback.snippet || '',
+      date: fallback.date || ''
+    };
+    if (state.data && !emails.some(email => String(emailKey(email)) === sourceId)) {
+      state.data.emails = [source, ...emails];
+    }
+    showTab('inbox');
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    await openEmail(source);
   }
 
   function privacyDetailBox(gate) {
@@ -631,7 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${privacyPillHtml(email.privacy_gate)}
               </div>
               <p class="email-subject">${escapeHtml(email.subject || 'No subject')}</p>
-              <p class="email-preview">${safeSnippet(email.snippet || email.body || 'No preview available.')}</p>
+              <p class="email-preview">${safeSnippet(emailOverviewText(email))}</p>
             </div>
             <time class="email-time">${escapeHtml(formatDate(email.date || email.timestamp))}</time>
           </article>`;
@@ -736,9 +771,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const hasFullBody = Boolean(email.body);
+    const hasFullBody = Boolean(email.body_html || email.body);
     let bodyContent = '';
-    if (hasFullBody) {
+    if (email.body_html) {
+      bodyContent = `<div class="email-html-content">${email.body_html}</div>`;
+    } else if (hasFullBody) {
       bodyContent = linkifyText(email.body);
     } else if (loading) {
       bodyContent = `
@@ -888,7 +925,7 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'approved_sent':
         return { label: 'Sent via Gmail', cls: 'badge-sent' };
       case 'completed':
-        return { label: 'Complete', cls: 'badge-sent' };
+        return { label: 'Complete', cls: 'badge-completed' };
       case 'cancelled':
         return { label: 'Cancelled', cls: 'badge-cancelled' };
       case 'failed':
@@ -972,7 +1009,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const stepProgress = activeStatuses.has(job.status) && latestStep ? (latestStep.label || latestStep.thought || latestStep.action || '') : '';
         const subtitle = stepProgress || ((senderDisplay ? senderDisplay + ' · ' : '') + (decodeHtml(job.source?.snippet) || decodeHtml(job.source?.subject) || 'Preparation work'));
         return `
-          <article class="work-item ${isSel ? 'active' : ''}" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
+          <article class="work-item work-state-${escapeHtml(statusClass.replace('badge-', ''))} ${activeStatuses.has(job.status) ? 'is-buffering' : ''} ${isSel ? 'active' : ''}" role="button" tabindex="0" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
               <strong>${escapeHtml(displayTitle)}</strong>
               <span class="run-status ${statusClass}" style="font-size:0.68rem;padding:2px 6px;">${escapeHtml(statusLabel)}</span>
@@ -1012,6 +1049,12 @@ document.addEventListener('DOMContentLoaded', () => {
       item.addEventListener('click', () => {
         selectedJobId = item.dataset.jobId;
         renderWork(state.data);
+      });
+      item.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          item.click();
+        }
       });
     });
   }
@@ -1083,6 +1126,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const preparedCard = $('workPreparedCard');
     const preparedSummary = $('workPreparedSummary');
     const collapsiblesGroup = $('workCollapsiblesGroup');
+    const runInspector = $('workRunInspector');
+    const activeStatuses = new Set(['queued', 'reading_context', 'planning', 'researching', 'generating', 'drafting_reply', 'creating_files', 'verifying', 'preparing', 'working']);
+    if (runInspector) runInspector.classList.toggle('is-buffering', activeStatuses.has(job.status));
 
     const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
     if (titleEl) titleEl.textContent = displayTitle;
@@ -1119,6 +1165,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const fileCopy = preparedArtifacts.length ? ` and ${preparedArtifacts.length} supporting file${preparedArtifacts.length === 1 ? '' : 's'}` : '';
         preparedSummary.textContent = `Kyle prepared a reply${fileCopy}.`;
       }
+    }
+
+    const reviewEmailBtn = $('workReviewEmailBtn');
+    if (reviewEmailBtn) {
+      const sourceId = String(job.source?.message_id || job.source?.id || '');
+      reviewEmailBtn.hidden = isAutomation;
+      reviewEmailBtn.disabled = !sourceId;
+      reviewEmailBtn.onclick = () => openSourceEmail(sourceId, job.source || {});
     }
 
     // 1. Policy Banner
