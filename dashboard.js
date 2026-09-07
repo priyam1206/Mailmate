@@ -1,8 +1,14 @@
+// Immediately apply theme before DOM is fully loaded to prevent flashing
+const savedTheme = localStorage.getItem('mailmate-theme');
+if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+  document.documentElement.setAttribute('data-theme', 'dark');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const API_BASE = window.location.origin;
   const $ = id => document.getElementById(id);
   const els = {
-    tabs: [...document.querySelectorAll('.nav-tab')],
+    tabs: [...document.querySelectorAll('nav.nav-tabs .nav-tab')],
     panels: [...document.querySelectorAll('.tab-panel')],
     filters: [...document.querySelectorAll('.filter-tab')],
     pageTitle: $('pageTitle'),
@@ -156,8 +162,43 @@ document.addEventListener('DOMContentLoaded', () => {
       els.filters.forEach(item => item.classList.toggle('active', item === filter));
       renderEmails(state.data?.emails || []);
     }));
-    els.refreshBtn?.addEventListener('click', () => loadInbox(true));
+    els.refreshBtn?.addEventListener('click', async () => {
+      const btn = els.refreshBtn;
+      const icon = $('refreshIcon');
+      const label = $('refreshLabel');
+      if (btn.classList.contains('is-refreshing')) return;
+      btn.classList.add('is-refreshing');
+      if (label) label.textContent = 'Syncing…';
+      try {
+        await loadInbox(true);
+      } finally {
+        btn.classList.remove('is-refreshing');
+        if (label) label.textContent = 'Refresh';
+      }
+    });
     $('logoutBtn')?.addEventListener('click', logout);
+
+    const themeToggleBtn = $('themeToggleBtn');
+    function updateThemeIcon() {
+      if (document.documentElement.getAttribute('data-theme') === 'dark') {
+        themeToggleBtn.innerHTML = '<i class="fas fa-sun"></i><span>Light Mode</span>';
+      } else {
+        themeToggleBtn.innerHTML = '<i class="fas fa-moon"></i><span>Dark Mode</span>';
+      }
+    }
+    if (themeToggleBtn) {
+      updateThemeIcon();
+      themeToggleBtn.addEventListener('click', () => {
+        if (document.documentElement.getAttribute('data-theme') === 'dark') {
+          document.documentElement.removeAttribute('data-theme');
+          localStorage.setItem('mailmate-theme', 'light');
+        } else {
+          document.documentElement.setAttribute('data-theme', 'dark');
+          localStorage.setItem('mailmate-theme', 'dark');
+        }
+        updateThemeIcon();
+      });
+    }
 
     window.addEventListener('harness:open-email', event => {
       const email = event.detail;
@@ -416,7 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
       els.actionList.innerHTML = activeJobs.map(job => {
         const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
         const latestStep = (job.steps && job.steps.length > 0) ? job.steps[job.steps.length - 1] : null;
-        const stepText = latestStep ? (latestStep.label || latestStep.thought || latestStep.action || 'Executing...') : (job.source?.snippet || 'Agent working...');
+        const stepText = latestStep ? (latestStep.label || latestStep.thought || latestStep.action || 'Executing...') : (decodeHtml(job.source?.snippet) || 'Agent working...');
         const badgeText = job.status === 'working' ? 'Working' : job.status.replace(/_/g, ' ');
         return `
           <article data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
@@ -461,9 +502,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const attention = data.needs_attention || [];
     els.attentionList.innerHTML = attention.length
       ? attention.slice(0, 5).map((item, index) => {
-          const title = item.subject || item.title || conciseActionTitle(item.description || item.reason) || 'Your task';
-          const deadline = item.deadline ? `<small>${escapeHtml(item.deadline)}</small>` : '';
-          return `<li data-kyle-type="work-item" data-kyle-id="attention-${index}" data-kyle-label="${escapeHtml(title)}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(item.description || item.reason || 'Needs follow-up')}</span>${deadline}</li>`;
+          const title = decodeHtml(item.subject || item.title || conciseActionTitle(item.description || item.reason) || 'Your task');
+          const description = decodeHtml(item.description || item.reason || 'Needs follow-up');
+          const deadline = item.deadline ? `<small>${escapeHtml(decodeHtml(item.deadline))}</small>` : '';
+          return `<li data-kyle-type="work-item" data-kyle-id="attention-${index}" data-kyle-label="${escapeHtml(title)}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span>${deadline}</li>`;
         }).join('')
       : '<li><strong>Inbox clear</strong><span>No urgent dependencies detected in this scan.</span></li>';
 
@@ -585,7 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${privacyPillHtml(email.privacy_gate)}
               </div>
               <p class="email-subject">${escapeHtml(email.subject || 'No subject')}</p>
-              <p class="email-preview">${escapeHtml(email.snippet || 'No preview available.')}</p>
+              <p class="email-preview">${safeSnippet(email.snippet || email.body || 'No preview available.')}</p>
             </div>
             <time class="email-time">${escapeHtml(formatDate(email.date || email.timestamp))}</time>
           </article>`;
@@ -675,7 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!response.ok) throw new Error(detail.error || `Gmail message returned ${response.status}`);
       state.fullMessages.set(id, detail);
       const source = state.data?.emails?.find(item => emailKey(item) === id);
-      if (source) Object.assign(source, detail, { is_read: source.is_read });
+      if (source) Object.assign(source, detail, { is_read: source.is_read ?? detail.is_read });
     } catch (error) {
       addError('Gmail: ' + error.message);
     } finally {
@@ -697,7 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (loading) {
       bodyContent = `
         <div class="email-prefetch-indicator"><i class="fas fa-circle-notch fa-spin"></i> Loading full message...</div>
-        <div class="email-snippet-content">${escapeHtml(email.snippet || 'Loading preview...')}</div>`;
+        <div class="email-snippet-content">${safeSnippet(email.snippet || 'Loading preview...')}</div>`;
     } else {
       bodyContent = linkifyText(email.body || email.snippet || 'This message has no readable text body.');
     }
@@ -924,7 +966,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const senderDisplay = (job.source?.sender || '').split('<')[0].trim();
         const latestStep = (job.steps && job.steps.length > 0) ? job.steps[job.steps.length - 1] : null;
         const stepProgress = activeStatuses.has(job.status) && latestStep ? (latestStep.label || latestStep.thought || latestStep.action || '') : '';
-        const subtitle = stepProgress || ((senderDisplay ? senderDisplay + ' · ' : '') + (job.source?.snippet || job.source?.subject || 'Preparation work'));
+        const subtitle = stepProgress || ((senderDisplay ? senderDisplay + ' · ' : '') + (decodeHtml(job.source?.snippet) || decodeHtml(job.source?.subject) || 'Preparation work'));
         return `
           <article class="work-item ${isSel ? 'active' : ''}" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -1397,7 +1439,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sourceSenderFull) sourceSenderFull.textContent = job.source?.sender || 'Unknown sender';
     if (sourceSubjectFull) sourceSubjectFull.textContent = job.source?.subject || 'No subject';
     if (sourceSubjectBadge) sourceSubjectBadge.textContent = (job.source?.subject || 'Email').slice(0, 24);
-    if (sourceSnippet) sourceSnippet.textContent = job.source?.snippet || 'No snippet available.';
+    if (sourceSnippet) sourceSnippet.textContent = decodeHtml(job.source?.snippet || job.source?.body) || 'No snippet available.';
     if (sourceMeta) {
       sourceMeta.textContent = job.source?.deadline ? `Deadline: ${job.source.deadline}` : 'Inbound Gmail thread';
     }
@@ -1617,6 +1659,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const div = document.createElement('div');
     div.textContent = String(value ?? '');
     return div.innerHTML;
+  }
+
+  /**
+   * Decode HTML entities (e.g. &#39; → ') that Gmail puts in snippets,
+   * then safely re-escape so the result is safe to insert into innerHTML.
+   */
+  function decodeHtml(value) {
+    const ta = document.createElement('textarea');
+    ta.innerHTML = String(value ?? '');
+    return ta.value;
+  }
+
+  function safeSnippet(value) {
+    return escapeHtml(decodeHtml(value));
   }
 
   /**

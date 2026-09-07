@@ -12,12 +12,13 @@
   <link rel="stylesheet" href="/remote-worker-ui.css?v=8">
   <link rel="stylesheet" href="/compute-ui-fix.css?v=1">
   <link rel="stylesheet" href="./mailmate-master-polish.css?v=1">
+  <link rel="icon" type="image/png" href="./assets/images/cs_logo.png">
 </head>
 <body>
   <div class="app-shell">
     <aside class="side-rail">
       <div class="brand">
-        <img src="./assets/images/cs_logo.png" alt="CipherSquad" onerror="this.src='./assets/images/ciphersquad_logo.jpg'">
+        <img src="./assets/images/cs_logo.png" alt="MailMate" onerror="this.src='./assets/images/ciphersquad_logo.jpg'">
         <span>MailMate</span>
       </div>
       <nav class="nav-tabs" aria-label="Workspace sections">
@@ -31,6 +32,11 @@
         <button class="nav-tab" type="button" data-tab="integrations"><i class="fas fa-plug"></i><span>Integrations</span></button>
         <button class="nav-tab" type="button" data-tab="settings"><i class="fas fa-gear"></i><span>Settings</span></button>
       </nav>
+      <div class="theme-toggle-container">
+        <button class="nav-tab theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle dark mode">
+          <i class="fas fa-moon"></i><span>Dark Mode</span>
+        </button>
+      </div>
     </aside>
 
     <main class="main">
@@ -53,7 +59,10 @@
             <h2 id="overviewGreeting">Good evening</h2>
             <p id="summaryText">Loading your latest Gmail brief...</p>
           </div>
-          <button class="icon-btn refresh-btn" id="refreshBtn" type="button" aria-label="Refresh Gmail" title="Refresh Gmail"><i class="fas fa-arrows-rotate"></i></button>
+          <button class="refresh-pill-btn" id="refreshBtn" type="button" aria-label="Refresh Gmail" title="Refresh Gmail">
+            <i class="fas fa-arrows-rotate" id="refreshIcon"></i>
+            <span id="refreshLabel">Refresh</span>
+          </button>
         </section>
         <div class="metric-strip" aria-label="Inbox summary">
           <div><strong id="importantCount">--</strong><span>need attention</span></div>

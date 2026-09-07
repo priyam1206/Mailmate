@@ -15,6 +15,23 @@
   --dark-line: rgba(255, 255, 255, 0.10);
 }
 
+[data-theme="dark"] {
+  --bg: #111111;
+  --surface: #191919;
+  --surface-strong: #222222;
+  --surface-hover: #2a2a2a;
+  --sidebar: #0a0a0a;
+  --sidebar-hover: #1f1f1f;
+  --text: #ededed;
+  --soft: #a1a1a1;
+  --muted: #737373;
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.24);
+  --dark-text: #f3f3ef;
+  --dark-muted: #a4a49e;
+  --dark-line: rgba(255, 255, 255, 0.10);
+}
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
@@ -38,6 +55,8 @@ h1, h2, h3, p, dl, dd { margin: 0; }
 }
 
 .side-rail {
+  display: flex;
+  flex-direction: column;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -45,6 +64,11 @@ h1, h2, h3, p, dl, dd { margin: 0; }
   color: var(--dark-text);
   background: var(--sidebar);
   border-right: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.theme-toggle-container {
+  margin-top: auto;
+  margin-bottom: 8px;
 }
 
 .brand {
@@ -59,11 +83,12 @@ h1, h2, h3, p, dl, dd { margin: 0; }
 }
 
 .brand img {
-  width: 31px;
-  height: 31px;
-  border-radius: 50%;
+  width: 33px;
+  height: 33px;
+  border-radius: 8px;
   object-fit: cover;
-  filter: grayscale(1);
+  filter: none;
+  box-shadow: 0 2px 8px rgba(108, 99, 255, 0.35);
 }
 
 .nav-tabs { display: grid; gap: 4px; margin-top: 22px; }
@@ -206,6 +231,45 @@ h2 { font-size: 1rem; }
 }
 
 .icon-btn:hover { background: var(--surface-hover); transform: rotate(18deg); }
+
+/* ── Refresh pill button ── */
+.refresh-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+  background: var(--text);
+  color: var(--surface-strong);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+}
+.refresh-pill-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+.refresh-pill-btn:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.refresh-pill-btn.is-refreshing {
+  opacity: 0.85;
+  pointer-events: none;
+}
+.refresh-pill-btn.is-refreshing #refreshIcon {
+  animation: refreshSpin 700ms linear infinite;
+}
+@keyframes refreshSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
 
 .metric-strip {
   display: grid;
@@ -352,7 +416,8 @@ h2 { font-size: 1rem; }
 .email-item.is-selected { background: #deded9; }
 .email-item.is-unread .email-sender,
 .email-item.is-unread .email-subject { font-weight: 700; }
-.email-marker { width: 7px; height: 7px; margin-top: 7px; border-radius: 50%; background: transparent; }
+.email-item.is-unread .email-marker { background: #6c63ff; box-shadow: 0 0 0 3px rgba(108,99,255,0.18); }
+.email-marker { width: 7px; height: 7px; margin-top: 7px; border-radius: 50%; background: transparent; transition: background 200ms ease, box-shadow 200ms ease; }
 .email-item.is-important .email-marker { background: var(--text); }
 .email-copy { min-width: 0; }
 .email-sender { color: var(--soft); font-size: 0.78rem; }
