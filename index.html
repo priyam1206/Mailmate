@@ -8,9 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=2">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="./script.js" defer></script>
+  <script src="./script.js?v=2" defer></script>
 </head>
 <body>
   <h1 class="sr-only">MailMate - Code2Create 7.0 Portal</h1>
@@ -68,8 +68,8 @@
       <!-- Header Content -->
       <div class="auth-header">
         <div class="auth-badge">MEET KYLE</div>
-        <h2 class="auth-title">Connect your inbox.</h2>
-        <p class="auth-subtitle">Kyle finds what matters, prepares the work and keeps you in control. Gmail stays the source of truth.</p>
+        <h2 class="auth-title" id="authTitle">Connect your inbox.</h2>
+        <p class="auth-subtitle" id="authSubtitle">Kyle finds what matters, prepares the work and keeps you in control. Gmail stays the source of truth.</p>
       </div>
 
       <!-- Google Sign In Button -->
@@ -87,7 +87,7 @@
 
         <div class="auth-status-msg" id="authStatusMsg" aria-live="polite"></div>
 
-        <div class="auth-divider">
+        <div class="auth-divider" id="authDivider">
           <span>OR</span>
         </div>
 

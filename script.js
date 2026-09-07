@@ -22,7 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
     tokenClient: null,
     accessToken: '',
     profile: null,
-    messages: []
+    messages: [],
+    authenticated: false
   };
 
   const demoMessages = [
@@ -258,6 +259,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const scrollPrompt = document.getElementById('scrollPrompt');
     if (scrollPrompt) scrollPrompt.style.opacity = Math.max(0, 0.85 - currentScatter * 3.5);
+
+    const heroIdentity = document.querySelector('.hero-identity');
+    if (heroIdentity) {
+      heroIdentity.style.opacity = Math.max(0, 1 - currentScatter * 2.7);
+      heroIdentity.style.transform = `translateX(-50%) translateY(${-currentScatter * 18}px)`;
+    }
 
     const authContainer = document.getElementById('authContainer');
     if (authContainer && !document.body.classList.contains('app-active')) {
@@ -529,6 +536,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const googleAuthBtn = document.getElementById('googleAuthBtn');
     if (!googleAuthBtn) return;
 
+    try {
+      const profileResponse = await fetch(`/api/user/profile?ts=${Date.now()}`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (profileResponse.ok) {
+        appState.profile = await profileResponse.json();
+        appState.authenticated = true;
+        document.getElementById('btnText').textContent = 'Enter dashboard';
+        document.getElementById('authTitle').textContent = 'Your inbox is ready.';
+        document.getElementById('authSubtitle').textContent = `Continue as ${appState.profile.name || appState.profile.email || 'your Google account'}.`;
+        googleAuthBtn.classList.add('is-authenticated');
+        document.getElementById('authDivider').hidden = true;
+        document.getElementById('demoClientBtn').hidden = true;
+        setAuthStatus('Google account connected.', 'is-success');
+        return;
+      }
+    } catch (error) {
+      console.info('No active Google session found.', error);
+    }
+
     const config = await loadGoogleConfig();
     if (!config.clientId) {
       setAuthStatus(config.envError || 'Google client ID is missing.', 'is-error');
@@ -546,6 +573,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (googleAuthBtn) {
     googleAuthBtn.addEventListener('click', async () => {
       if (googleAuthBtn.classList.contains('is-loading')) return;
+
+      if (appState.authenticated) {
+        window.location.href = './dashboard.html';
+        return;
+      }
       googleAuthBtn.classList.add('is-loading');
 
       if (!appState.tokenClient) await initGoogleAuth();

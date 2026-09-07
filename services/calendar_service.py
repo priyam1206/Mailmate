@@ -282,10 +282,24 @@ def update_event(event_id, data):
     patch = _event_body(data, existing=existing)
     if not patch:
         return _normalize(existing)
-    updated = service.events().patch(
+    existing_all_day = bool((existing.get('start') or {}).get('date'))
+    updated_all_day = bool((patch.get('start') or {}).get('date')) if 'start' in patch else existing_all_day
+    method = service.events().patch
+    body = patch
+    if 'start' in patch and existing_all_day != updated_all_day:
+        writable_fields = (
+            'summary', 'description', 'location', 'attendees', 'colorId',
+            'extendedProperties', 'reminders', 'recurrence', 'transparency',
+            'visibility', 'guestsCanInviteOthers', 'guestsCanModify',
+            'guestsCanSeeOtherGuests',
+        )
+        body = {key: existing[key] for key in writable_fields if key in existing}
+        body.update(patch)
+        method = service.events().update
+    updated = method(
         calendarId='primary',
         eventId=event_id,
-        body=patch,
+        body=body,
         sendUpdates='all' if 'attendees' in data else 'none',
     ).execute()
     return _normalize(updated)

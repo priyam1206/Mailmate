@@ -251,6 +251,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.title = `MailMate - ${copy[0]}`;
     els.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
     els.panels.forEach(panel => panel.classList.toggle('active', panel.id === `tab-${name}`));
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    document.querySelector('.main')?.scrollTo?.({ top: 0, left: 0, behavior: 'auto' });
     window.MailmateContext?.setPage(name);
     window.KyleUi?.active?.setPresentationMode?.(name === 'overview' ? 'overview' : 'floating');
     window.Kyle?.setContext({
@@ -604,7 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (work.state === 'active') {
         return `<span class="privacy-pill work-active" title="Kyle Work is active for this source email"><i class="fas fa-robot"></i> Work Active</span>`;
       }
-      return `<span class="privacy-pill work-eligible" title="This email is eligible for Work, but no active run is attached"><i class="fas fa-bolt"></i> Work eligible</span>`;
+      return '';
     }
     return '';
   }
@@ -676,20 +678,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (gate.work_agent_allowed) {
       const work = emailWorkPresentation(email || { privacy_gate: gate });
+      if (work.state === 'eligible') return '';
       const done = work.state === 'done';
       const needs = work.state === 'needs-input';
-      const active = work.state === 'active';
       const cardClass = done ? 'work-done' : needs ? 'work-needs-input' : 'work';
-      const title = done ? 'Work completed' : needs ? 'Work needs input' : active ? 'Actionable Task Plane' : 'Work eligible';
+      const title = done ? 'Work completed' : needs ? 'Work needs input' : 'Actionable Task Plane';
       const subtitle = done
         ? 'Kyle has already resolved or completed the Work item attached to this source email.'
         : needs
           ? 'Kyle is waiting for required input before it can continue.'
-          : active
-            ? 'Kyle Work is currently active for this source email.'
-            : 'Kyle will prepare a Work item for this email on the next sync. Reload the page to check.';
-      const label = done ? 'Work done' : needs ? 'Needs input' : active ? 'Work Active' : 'Eligible';
-      const icon = done ? 'fa-check' : needs ? 'fa-circle-exclamation' : active ? 'fa-robot' : 'fa-bolt';
+          : 'Kyle Work is currently active for this source email.';
+      const label = done ? 'Work done' : needs ? 'Needs input' : 'Work Active';
+      const icon = done ? 'fa-check' : needs ? 'fa-circle-exclamation' : 'fa-robot';
       return `
         <div class="email-privacy-card ${cardClass}">
           <div style="display:flex;align-items:center;gap:8px;">
@@ -702,17 +702,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="privacy-state-label">${label}</span>
         </div>`;
     }
-    return `
-      <div class="email-privacy-card safe">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <i class="fas fa-circle-check" style="font-size:1.1rem;color:#0284c7;"></i>
-          <div>
-            <strong>Display Only</strong> · Safe for local AI overview
-            <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(gate.reason || 'Direct correspondence; suitable for contextual summarization.')}</p>
-          </div>
-        </div>
-        <span class="privacy-state-label safe">Display only</span>
-      </div>`;
+    return '';
   }
 
   const prefetchTimers = new WeakMap();
@@ -1949,7 +1939,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function decodeHtml(value) {
     const ta = document.createElement('textarea');
     ta.innerHTML = String(value ?? '');
-    return ta.value;
+    return ta.value
+      .replace(/[\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
   }
 
   function safeSnippet(value) {
@@ -2321,7 +2314,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderConflictAlert();
     grid.dataset.rendered = 'true';
     requestAnimationFrame(() => {
-      grid.scrollTop = hadTimeline ? previousScrollTop : 7 * 56;
+      grid.scrollTop = hadTimeline && previousScrollTop > 0 ? previousScrollTop : 5 * 56;
     });
   }
 
@@ -2414,6 +2407,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const height = Math.max(22, ((visibleEnd - visibleStart) / 60) * HOUR_HEIGHT - 2);
         const classes = [
           'calendar-event-block',
+          height < 42 ? 'is-compact' : '',
           eventTypeClass(event),
           `urgency-${eventUrgency(event)}`,
           event.conflict ? 'conflict' : ''

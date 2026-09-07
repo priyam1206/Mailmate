@@ -380,6 +380,16 @@ class WorkAgentService:
         completed_statuses = {"sent", "approved_sent", "resolved_external", "ignored_outbound", "completed", "cancelled", "failed"}
         return [j for j in self.list_jobs(user_id, reconcile=False) if j.get("status") in completed_statuses]
 
+    def resolved_source_message_ids(self, user_id):
+        """Return Gmail source IDs whose requested reply/action is verifiably resolved."""
+        resolved_statuses = {"sent", "approved_sent", "resolved_external", "ignored_outbound"}
+        return {
+            str((job.get("source") or {}).get("message_id") or "")
+            for job in self.list_jobs(user_id, reconcile=False)
+            if job.get("status") in resolved_statuses
+            and (job.get("source") or {}).get("message_id")
+        }
+
     def create_automation_run(self, user_id, automation):
         automation_id = str((automation or {}).get("id") or "automation")
         stamp = _now()

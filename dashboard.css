@@ -1825,7 +1825,7 @@ h2 { font-size: 1rem; }
 .calendar-all-day {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 58px repeat(7, minmax(110px, 1fr));
+  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
   min-height: 50px;
   border-bottom: 1px solid var(--line-strong);
   background: #f5f5f2;
@@ -1836,6 +1836,7 @@ h2 { font-size: 1rem; }
   color: var(--muted);
   font-size: 0.62rem;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .calendar-all-day-cell {
@@ -1889,8 +1890,13 @@ h2 { font-size: 1rem; }
   color: #35435e;
   font-size: 0.66rem;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-height: 27px;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   cursor: pointer;
 }
 
@@ -1905,7 +1911,7 @@ h2 { font-size: 1rem; }
   flex: 1 1 auto;
   position: relative;
   display: grid;
-  grid-template-columns: 58px repeat(7, minmax(110px, 1fr));
+  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
   height: 100%;
   min-height: 0;
   overflow-y: auto;
@@ -1975,8 +1981,11 @@ h2 { font-size: 1rem; }
   overflow: hidden;
   font-size: 0.69rem;
   line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .calendar-event-block small {
@@ -1985,6 +1994,9 @@ h2 { font-size: 1rem; }
   opacity: 0.72;
   font-size: 0.61rem;
 }
+.calendar-event-block.is-compact { padding-top: 4px; padding-bottom: 4px; }
+.calendar-event-block.is-compact strong { white-space: nowrap; display: block; text-overflow: ellipsis; }
+.calendar-event-block.is-compact small { display: none; }
 
 .calendar-event-block.deadline {
   border-left-color: #be8b2f;

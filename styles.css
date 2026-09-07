@@ -215,6 +215,8 @@ body {
   text-align: center;
   pointer-events: none;
   color: #dadde2;
+  transition: opacity 180ms linear, transform 240ms ease-out;
+  will-change: opacity, transform;
 }
 
 .hero-identity h1 {
@@ -308,7 +310,7 @@ body {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 28px;
-  padding: 40px 36px 32px;
+  padding: 34px 36px 30px;
   backdrop-filter: blur(28px) saturate(190%);
   -webkit-backdrop-filter: blur(28px) saturate(190%);
   box-shadow:
@@ -337,7 +339,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
   padding: 6px 14px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -397,7 +399,7 @@ body {
   font-size: 0.88rem;
   color: #94a3b8;
   line-height: 1.55;
-  margin-bottom: 26px;
+  margin-bottom: 22px;
 }
 
 .auth-subtitle strong {
@@ -410,7 +412,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   margin-bottom: 0;
 }
 
@@ -476,10 +478,20 @@ body {
   display: block;
 }
 
+.google-auth-btn.is-authenticated .google-icon {
+  display: none;
+}
+
+.google-auth-btn.is-authenticated {
+  box-shadow:
+    0 7px 24px rgba(0, 0, 0, 0.42),
+    0 0 28px rgba(255, 255, 255, 0.24);
+}
+
 .auth-status-msg {
   font-size: 0.82rem;
   color: #94a3b8;
-  min-height: 20px;
+  min-height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -555,6 +567,20 @@ body {
 
 .demo-client-btn:hover svg {
   transform: translateX(3px);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 

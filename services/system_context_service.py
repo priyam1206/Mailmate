@@ -91,7 +91,12 @@ class SystemContextService:
 
         # 4. Mail intelligence is minimized active context, never raw mailbox data.
         mail_rows = mail_context_service.list_context(user_id)
-        needs_attention = [row for row in mail_rows if row.get('attention_allowed')]
+        resolved_source_ids = work_agent_service.resolved_source_message_ids(user_id)
+        active_mail_rows = [
+            row for row in mail_rows
+            if str(row.get('gmail_message_id') or '') not in resolved_source_ids
+        ]
+        needs_attention = [row for row in active_mail_rows if row.get('attention_allowed')]
         recent_index = [{
             'id': row.get('gmail_message_id'), 'thread_id': row.get('gmail_thread_id'),
             'title': row.get('display_title'), 'sender': row.get('sender_display'),
@@ -139,7 +144,7 @@ class SystemContextService:
                     "recent": recent_index,
                     "counts": {
                         "needs_attention": len(needs_attention),
-                        "requires_reply": sum(1 for row in mail_rows if row.get('requires_reply')),
+                        "requires_reply": sum(1 for row in active_mail_rows if row.get('requires_reply')),
                     },
                 },
                 "runtime": {

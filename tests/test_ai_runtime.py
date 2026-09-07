@@ -244,6 +244,62 @@ def test_manual_dashboard_refresh_reconciles_without_enqueuing_work(monkeypatch)
     })
     monkeypatch.setattr(mailmate_app.work_agent_service, 'reconcile_jobs_with_gmail', lambda user_id: calls.__setitem__('reconcile', calls['reconcile'] + 1))
     monkeypatch.setattr(mailmate_app.work_agent_service, 'sync_and_enqueue', lambda *args: calls.__setitem__('enqueue', calls['enqueue'] + 1))
+    monkeypatch.setattr(mailmate_app.work_agent_service, 'resolved_source_message_ids', lambda user_id: set())
     response = mailmate_app.app.test_client().get('/api/dashboard/overview?refresh=true')
     assert response.status_code == 200
     assert calls == {'reconcile': 1, 'enqueue': 0}
+
+
+def test_resolved_work_is_removed_from_attention_but_email_remains():
+    payload = {
+        'emails': [
+            {'id': 'done', 'context_scores': {'attention_allowed': True, 'requires_reply': True, 'work_allowed': True}},
+            {'id': 'open', 'context_scores': {'attention_allowed': True}},
+        ],
+        'needs_attention': [
+            {'source_message_id': 'done'},
+            {'source_message_id': 'open'},
+        ],
+        'waiting_on_others': [{'source_message_id': 'done'}],
+        'metrics': {'important': 2, 'actions': 2},
+    }
+    result = mailmate_app._prune_resolved_attention(payload, {'done'})
+    assert [item['source_message_id'] for item in result['needs_attention']] == ['open']
+    assert result['waiting_on_others'] == []
+    assert [email['id'] for email in result['emails']] == ['done', 'open']
+    assert result['emails'][0]['context_scores']['attention_allowed'] is False
+    assert result['metrics']['actions'] == 1
+
+
+def test_later_outbound_thread_reply_resolves_only_earlier_inbound_messages():
+    threads = [{'messages': [
+        {'id': 'request-1', 'direction': 'inbound'},
+        {'id': 'reply-1', 'direction': 'outbound', 'labels': ['SENT']},
+        {'id': 'follow-up', 'direction': 'inbound'},
+    ]}]
+    assert mailmate_app._resolved_message_ids_from_threads(threads) == {'request-1'}
+
+
+def test_kyle_agent_plain_chat_always_returns_json(monkeypatch):
+    monkeypatch.setattr(mailmate_app, 'get_user_profile', lambda: {'email': 'user@example.com'})
+    monkeypatch.setattr(mailmate_app.system_context_service, 'build', lambda **kwargs: {
+        'context_version': 3,
+        'emails': [],
+        'work': {'all': []},
+        'calendar': {'events': []},
+    })
+    monkeypatch.setattr(mailmate_app, 'plan_kyle_turn', lambda *args, **kwargs: {
+        'reply': 'I am here and ready.',
+        'voice': 'I am here and ready.',
+        'actions': [],
+    })
+
+    response = mailmate_app.app.test_client().post('/api/kyle/agent', json={
+        'message': 'Hello, are you working?',
+        'conversation': [],
+        'uiContext': {},
+    })
+
+    assert response.status_code == 200
+    assert response.get_json()['reply'] == 'I am here and ready.'
+    assert response.get_json()['mode'] == 'semantic-agent'

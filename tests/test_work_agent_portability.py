@@ -41,3 +41,14 @@ def test_hydrated_work_job_restores_gmail_action_metadata(monkeypatch):
     assert job['source']['direction'] == 'inbound'
     assert 'body' not in job['source']
     assert 'body' not in state['work-1']['source']
+
+
+def test_resolved_source_ids_only_include_verified_resolution_states():
+    service = WorkAgentService.__new__(WorkAgentService)
+    service.list_jobs = lambda user_id, reconcile=False: [
+        {'status': 'resolved_external', 'source': {'message_id': 'replied'}},
+        {'status': 'sent', 'source': {'message_id': 'sent'}},
+        {'status': 'waiting_approval', 'source': {'message_id': 'pending'}},
+        {'status': 'failed', 'source': {'message_id': 'failed'}},
+    ]
+    assert service.resolved_source_message_ids('user@example.com') == {'replied', 'sent'}

@@ -180,6 +180,37 @@ def _attention_source_id(item):
     ).strip()
 
 
+def _resolved_message_ids_from_threads(threads):
+    """An inbound message is resolved when its Gmail thread has a later sent reply."""
+    resolved = set()
+    for thread in threads or []:
+        messages = list((thread or {}).get('messages') or [])
+        last_outbound_index = -1
+        for index, message in enumerate(messages):
+            labels = {str(label).upper() for label in (message.get('labels') or [])}
+            if (
+                str(message.get('direction') or '').lower() == 'outbound'
+                or message.get('is_sent_by_me') is True
+                or 'SENT' in labels
+            ):
+                last_outbound_index = index
+        if last_outbound_index < 0:
+            continue
+        for message in messages[:last_outbound_index]:
+            labels = {str(label).upper() for label in (message.get('labels') or [])}
+            outbound = (
+                str(message.get('direction') or '').lower() == 'outbound'
+                or message.get('is_sent_by_me') is True
+                or 'SENT' in labels
+            )
+            if outbound:
+                continue
+            message_id = str(message.get('id') or message.get('gmail_id') or '')
+            if message_id:
+                resolved.add(message_id)
+    return resolved
+
+
 def _prune_payload_to_live_gmail(payload, live_ids):
     """Remove messages/tasks that no longer exist in active Gmail (e.g. moved to Trash)."""
     result = dict(payload or {})
@@ -211,6 +242,41 @@ def _prune_payload_to_live_gmail(payload, live_ids):
     metrics['actions'] = len(result.get('needs_attention') or [])
     result['metrics'] = metrics
     result['gmail_pruned_count'] = len(removed_ids)
+    return result
+
+
+def _prune_resolved_attention(payload, resolved_source_ids):
+    """Keep completed Gmail work visible in Inbox, but out of active attention."""
+    result = dict(payload or {})
+    resolved = {str(value) for value in (resolved_source_ids or set()) if value}
+    if not resolved:
+        return result
+
+    for key in ('needs_attention', 'waiting_on_others'):
+        result[key] = [
+            item for item in (result.get(key) or [])
+            if _attention_source_id(item) not in resolved
+        ]
+
+    emails = list(result.get('emails') or [])
+    for email in emails:
+        message_id = str(email.get('id') or email.get('gmail_id') or '')
+        if message_id not in resolved:
+            continue
+        scores = dict(email.get('context_scores') or {})
+        scores.update({
+            'attention_allowed': False,
+            'requires_reply': False,
+            'work_allowed': False,
+            'resolution': 'completed_work',
+        })
+        email['context_scores'] = scores
+    result['emails'] = emails
+
+    metrics = dict(result.get('metrics') or {})
+    metrics['important'] = len(result.get('needs_attention') or [])
+    metrics['actions'] = len(result.get('needs_attention') or [])
+    result['metrics'] = metrics
     return result
 
 # MAILMATE_TAILNET_COMPUTE_ONLY_GUARD
@@ -974,6 +1040,9 @@ def _build_live_dashboard(profile, force_ai=False):
 
     user_id = profile.get('id') or profile.get('sub') or profile.get('email') or ''
     context_result = mail_context_service.update(user_id, emails)
+    replied_source_ids = _resolved_message_ids_from_threads(threads)
+    if replied_source_ids:
+        mail_context_service.delete_context(user_id, replied_source_ids)
     mail_context_service.save_sync_state(
         user_id,
         history_id,
@@ -1015,6 +1084,7 @@ def _build_live_dashboard(profile, force_ai=False):
         'storage': context_result['persistence'],
     }
     overview['calendar_dismissed_markers'] = sorted(_calendar_dismissed_markers(profile))
+    overview = _prune_resolved_attention(overview, replied_source_ids)
     overview['ai_calendar_sync'] = _reconcile_ai_calendar(overview, profile=profile, force=False)
 
     return overview
@@ -1049,6 +1119,10 @@ def dashboard_overview():
                 work_agent_service.sync_and_enqueue(user_id, live_payload)
         except Exception as sync_exc:
             app.logger.debug('Work sync notice: %s', sync_exc)
+        live_payload = _prune_resolved_attention(
+            live_payload,
+            work_agent_service.resolved_source_message_ids(user_id),
+        )
         return jsonify(live_payload)
     except Exception as exc:
         app.logger.exception('Dashboard processing failed')
@@ -2681,28 +2755,6 @@ def kyle_agent_endpoint():
         'conversation': (data.get('conversation') or [])[-12:],
     })
 
-
-@app.route('/api/voice/speak', methods=['POST'])
-def elevenlabs_speak():
-    if not get_user_profile():
-        return jsonify({'error': 'Not authenticated'}), 401
-    text = str((request.get_json(silent=True) or {}).get('text') or '').strip()
-    try:
-        content, content_type = elevenlabs_synthesize(text)
-        return Response(content, status=200, content_type=content_type, headers={'Cache-Control': 'no-store'})
-    except ElevenLabsError as exc:
-        return jsonify({'error': str(exc), 'fallback': 'browser'}), 503
-
-
-@app.route('/api/voice/agent/signed-url')
-def elevenlabs_agent_signed_url():
-    if not get_user_profile():
-        return jsonify({'error': 'Not authenticated'}), 401
-    try:
-        return jsonify({'signed_url': signed_agent_url()})
-    except ElevenLabsError as exc:
-        return jsonify({'error': str(exc)}), 503
-
     # Mail commands have a deterministic recipient/action path. Resolve them
     # before any semantic planning so explicit sends never depend on LM Studio.
     if active_draft or re.search(r'\b(email|mail|reply|draft|compose|send)\b', message, re.I):
@@ -2812,6 +2864,28 @@ def elevenlabs_agent_signed_url():
         'mode': 'deterministic-context',
         'context_version': system_ctx.get('context_version', 1),
     })
+
+
+@app.route('/api/voice/speak', methods=['POST'])
+def elevenlabs_speak():
+    if not get_user_profile():
+        return jsonify({'error': 'Not authenticated'}), 401
+    text = str((request.get_json(silent=True) or {}).get('text') or '').strip()
+    try:
+        content, content_type = elevenlabs_synthesize(text)
+        return Response(content, status=200, content_type=content_type, headers={'Cache-Control': 'no-store'})
+    except ElevenLabsError as exc:
+        return jsonify({'error': str(exc), 'fallback': 'browser'}), 503
+
+
+@app.route('/api/voice/agent/signed-url')
+def elevenlabs_agent_signed_url():
+    if not get_user_profile():
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        return jsonify({'signed_url': signed_agent_url()})
+    except ElevenLabsError as exc:
+        return jsonify({'error': str(exc)}), 503
 
 
 @app.route('/api/kyle/chat', methods=['POST'])
