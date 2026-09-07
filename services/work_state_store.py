@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,7 @@ class WorkStateStore:
     def __init__(self):
         self._lock = threading.RLock()
         self._jobs = {}
-        self._hydrated_users = set()
+        self._last_hydrated_at = {}
         self._reachable = None
 
     def _enabled(self):
@@ -65,6 +66,7 @@ class WorkStateStore:
         source = job.get('source') or {}
         output = job.get('output') or {}
         now = datetime.now(timezone.utc)
+        terminal = str(job.get('status') or '') in TERMINAL_STATUSES
         return {
             'job_id': str(job.get('id') or ''),
             'user_id': self._user_uuid(job.get('user_id')),
@@ -79,15 +81,52 @@ class WorkStateStore:
             'approval_state': str((job.get('policy_verdict') or {}).get('decision') or job.get('status') or '')[:80],
             'gmail_draft_id': output.get('gmail_draft_id') or None,
             'artifact_metadata': self._artifact_metadata(job),
-            'updated_at': now.isoformat(),
-            'expires_at': (now + timedelta(days=14)).isoformat(),
+            'updated_at': str(job.get('updated_at') or now.isoformat()),
+            'expires_at': (now + timedelta(days=2 if terminal else 14)).isoformat(),
         }
 
-    def hydrate(self, user_id):
+    @staticmethod
+    def _newer(left, right):
+        return str(left or '') > str(right or '')
+
+    @staticmethod
+    def _job_from_row(row, user_id):
+        artifacts = [
+            {'filename': item.get('filename'), 'type': item.get('type'), 'path': item.get('path')}
+            for item in (row.get('artifact_metadata') or [])
+        ]
+        return {
+            'id': str(row.get('job_id') or ''),
+            'user_id': str(user_id or '').lower(),
+            'title': row.get('clean_title'),
+            'clean_title': row.get('clean_title'),
+            'status': row.get('status'),
+            'current_step': row.get('current_step'),
+            'source': {
+                'type': 'gmail',
+                'message_id': row.get('source_message_id'),
+                'thread_id': row.get('source_thread_id'),
+                'deadline': row.get('deadline'),
+            },
+            'output': {
+                'summary': row.get('task_summary'),
+                'suggested_reply': row.get('generated_reply') or '',
+                'gmail_draft_id': row.get('gmail_draft_id'),
+                'checklist': [],
+                'notes': [],
+            },
+            'artifacts': artifacts,
+            'steps': [],
+            'created_at': row.get('created_at'),
+            'updated_at': row.get('updated_at'),
+        }
+
+    def hydrate(self, user_id, force=False):
         normalized = str(user_id or '').lower()
-        if not normalized or normalized in self._hydrated_users:
+        refresh_seconds = max(1, int(os.getenv('WORK_STATE_REFRESH_SECONDS', '4')))
+        now_monotonic = time.monotonic()
+        if not normalized or (not force and now_monotonic - self._last_hydrated_at.get(normalized, 0) < refresh_seconds):
             return
-        self._hydrated_users.add(normalized)
         if not self._enabled() or not all(self._config()):
             return
         try:
@@ -99,37 +138,11 @@ class WorkStateStore:
             with self._lock:
                 for row in response.json() or []:
                     job_id = str(row.get('job_id') or '')
-                    if not job_id or job_id in self._jobs:
+                    local = self._jobs.get(job_id)
+                    if not job_id or (local and not self._newer(row.get('updated_at'), local.get('updated_at'))):
                         continue
-                    artifacts = [
-                        {'filename': item.get('filename'), 'type': item.get('type'), 'path': item.get('path')}
-                        for item in (row.get('artifact_metadata') or [])
-                    ]
-                    self._jobs[job_id] = {
-                        'id': job_id,
-                        'user_id': normalized,
-                        'title': row.get('clean_title'),
-                        'clean_title': row.get('clean_title'),
-                        'status': row.get('status'),
-                        'current_step': row.get('current_step'),
-                        'source': {
-                            'type': 'gmail',
-                            'message_id': row.get('source_message_id'),
-                            'thread_id': row.get('source_thread_id'),
-                            'deadline': row.get('deadline'),
-                        },
-                        'output': {
-                            'summary': row.get('task_summary'),
-                            'suggested_reply': row.get('generated_reply') or '',
-                            'gmail_draft_id': row.get('gmail_draft_id'),
-                            'checklist': [],
-                            'notes': [],
-                        },
-                        'artifacts': artifacts,
-                        'steps': [],
-                        'created_at': row.get('created_at'),
-                        'updated_at': row.get('updated_at'),
-                    }
+                    self._jobs[job_id] = self._job_from_row(row, normalized)
+            self._last_hydrated_at[normalized] = now_monotonic
         except Exception:
             self._reachable = False
 
@@ -148,16 +161,23 @@ class WorkStateStore:
                 if not job_id:
                     continue
                 if job.get('status') in TERMINAL_STATUSES:
-                    self._request('DELETE', 'active_work_state', params={'job_id': f'eq.{job_id}'})
                     source_id = str((job.get('source') or {}).get('message_id') or '')
                     if source_id:
                         self._request('DELETE', 'active_ui_context', params={
                             'user_id': f'eq.{self._user_uuid(job.get("user_id"))}',
                             'source_message_id': f'eq.{source_id}',
                         })
-                    continue
                 payload = self._payload(job)
                 if not payload['source_message_id']:
+                    continue
+                remote = self._request('GET', 'active_work_state', params={
+                    'job_id': f'eq.{job_id}', 'select': '*', 'limit': '1',
+                }).json() or []
+                if remote and self._newer(remote[0].get('updated_at'), payload.get('updated_at')):
+                    with self._lock:
+                        self._jobs[job_id] = self._job_from_row(
+                            remote[0], job.get('user_id')
+                        )
                     continue
                 self._request(
                     'POST', 'active_work_state',

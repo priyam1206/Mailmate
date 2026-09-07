@@ -386,8 +386,14 @@
 
     try {
       store.set(store.states.THINKING);
+      ui.setSubtitle?.('Understanding your request...');
       const activeDraft = window.KyleUi?.active?.getActiveDraft?.() || null;
       const selectedEmail = window.AgentMail?.getSelectedEmail?.() || null;
+      const composerRequest = /\b(draft|compose|write|send|reply)\b/i.test(cleanPrompt) && /\b(email|mail|reply|this|that|it)\b/i.test(cleanPrompt);
+      if (composerRequest && !activeDraft) {
+        window.KyleUi?.active?.openPreparingComposer?.(/\breply\b/i.test(cleanPrompt) ? 'reply' : 'compose');
+        ui.setSubtitle?.('Preparing draft...');
+      }
 
       const response = await fetch(`${API_BASE}/api/kyle/agent`, {
         method: 'POST',
@@ -406,6 +412,9 @@
       if (!response.ok) throw new Error(`Kyle returned ${response.status}`);
 
       const data = await response.json();
+      if (composerRequest && !(data.actions || []).some(action => ['mail.compose', 'mail.reply', 'mail.update_draft', 'mail.send_draft'].includes(action.tool))) {
+        window.KyleUi?.active?.closeComposer?.();
+      }
       if (data.mode !== 'semantic-agent') {
         const recentFallback = /\b(most\s+recent|latest|newest|show\s+(?:me\s+)?(?:the\s+)?recent)\s+(?:e?mail|message)\b/i.test(cleanPrompt);
         if (recentFallback) {

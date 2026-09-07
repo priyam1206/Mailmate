@@ -183,6 +183,8 @@ function testKyleCommandCardAndError() {
     console,
     setTimeout,
     clearTimeout,
+    setInterval,
+    clearInterval,
     parseFloat: Number.parseFloat
   });
 
@@ -196,6 +198,8 @@ function testKyleCommandCardAndError() {
   assert.ok(typeof ui.showCommandCard === 'function', 'showCommandCard must be exposed');
   assert.ok(typeof ui.updateCommandStep === 'function', 'updateCommandStep must be exposed');
   assert.ok(typeof ui.showErrorRecovery === 'function', 'showErrorRecovery must be exposed');
+  assert.ok(typeof ui.openPreparingComposer === 'function', 'preparing composer must be exposed');
+  assert.ok(typeof ui.minimizeComposer === 'function', 'minimize composer must be exposed');
 
   // Verify showCommandCard
   ui.showCommandCard({
@@ -223,6 +227,16 @@ function testKyleCommandCardAndError() {
   });
   assert.equal(document.getElementById('kyleErrorTitle').textContent, 'Server connection took too long');
   assert.equal(document.getElementById('kyleErrorReason').textContent, 'Could not connect to AI backend.');
+
+  ui.openPreparingComposer('compose');
+  assert.equal(panel.dataset.composerState, 'preparing', 'Composer should expose its loading state');
+  assert.equal(document.getElementById('kyleComposerLoading').hidden, false, 'Loading indicator should be visible');
+  assert.ok(panel.classList.contains('is-open'), 'Preparing composer should stay open');
+  ui.minimizeComposer();
+  assert.ok(panel.classList.contains('is-minimized'), 'Composer should minimize without discarding');
+  ui.restoreComposer();
+  assert.ok(!panel.classList.contains('is-minimized'), 'Composer should restore');
+  assert.equal(panel.dataset.composerState, 'preparing', 'Restoring should preserve in-progress state');
 
   console.log('✓ testKyleCommandCardAndError passed');
 }

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=33">
+  <link rel="stylesheet" href="./dashboard.css?v=34">
   <link rel="stylesheet" href="/remote-worker-ui.css?v=8">
   <link rel="stylesheet" href="/compute-ui-fix.css?v=1">
   <link rel="stylesheet" href="./mailmate-master-polish.css?v=1">
@@ -450,8 +450,8 @@
     </section>
   </div>
 
-  <div class="calendar-modal" id="automationModal" hidden>
-    <section class="calendar-modal-card automation-modal-card" role="dialog" aria-modal="true" aria-labelledby="automationModalTitle">
+  <div class="calendar-modal-backdrop" id="automationModal" hidden>
+    <section class="calendar-modal automation-modal-card" role="dialog" aria-modal="true" aria-labelledby="automationModalTitle">
       <header>
         <div><p class="section-label">Scheduled Kyle run</p><h2 id="automationModalTitle">New automation</h2></div>
         <button class="icon-btn plain-icon" id="automationModalClose" type="button" aria-label="Close"><i class="fas fa-xmark"></i></button>
@@ -459,7 +459,7 @@
       <form id="automationForm">
         <input type="hidden" id="automationId">
         <label>Name<input id="automationName" type="text" required maxlength="100" placeholder="Morning brief"></label>
-        <label>Kyle does<textarea id="automationGoal" rows="4" required maxlength="1200" placeholder="Check important Gmail, deadlines and Calendar, then prepare a summary."></textarea></label>
+        <label>Task for Kyle<textarea id="automationGoal" rows="5" required maxlength="1200" placeholder="Check important Gmail, deadlines and Calendar, then prepare a summary."></textarea></label>
         <div class="calendar-form-grid automation-schedule-grid">
           <label>When
             <select id="automationScheduleType">
@@ -479,6 +479,7 @@
           <label id="automationOnceField" hidden>Date and time<input id="automationOnceAt" type="datetime-local"></label>
           <label id="automationIntervalField" hidden>Every (minutes)<input id="automationIntervalMinutes" type="number" min="5" max="10080" value="240"></label>
         </div>
+        <label class="automation-enabled-row"><span><strong>Enabled</strong><small>Run this automation on its schedule</small></span><span class="switch"><input id="automationEnabled" type="checkbox" checked><span></span></span></label>
         <div class="calendar-modal-footer">
           <button class="danger-text-btn" id="automationDeleteBtn" type="button" hidden>Delete</button>
           <div>
@@ -502,10 +503,10 @@
   <script src="./kyle-executor.js?v=22"></script>
   <script src="./kyle-planner.js?v=21"></script>
   <script src="./kyle-audio.js?v=30"></script>
-  <script src="./kyle-ui.js?v=33"></script>
-  <script src="./kyle.js?v=31"></script>
+  <script src="./kyle-ui.js?v=34"></script>
+  <script src="./kyle.js?v=32"></script>
   <script src="./calendar-conflicts.js?v=21"></script>
-  <script src="./dashboard.js?v=34"></script>
+  <script src="./dashboard.js?v=35"></script>
   <script src="/remote-worker-ui.js?v=5"></script>
 </body>
 </html>

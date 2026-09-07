@@ -15,6 +15,7 @@
                 <p class="kyle-panel-subtitle" id="kylePanelSubtitle"></p>
               </div>
               <div class="kyle-panel-header-actions">
+                <button class="kyle-panel-btn" id="kylePanelMinimizeBtn" type="button" aria-label="Minimize draft" title="Minimize"><i class="fas fa-minus"></i></button>
                 <button class="kyle-panel-btn kyle-panel-close-btn" id="kylePanelCloseBtn" type="button" aria-label="Close panel" title="Close">
                   <i class="fas fa-xmark"></i>
                 </button>
@@ -24,6 +25,7 @@
             <div class="kyle-panel-body" id="kylePanelBody">
               <!-- Mini Composer View -->
               <div class="kyle-composer-view" id="kyleComposerView">
+                <div class="kyle-composer-loading" id="kyleComposerLoading" hidden><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>Preparing your draft...</span></div>
                 <div class="kyle-composer-field">
                   <label class="kyle-composer-label" for="kyleComposerSubject">Subject</label>
                   <input class="kyle-composer-input" id="kyleComposerSubject" type="text" placeholder="Subject">
@@ -109,6 +111,7 @@
     const panelSubtitle = mount.querySelector('#kylePanelSubtitle');
     const cardBadge = mount.querySelector('#kyleCardBadge');
     const panelMicBtn = mount.querySelector('#kylePanelMicBtn');
+    const panelMinimizeBtn = mount.querySelector('#kylePanelMinimizeBtn');
     const panelCloseBtn = mount.querySelector('#kylePanelCloseBtn');
     const composerView = mount.querySelector('#kyleComposerView');
     const hudView = mount.querySelector('#kyleActivityHudView');
@@ -126,6 +129,7 @@
     const surfaceResult = mount.querySelector('#kyleSurfaceResult');
     const subjectInput = mount.querySelector('#kyleComposerSubject');
     const bodyInput = mount.querySelector('#kyleComposerText');
+    const composerLoading = mount.querySelector('#kyleComposerLoading');
     const panelStatus = mount.querySelector('#kylePanelStatus');
     const panelFooter = mount.querySelector('#kylePanelFooter');
     const changeBtn = mount.querySelector('#kyleComposerChangeBtn');
@@ -142,6 +146,9 @@
     let surfaceTimer = null;
     let boundHandlers = {};
     let presentationMode = 'floating';
+    let composerState = 'idle';
+    let stateBeforeMinimize = 'idle';
+    let fillGeneration = 0;
 
     function createFloatingMount() {
       const existing = document.getElementById('kyleMount');
@@ -249,13 +256,14 @@
 
     function setPresentationMode(mode, options = {}) {
       const next = mode === 'overview' ? 'overview' : 'floating';
-      const target = next === 'overview' ? document.getElementById('kyleOverviewHome') : document.body;
-      if (!target || (presentationMode === next && mount.parentElement === target)) return;
+      const effective = activeDraft ? 'floating' : next;
+      const target = effective === 'overview' ? document.getElementById('kyleOverviewHome') : document.body;
+      if (!target || (presentationMode === effective && mount.parentElement === target)) return;
       const canMeasure = typeof form.getBoundingClientRect === 'function';
       const before = canMeasure ? form.getBoundingClientRect() : { left: 0, top: 0, width: 0 };
-      presentationMode = next;
-      mount.classList.toggle('kyle-overview-mount', next === 'overview');
-      mount.classList.toggle('kyle-floating-mount', next === 'floating');
+      presentationMode = effective;
+      mount.classList.toggle('kyle-overview-mount', effective === 'overview');
+      mount.classList.toggle('kyle-floating-mount', effective === 'floating');
       target.appendChild(mount);
       mount.style.transform = '';
       const after = canMeasure ? form.getBoundingClientRect() : { left: 0, top: 0, width: 0 };
@@ -265,7 +273,7 @@
           { transform: 'translate(0, 0) scaleX(1)', transformOrigin: 'right center', opacity: 1 }
         ], { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
       }
-      mount.dataset.presentation = next;
+      mount.dataset.presentation = effective;
     }
 
     function selectSurfaceView(mode) {
@@ -298,7 +306,52 @@
         panel.dataset.mode = 'compact';
       }
       activeDraft = null;
+      composerState = 'idle';
+      stateBeforeMinimize = 'idle';
+      panel?.classList.remove('is-minimized');
       currentPanelMode = 'compact';
+    }
+
+    function setComposerState(next, message = '') {
+      composerState = next || 'idle';
+      if (panel) panel.dataset.composerState = composerState;
+      const busy = ['preparing', 'generating'].includes(composerState);
+      if (composerLoading) composerLoading.hidden = !busy;
+      if (subjectInput) subjectInput.disabled = busy || ['sending', 'sent'].includes(composerState);
+      if (bodyInput) bodyInput.disabled = busy || ['sending', 'sent'].includes(composerState);
+      if (message) setComposerStatus(message, composerState === 'error');
+    }
+
+    function openPreparingComposer(mode = 'compose') {
+      activeDraft = { recipient: '', to: '', subject: '', body: '', thread_id: null, in_reply_to: null, operation_id: null, mode };
+      setPresentationMode('floating', { immediate: true });
+      openSurface('email_review', mode === 'reply' ? 'Preparing reply' : 'Preparing email', 'Kyle is working');
+      subjectInput.value = '';
+      bodyInput.value = '';
+      panelFooter.style.display = 'flex';
+      changeBtn.style.display = 'none';
+      sendBtn.disabled = true;
+      sendBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Preparing';
+      setComposerState('preparing', 'Understanding your request...');
+    }
+
+    function animateField(element, value, generation) {
+      const finalValue = String(value || '');
+      if (!element || !finalValue || typeof setInterval !== 'function') {
+        if (element) element.value = finalValue;
+        return Promise.resolve();
+      }
+      element.value = '';
+      const chunk = Math.max(2, Math.ceil(finalValue.length / 24));
+      return new Promise(resolve => {
+        let index = 0;
+        const timer = setInterval(() => {
+          if (generation !== fillGeneration) { clearInterval(timer); resolve(); return; }
+          index = Math.min(finalValue.length, index + chunk);
+          element.value = finalValue.slice(0, index);
+          if (index >= finalValue.length) { clearInterval(timer); resolve(); }
+        }, 14);
+      });
     }
 
     function showSurfaceResult(title, text, options = {}) {
@@ -415,23 +468,53 @@
         operation_id: draft.operation_id || null,
         mode: mode
       };
+      setPresentationMode('floating', { immediate: true });
       const displayName = (activeDraft.recipient || activeDraft.to || '').split('<')[0].trim() || activeDraft.to || 'Contact';
       openSurface('email_review', mode === 'reply' ? `Reply to ${displayName}` : `Email ${displayName}`, activeDraft.to || activeDraft.recipient || '');
-      subjectInput.value = activeDraft.subject || '';
-      bodyInput.value = activeDraft.body || '';
+      panel.classList.remove('is-minimized');
+      const generation = ++fillGeneration;
+      setComposerState('generating', 'Filling message...');
+      Promise.all([
+        animateField(subjectInput, activeDraft.subject, generation),
+        animateField(bodyInput, activeDraft.body, generation)
+      ]).then(() => {
+        if (generation !== fillGeneration || !activeDraft) return;
+        subjectInput.value = activeDraft.subject || '';
+        bodyInput.value = activeDraft.body || '';
+        setComposerState('draft_ready', 'Draft ready · Edit anytime or click Send');
+        sendBtn.disabled = !isValidEmail(activeDraft.to);
+      });
 
       panelFooter.style.display = 'flex';
       panelStatus.textContent = 'Draft ready · Edit anytime or click Send';
       panelStatus.style.color = 'var(--muted)';
       changeBtn.style.display = '';
       changeBtn.textContent = 'Edit';
-      sendBtn.disabled = !isValidEmail(activeDraft.to);
+      sendBtn.disabled = true;
       sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
       if (!isValidEmail(activeDraft.to)) setComposerStatus('A valid recipient email is required.', true);
     }
 
     function closeComposer() {
       closeSurface();
+    }
+
+    function minimizeComposer() {
+      if (!activeDraft) return;
+      stateBeforeMinimize = composerState;
+      composerState = 'minimized';
+      panel.dataset.composerState = composerState;
+      panel.classList.add('is-minimized');
+      panel.setAttribute('aria-hidden', 'false');
+    }
+
+    function restoreComposer() {
+      if (!activeDraft) return;
+      panel.classList.remove('is-minimized');
+      const restoredState = stateBeforeMinimize === 'minimized' ? 'draft_ready' : stateBeforeMinimize;
+      setComposerState(restoredState || 'draft_ready', restoredState === 'preparing' || restoredState === 'generating'
+        ? 'Preparing your draft...'
+        : 'Draft ready · Edit anytime or click Send');
     }
 
     function setComposerDraft(draft = {}) {
@@ -504,6 +587,7 @@
       }
 
       isSending = true;
+      setComposerState('sending', 'Sending email...');
       sendBtn.disabled = true;
       sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
       setComposerStatus('Sending via Gmail API...');
@@ -549,6 +633,7 @@
 
         sendBtn.innerHTML = '<i class="fas fa-check"></i> Sent';
         setComposerStatus(`Sent to ${to}`);
+        setComposerState('sent', `Sent to ${to}`);
         const doneMsg = `Sent to ${to}.`;
         setLiveText(doneMsg, 4000);
         window.Kyle?.store?.addMessage?.('kyle', doneMsg);
@@ -573,7 +658,7 @@
             : err.code === 'send_unconfirmed'
               ? "Couldn't confirm send; checking Gmail is required."
               : `Failed to send: ${err.message}`;
-        setComposerStatus(message, true);
+        setComposerState('error', message);
         return { ok: false, error: err.message };
       }
     }
@@ -652,6 +737,8 @@
       if (currentPanelMode === 'calendar_confirmation') window.KyleExecutor?.cancelPending?.();
       closeSurface();
     });
+    panelMinimizeBtn?.addEventListener?.('click', () => panel.classList.contains('is-minimized') ? restoreComposer() : minimizeComposer());
+    panel?.querySelector?.('.kyle-panel-header')?.addEventListener?.('dblclick', restoreComposer);
     panelMicBtn?.addEventListener?.('click', () => boundHandlers.onMute?.());
     subjectInput?.addEventListener?.('input', () => {
       if (activeDraft) activeDraft.operation_id = null;
@@ -699,7 +786,8 @@
           input.focus();
         }
         if (event.key === 'Escape') {
-          closeSurface();
+          if (activeDraft) minimizeComposer();
+          else closeSurface();
           input.blur();
         }
       });
@@ -724,6 +812,7 @@
       renderActivityHud(event.detail);
     });
     window.addEventListener('kyle:action-start', event => {
+      if (activeDraft) return;
       const transaction = event.detail?.transaction || {};
       renderActivityHud({
         goal: transaction.goal,
@@ -744,7 +833,7 @@
         return;
       }
       const transaction = event.detail?.transaction || {};
-      if (currentPanelMode === 'activity') {
+      if (currentPanelMode === 'activity' && !activeDraft) {
         renderActivityHud({
           goal: transaction.goal,
           title: transaction.goal,
@@ -910,7 +999,11 @@
       renderResults,
       renderBrief,
       openComposer,
+      openPreparingComposer,
       closeComposer,
+      minimizeComposer,
+      restoreComposer,
+      setComposerState,
       setComposerDraft,
       getActiveDraft,
       setComposerStatus,

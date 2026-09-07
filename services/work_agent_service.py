@@ -15,6 +15,7 @@ from services.google_service import (
     update_gmail_draft,
     get_gmail_threads,
     get_gmail_thread,
+    get_gmail_message,
     get_gmail_draft,
     delete_gmail_draft
 )
@@ -432,12 +433,52 @@ class WorkAgentService:
             return dict(job)
 
     def get_job(self, job_id, user_id):
+        work_state_store.hydrate(user_id)
         with self._lock:
             jobs = self._read_jobs()
             job = jobs.get(str(job_id))
             if job and job.get("user_id") == user_id:
                 return job
             return None
+
+    def _ensure_source_metadata(self, job_id, user_id, job=None):
+        """Restore action metadata from Gmail for jobs hydrated on another device."""
+        current = job or self.get_job(job_id, user_id)
+        source = (current or {}).get("source") or {}
+        if source.get("sender") and source.get("subject") and source.get("thread_id"):
+            return current
+
+        message_id = source.get("message_id")
+        if not message_id:
+            return current
+
+        try:
+            message = get_gmail_message(message_id)
+        except Exception as exc:
+            print(f"[WorkAgent] Gmail metadata refresh notice ({message_id}): {exc}")
+            return current
+
+        labels = [str(label) for label in (message.get("labels") or [])]
+        metadata = {
+            "thread_id": message.get("thread_id"),
+            "rfc_message_id": message.get("rfc_message_id"),
+            "sender": message.get("sender"),
+            "subject": message.get("subject"),
+            "direction": "outbound" if "SENT" in {label.upper() for label in labels} else "inbound",
+            "labels": labels,
+        }
+        with self._lock:
+            jobs = self._read_jobs()
+            target = jobs.get(str(job_id))
+            if not target or target.get("user_id") != user_id:
+                return current
+            target_source = target.setdefault("source", {})
+            for key, value in metadata.items():
+                if value:
+                    target_source[key] = value
+            target["updated_at"] = _now()
+            self._write_jobs(jobs)
+            return dict(target)
 
     def sync_and_enqueue(self, user_id, overview_data):
         """Analyze overview tasks, create WorkJob records, and enqueue actionable jobs."""
@@ -590,6 +631,7 @@ class WorkAgentService:
 
     def save_draft(self, job_id, user_id, edited_reply):
         """Save manual edits to the draft without sending. Aborts any active auto-send countdown."""
+        self._ensure_source_metadata(job_id, user_id)
         with self._lock:
             jobs = self._read_jobs()
             job = jobs.get(str(job_id))
@@ -646,6 +688,7 @@ class WorkAgentService:
         job = self.get_job(job_id, user_id)
         if not job:
             raise ValueError("Job not found")
+        job = self._ensure_source_metadata(job_id, user_id, job) or job
 
         # Reconcile with Gmail thread before executing send
         source = job.get("source") or {}
@@ -689,6 +732,8 @@ class WorkAgentService:
         sender = source.get("sender") or ""
         match = re.search(r"[\w\.-]+@[\w\.-]+", sender)
         to_email = match.group(0) if match else sender
+        if not to_email:
+            raise ValueError("Cannot send this Work item because its Gmail sender could not be resolved.")
         subj = "Re: " + re.sub(r"^(Re:\s*)+", "", source.get("subject") or "", flags=re.I)
         body = edited_reply or (job.get("reply_draft") or {}).get("body") or (job.get("output") or {}).get("suggested_reply") or "Thank you, I am working on this."
 

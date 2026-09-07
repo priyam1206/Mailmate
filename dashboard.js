@@ -2745,6 +2745,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('automationId').value = automation?.id || '';
     $('automationName').value = automation?.name || '';
     $('automationGoal').value = automation?.action?.goal || '';
+    $('automationEnabled').checked = automation?.enabled !== false;
     $('automationScheduleType').value = schedule.type || 'daily';
     $('automationTime').value = schedule.time || '08:00';
     $('automationWeekday').value = String(schedule.weekday ?? 0);
@@ -2779,6 +2780,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (type === 'interval') schedule.minutes = Number($('automationIntervalMinutes').value || 240);
     return {
       name: $('automationName').value.trim(),
+      enabled: $('automationEnabled').checked,
       schedule,
       action: { type: 'kyle_goal', goal: $('automationGoal').value.trim() },
       output: { type: 'work_summary' }
