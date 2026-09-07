@@ -2,6 +2,19 @@
   const transactions = [];
   let pendingApproval = null;
 
+  const SAFE_RETRY_TOOLS = new Set([
+    'navigation.open',
+    'inbox.open_email',
+    'inbox.set_filter',
+    'ui.highlight',
+    'ui.scroll_to',
+    'mail.compose',
+    'mail.reply',
+    'mail.update_draft'
+  ]);
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
   function setState(name) {
     const state = window.Kyle?.store;
     if (state?.states?.[name]) state.set(state.states[name]);
@@ -84,17 +97,64 @@
       try {
         await window.KyleMotion?.before(action);
         const before = window.KyleObservation?.capture(action);
-        const result = await window.KyleTools.run(action.tool, action.args || {}, transaction);
-        setState('OBSERVING');
-        const observation = await window.KyleObservation?.after(action, before, result);
+
+        let result = null;
+        let observation = null;
+        const maxAttempts = SAFE_RETRY_TOOLS.has(action.tool) ? 2 : 1;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          try {
+            result = await window.KyleTools.run(
+              action.tool,
+              action.args || {},
+              transaction
+            );
+
+            setState('OBSERVING');
+            observation = await window.KyleObservation?.after(
+              action,
+              before,
+              result
+            );
+
+            if (observation && observation.satisfied === false) {
+              throw new Error(
+                `${action.tool} ran but Mailmate could not verify the result.`
+              );
+            }
+
+            break;
+          } catch (error) {
+            if (attempt >= maxAttempts) throw error;
+
+            window.KyleUi?.active?.setSubtitle?.(
+              'That did not complete correctly. Retrying...'
+            );
+
+            window.dispatchEvent(new CustomEvent('kyle:action-retry', {
+              detail: { transaction, action, attempt }
+            }));
+
+            await sleep(180 * attempt);
+          }
+        }
+
         await window.KyleMotion?.after(action, result, observation);
-        step.status = observation?.satisfied === false ? 'unverified' : 'complete';
+        step.status = 'complete';
         step.result = result;
         step.observation = observation;
+
         if (typeof result?.undo === 'function') transaction.undo.push(result.undo);
         if (action.args?.reference && result !== false) transaction.changedObjects.push(action.args.reference);
-        window.dispatchEvent(new CustomEvent('kyle:action-complete', { detail: { transaction, action, result, observation } }));
-        if (action.tool === 'mail.send_draft') window.KyleUi?.active?.setSubtitle?.('Verifying the send...');
+
+        window.dispatchEvent(new CustomEvent('kyle:action-complete', {
+          detail: { transaction, action, result, observation }
+        }));
+
+        if (action.tool === 'mail.send_draft') {
+          window.KyleUi?.active?.setSubtitle?.('Send verified.');
+        }
+
         if (result?.requiresApproval && result?.previewId) {
           const commitTool = action.tool === 'calendar.preview_move' ? 'calendar.commit_move'
             : action.tool === 'calendar.preview_create' ? 'calendar.commit_create'

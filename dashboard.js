@@ -2741,12 +2741,19 @@ document.addEventListener('DOMContentLoaded', () => {
     $('automationDeleteBtn').hidden = !automation;
     updateAutomationScheduleFields();
     modal.hidden = false;
-    setTimeout(() => $('automationName')?.focus(), 20);
+    document.body.classList.add('modal-open');
+    requestAnimationFrame(() => modal.classList.add('is-visible'));
+    setTimeout(() => $('automationName')?.focus(), 40);
   }
 
   function closeAutomationModal() {
     const modal = $('automationModal');
-    if (modal) modal.hidden = true;
+    if (!modal) return;
+    modal.classList.remove('is-visible');
+    document.body.classList.remove('modal-open');
+    setTimeout(() => {
+      if (!modal.classList.contains('is-visible')) modal.hidden = true;
+    }, 140);
   }
 
   function automationPayload() {
@@ -2787,8 +2794,22 @@ document.addEventListener('DOMContentLoaded', () => {
     $('automationModal')?.addEventListener('click', event => {
       if (event.target === $('automationModal')) closeAutomationModal();
     });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !$('automationModal')?.hidden) closeAutomationModal();
+    });
     $('automationForm')?.addEventListener('submit', async event => {
       event.preventDefault();
+      const submitBtn = event.currentTarget.querySelector('button[type="submit"]');
+      const name = $('automationName')?.value?.trim() || '';
+      const goal = $('automationGoal')?.value?.trim() || '';
+      if (!name || !goal) {
+        addError('Automation: name and Kyle task are required.');
+        return;
+      }
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Savingâ€¦';
+      }
       let payload;
       try {
         payload = automationPayload();
@@ -2809,6 +2830,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       closeAutomationModal();
       await loadAutomations();
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save automation';
+      }
     });
     $('automationDeleteBtn')?.addEventListener('click', async () => {
       const id = $('automationId').value;

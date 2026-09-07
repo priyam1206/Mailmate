@@ -2914,3 +2914,204 @@ h2 { font-size: 1rem; }
 .work-collapsibles-group{margin-top:20px;gap:8px!important}.work-collapsible{border:1px solid #e0e2de;border-radius:11px;overflow:hidden;background:#fff}.policy-banner{border-radius:12px}
 @media(max-width:1180px){.work-layout{grid-template-columns:minmax(250px,270px) minmax(0,1fr)}.work-run-content{padding-left:22px;padding-right:22px}}
 @media(max-width:840px){.work-layout{grid-template-columns:1fr}.work-history{max-height:310px;overflow:auto;border-right:0;border-bottom:1px solid var(--line)}.work-run-content{padding:20px 18px 120px}}
+
+
+/* MAILMATE_MANUAL_STABILITY_PATCH_V1 */
+body.modal-open {
+  overflow: hidden;
+}
+
+.kyle-action-panel {
+  z-index: 1450 !important;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(72vh, 620px);
+}
+
+.kyle-action-panel[data-mode="email_review"] {
+  border-color: rgba(255,255,255,0.18);
+  box-shadow:
+    0 24px 64px rgba(0,0,0,0.48),
+    0 0 0 1px rgba(255,255,255,0.045);
+}
+
+.kyle-composer-loading {
+  min-height: 76px;
+  grid-template-columns: auto 1fr;
+  justify-content: center;
+  padding: 20px 8px;
+}
+
+.kyle-composer-loading i {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+}
+
+.kyle-transcript {
+  max-height: min(320px, 42vh);
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.kyle-transcript-line {
+  align-items: flex-start;
+}
+
+.kyle-transcript-copy {
+  min-width: 0;
+  color: inherit;
+  line-height: 1.5;
+}
+
+.kyle-transcript-copy p {
+  margin: 0;
+}
+
+.kyle-transcript-copy p + p {
+  margin-top: 8px;
+}
+
+.kyle-transcript-copy code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  font: 0.92em/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.kyle-chat-bullet {
+  display: block;
+  padding-left: 2px;
+  margin: 2px 0;
+}
+
+.calendar-modal-backdrop:not([hidden]) {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1900 !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: 24px !important;
+  overflow: auto !important;
+  background: rgba(8, 8, 8, 0.58) !important;
+  backdrop-filter: blur(8px);
+  opacity: 1;
+}
+
+.calendar-modal-backdrop.is-visible {
+  animation: mailmateModalIn 150ms ease both;
+}
+
+.calendar-modal.automation-modal-card {
+  position: relative !important;
+  width: min(680px, calc(100vw - 48px)) !important;
+  max-width: 680px !important;
+  max-height: calc(100vh - 48px) !important;
+  margin: auto !important;
+  padding: 22px !important;
+  overflow: auto !important;
+  border-radius: 14px !important;
+  background: var(--surface-strong) !important;
+  border: 1px solid var(--line-strong) !important;
+  box-shadow: 0 30px 90px rgba(0,0,0,0.38) !important;
+}
+
+.automation-modal-card > header {
+  position: sticky;
+  top: -22px;
+  z-index: 2;
+  margin: -22px -22px 18px;
+  padding: 20px 22px 14px;
+  background: var(--surface-strong);
+  border-bottom: 1px solid var(--line);
+}
+
+#automationForm {
+  display: grid !important;
+  gap: 16px !important;
+}
+
+#automationForm > label,
+.automation-schedule-grid > label {
+  display: grid !important;
+  gap: 7px !important;
+  min-width: 0 !important;
+}
+
+#automationForm input,
+#automationForm textarea,
+#automationForm select {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  border-radius: 8px !important;
+}
+
+#automationForm textarea {
+  min-height: 132px !important;
+  resize: vertical;
+}
+
+.automation-schedule-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.automation-enabled-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 18px !important;
+  padding: 14px 0 !important;
+}
+
+.automation-enabled-row .switch {
+  flex: 0 0 42px;
+}
+
+.automation-modal-card .calendar-modal-footer {
+  position: sticky;
+  bottom: -22px;
+  z-index: 2;
+  margin: 2px -22px -22px;
+  padding: 14px 22px 20px;
+  background: var(--surface-strong);
+  border-top: 1px solid var(--line);
+}
+
+@keyframes mailmateModalIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 680px) {
+  .kyle-action-panel {
+    width: calc(100vw - 24px) !important;
+    max-height: min(76vh, 600px) !important;
+  }
+
+  .calendar-modal-backdrop:not([hidden]) {
+    align-items: end !important;
+    padding: 10px !important;
+  }
+
+  .calendar-modal.automation-modal-card {
+    width: 100% !important;
+    max-height: calc(100vh - 20px) !important;
+    border-radius: 16px 16px 10px 10px !important;
+  }
+
+  .automation-schedule-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .automation-modal-card .calendar-modal-footer > div {
+    width: 100%;
+    display: flex;
+  }
+
+  .automation-modal-card .calendar-modal-footer > div button {
+    flex: 1 1 0;
+  }
+}

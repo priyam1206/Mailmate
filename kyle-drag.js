@@ -48,6 +48,7 @@
     var onSnap        = opts.onSnap || null;
     var initialCorner = opts.initialCorner || 'br';
     var zBase         = opts.zBase || 1400;
+    var bottomOffset  = Number(opts.bottomOffset || 0);
 
     var dragging = false;
     var startPX = 0, startPY = 0, startEX = 0, startEY = 0;
@@ -60,10 +61,13 @@
       var rect = getRect();
       var vw = window.innerWidth, vh = window.innerHeight;
       var tx, ty;
-      if      (corner === 'bl') { tx = SNAP_MARGIN;             ty = vh - rect.height - SNAP_MARGIN; }
-      else if (corner === 'br') { tx = vw - rect.width - SNAP_MARGIN; ty = vh - rect.height - SNAP_MARGIN; }
+      if      (corner === 'bl') { tx = SNAP_MARGIN;             ty = vh - rect.height - SNAP_MARGIN - bottomOffset; }
+      else if (corner === 'br') { tx = vw - rect.width - SNAP_MARGIN; ty = vh - rect.height - SNAP_MARGIN - bottomOffset; }
       else if (corner === 'tl') { tx = SNAP_MARGIN;             ty = SNAP_MARGIN; }
       else                      { tx = vw - rect.width - SNAP_MARGIN; ty = SNAP_MARGIN; }
+
+      tx = clamp(tx, 8, Math.max(8, vw - rect.width - 8));
+      ty = clamp(ty, 8, Math.max(8, vh - rect.height - 8));
 
       currentCorner = corner;
       snapped = true;
@@ -149,10 +153,14 @@
       }
     }
 
-    return { snapToCorner: snapToCorner };
+    return {
+      snapToCorner: snapToCorner,
+      resnap: function (animate) { snapToCorner(currentCorner, animate !== false); },
+      getCorner: function () { return currentCorner; }
+    };
   }
 
-  /* ── init ─────────────────────────────────────────────────────── */
+  /* â”€â”€ init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function init() {
     var floatingMount = document.getElementById('kyleMount');
     if (!floatingMount) { setTimeout(init, 300); return; }
@@ -162,7 +170,7 @@
       floatingMount._dragInit = true;
       var orbHandle = floatingMount.querySelector('.kyle-orb');
       if (orbHandle) {
-        makeDraggable(floatingMount, {
+        floatingMount._dragController = makeDraggable(floatingMount, {
           handle: orbHandle, magnetic: true, initialCorner: 'br', zBase: 1400,
         });
       }
@@ -175,14 +183,33 @@
       actionPanel.style.right  = 'auto';
       actionPanel.style.bottom = 'auto';
       var header = actionPanel.querySelector('.kyle-panel-header');
-      makeDraggable(actionPanel, {
-        handle: header || actionPanel, magnetic: true, initialCorner: 'br', zBase: 1300,
+      actionPanel._dragController = makeDraggable(actionPanel, {
+        handle: header || actionPanel, magnetic: true, initialCorner: 'br', zBase: 1450,
+        bottomOffset: 96,
         onSnap: function (corner) {
           actionPanel.classList.toggle('opens-downward', corner.charAt(0) === 't');
         },
       });
     }
 
+
+    // Re-anchor floating surfaces after transcript/composer size changes.
+    if (!window._kyleLayoutResnapBound) {
+      window._kyleLayoutResnapBound = true;
+      window.addEventListener('kyle:layout-changed', function () {
+        requestAnimationFrame(function () {
+          var mount = document.getElementById('kyleMount');
+          if (mount && !isInOverviewMount(mount) && mount._dragController) {
+            mount._dragController.resnap(false);
+          }
+
+          var panel = document.querySelector('.kyle-action-panel.is-open');
+          if (panel && panel._dragController) {
+            panel._dragController.resnap(false);
+          }
+        });
+      });
+    }
     // 3. Watch for Overview -> floating transition and new panels
     var observer = new MutationObserver(function () {
       var mount = document.getElementById('kyleMount');
@@ -201,3 +228,4 @@
 
   window.KyleDrag = { init: init, makeDraggable: makeDraggable };
 })();
+

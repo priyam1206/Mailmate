@@ -107,7 +107,15 @@ def plan_kyle_turn(
         except Exception as exc:
             prompt_context["selected_mail_error"] = str(exc)[:160]
 
-    explicit_send = bool(re.search(r"\b(send|email .* now|reply .* and send)\b", message, re.I))
+    negative_send = bool(re.search(
+        r"\b(?:do\s+not|don't|dont|never|not\s+yet|without)\s+(?:send|email|mail)\b|\b(?:draft|compose)\s+(?:only|but\s+do\s+not\s+send)\b",
+        message,
+        re.I,
+    ))
+    explicit_send = (
+        not negative_send
+        and bool(re.search(r"\b(send|email .* now|reply .* and send)\b", message, re.I))
+    )
     system = """You are Kyle, Mailmate's interactive agent. Decide meaning and choose tools.
 Return JSON only: {"reply":"", "voice":"", "intent":"", "needs_more_context":false,
 "context_requests":[], "actions":[{"tool":"", "args":{}, "reason":""}]}.

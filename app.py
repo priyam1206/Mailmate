@@ -368,6 +368,37 @@ def health():
         "message": "Flask Backend Running!"
     })
 
+
+@app.route('/api/voice/test', methods=['GET'])
+def elevenlabs_voice_test():
+    if not get_user_profile():
+        return jsonify({'ok': False, 'error': 'Not authenticated'}), 401
+    try:
+        audio_bytes, mime = elevenlabs_synthesize('Kyle voice system is working.')
+        return Response(
+            audio_bytes,
+            status=200,
+            content_type=mime,
+            headers={
+                'Cache-Control': 'no-store',
+                'X-Mailmate-Voice': 'elevenlabs',
+            },
+        )
+    except ElevenLabsError as exc:
+        return jsonify({
+            'ok': False,
+            'provider': 'elevenlabs',
+            'error': str(exc),
+        }), 502
+    except Exception:
+        app.logger.exception('ElevenLabs voice test failed')
+        return jsonify({
+            'ok': False,
+            'provider': 'elevenlabs',
+            'error': 'Voice generation failed.',
+        }), 500
+
+
 @app.route('/api/config')
 def config():
     return jsonify({

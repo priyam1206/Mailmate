@@ -406,7 +406,12 @@
       ui.setSubtitle?.('Understanding your request...');
       const activeDraft = window.KyleUi?.active?.getActiveDraft?.() || null;
       const selectedEmail = window.AgentMail?.getSelectedEmail?.() || null;
-      const composerRequest = /\b(draft|compose|write|send|reply)\b/i.test(cleanPrompt) && /\b(email|mail|reply|this|that|it)\b/i.test(cleanPrompt);
+      const composerRequest =
+        /\b(reply|compose|draft|email|mail)\b/i.test(cleanPrompt) ||
+        (
+          /\bsend\b/i.test(cleanPrompt) &&
+          /(?:@|\bto\b|\bsaying\b|\bmessage\b|\bthem\b|\bhim\b|\bher\b)/i.test(cleanPrompt)
+        );
       if (composerRequest && !activeDraft) {
         window.KyleUi?.active?.openPreparingComposer?.(/\breply\b/i.test(cleanPrompt) ? 'reply' : 'compose');
         ui.setSubtitle?.('Preparing draft...');
@@ -444,7 +449,7 @@
       for (let attempt = 0; attempt <= MAX_TOOL_RETRIES; attempt++) {
         try {
           const retryNote = attempt > 0
-            ? `${cleanPrompt}\n\n[SYSTEM ERROR: your previous response did not include a required tool call. You MUST respond with a mail.compose/mail.reply/mail.update_draft tool action for this request. Do not reply with text only.]`
+            ? `${cleanPrompt}\n\nPlease use the appropriate mail tool for this request instead of returning text only.`
             : cleanPrompt;
           data = await askAgent(retryNote);
           if (!composerRequest || !composerToolMissing(data)) {
@@ -463,7 +468,11 @@
       }
 
       if (composerRequest && lastError && composerToolMissing(data || {})) {
-        window.KyleUi?.active?.closeComposer?.();
+        const message = 'Kyle could not produce a valid composer tool call after retrying. The draft window is still open.';
+        window.KyleUi?.active?.setComposerState?.('error', message);
+        ui.setSubtitle?.(message);
+        store.addMessage('kyle', message);
+        return;
       }
       if (!data) throw lastError || new Error('Kyle returned no response');
       if (data.mode !== 'semantic-agent') {
@@ -496,6 +505,15 @@
       const transaction = await window.KyleExecutor?.execute?.(plan);
       if (transaction && !['complete', 'waiting-approval'].includes(transaction.status)) {
         console.warn('[Kyle Agent] action transaction ended', transaction.status, transaction);
+        const failedStep = [...(transaction.steps || [])].reverse().find(step => step.status === 'failed');
+        const failureText = failedStep?.error
+          ? `I couldn't complete ${failedStep.action?.tool || 'that action'}: ${failedStep.error}`
+          : 'I could not complete that action.';
+        if (composerRequest) {
+          window.KyleUi?.active?.setComposerState?.('error', failureText);
+        }
+        reply = failureText;
+        voice = failureText;
       }
       if (transaction?.status === 'waiting-approval') {
         reply = 'The preview is ready. Say confirm to save it, or cancel to leave your calendar unchanged.';

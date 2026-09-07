@@ -10,6 +10,95 @@
   const PAGES = new Set(['overview', 'inbox', 'work', 'calendar', 'automations', 'status', 'integrations', 'settings']);
   const INBOX_FILTERS = new Set(['all', 'important', 'action', 'unread']);
   const previews = new Map();
+  // MAILMATE_VERIFIED_COMPOSER_HELPERS
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  async function waitFor(test, timeoutMs = 1200, intervalMs = 40) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      try {
+        const value = await test();
+        if (value) return value;
+      } catch (_) {}
+      await sleep(intervalMs);
+    }
+    return null;
+  }
+
+  function composerReceipt() {
+    if (window.KyleUi?.active?.getComposerSnapshot) {
+      const current = window.KyleUi.active.getComposerSnapshot();
+      if (current?.open) {
+        return {
+          composer_open: true,
+          state: current.state || '',
+          mode: current.mode || '',
+          subject: current.draft?.subject || '',
+          body: current.draft?.body || ''
+        };
+      }
+    }
+
+    const panel = document.getElementById('kyleActionPanel');
+    if (!panel) return null;
+    const style = window.getComputedStyle(panel);
+    const rect = panel.getBoundingClientRect();
+    const visible =
+      panel.getAttribute('aria-hidden') !== 'true' &&
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      rect.width > 20 &&
+      rect.height > 20;
+
+    if (!visible) return null;
+
+    return {
+      composer_open: true,
+      state: panel.dataset.composerState || '',
+      mode: panel.dataset.mode || '',
+      subject: document.getElementById('kyleComposerSubject')?.value || '',
+      body: document.getElementById('kyleComposerText')?.value || ''
+    };
+  }
+
+  async function openComposerVerified(draft, mode) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (window.KyleUi?.active?.openComposer) {
+        window.KyleUi.active.openComposer(draft, mode);
+      } else {
+        window.dispatchEvent(new CustomEvent('kyle:composer-open', {
+          detail: { draft, mode }
+        }));
+      }
+
+      const receipt = await waitFor(() => {
+        const current = composerReceipt();
+        return current?.composer_open && current?.mode === 'email_review'
+          ? current
+          : null;
+      }, 1250);
+
+      if (receipt) {
+        return {
+          ok: true,
+          observation: receipt
+        };
+      }
+
+      if (attempt === 0) {
+        window.KyleUi?.active?.setSubtitle?.('Composer did not open. Retrying...');
+        window.KyleUi?.active?.openPreparingComposer?.(mode);
+        await sleep(180);
+      }
+    }
+
+    window.KyleUi?.active?.setComposerState?.(
+      'error',
+      'Kyle could not open the composer. Retry the request or edit manually.'
+    );
+    throw new Error('Kyle could not open the email composer after retrying.');
+  }
+
 
   function exactReference(args = {}) {
     const reference = args.reference || args;
@@ -327,19 +416,15 @@
         subject: args.subject || '',
         body: args.body || ''
       };
-      if (window.KyleUi?.active?.openComposer) {
-        window.KyleUi.active.openComposer(draft, 'compose');
-      } else {
-        window.dispatchEvent(new CustomEvent('kyle:composer-open', { detail: { draft, mode: 'compose' } }));
-      }
+
+      const opened = await openComposerVerified(draft, 'compose');
+
       return {
-        ok: true,
-        undo: () => {
-          if (window.KyleUi?.active?.closeComposer) window.KyleUi.active.closeComposer();
-          else window.dispatchEvent(new CustomEvent('kyle:composer-close'));
-        }
+        ...opened,
+        undo: () => window.KyleUi?.active?.closeComposer?.()
       };
     },
+
     'mail.reply': async args => {
       const draft = {
         recipient: args.recipient || args.to || '',
@@ -349,37 +434,64 @@
         thread_id: args.thread_id || null,
         in_reply_to: args.in_reply_to || null
       };
-      if (window.KyleUi?.active?.openComposer) {
-        window.KyleUi.active.openComposer(draft, 'reply');
-      } else {
-        window.dispatchEvent(new CustomEvent('kyle:composer-open', { detail: { draft, mode: 'reply' } }));
-      }
+
+      const opened = await openComposerVerified(draft, 'reply');
+
       return {
-        ok: true,
-        undo: () => {
-          if (window.KyleUi?.active?.closeComposer) window.KyleUi.active.closeComposer();
-          else window.dispatchEvent(new CustomEvent('kyle:composer-close'));
-        }
+        ...opened,
+        undo: () => window.KyleUi?.active?.closeComposer?.()
       };
     },
+
     'mail.update_draft': async args => {
-      if (window.KyleUi?.active?.setComposerDraft) {
-        window.KyleUi.active.setComposerDraft(args);
+      if (!window.KyleUi?.active?.setComposerDraft) {
+        throw new Error('Kyle composer is unavailable.');
       }
-      return { ok: true };
+
+      window.KyleUi.active.setComposerDraft(args);
+
+      const receipt = await waitFor(() => {
+        const current = composerReceipt();
+        if (!current) return null;
+
+        if (
+          args.subject !== undefined &&
+          current.subject !== String(args.subject)
+        ) return null;
+
+        if (
+          args.body !== undefined &&
+          current.body !== String(args.body)
+        ) return null;
+
+        return current;
+      }, 1000);
+
+      if (!receipt) {
+        throw new Error('Kyle updated the draft but could not verify the composer.');
+      }
+
+      return {
+        ok: true,
+        observation: receipt
+      };
     },
+
     'mail.send_draft': async args => {
-      if (window.KyleUi?.active?.sendCurrentComposer) {
-        return await window.KyleUi.active.sendCurrentComposer();
+      if (!window.KyleUi?.active?.sendCurrentComposer) {
+        throw new Error('Composer not available');
       }
-      return { ok: false, error: 'Composer not available' };
+
+      // NEVER blind-retry a send here. The UI owns a stable operation_id.
+      const result = await window.KyleUi.active.sendCurrentComposer();
+      if (!result?.ok) {
+        throw new Error(result?.error || 'Gmail send could not be confirmed.');
+      }
+      return { ...result, ok: true };
     },
-    'mail.close_composer': async args => {
-      if (window.KyleUi?.active?.closeComposer) {
-        window.KyleUi.active.closeComposer();
-      } else {
-        window.dispatchEvent(new CustomEvent('kyle:composer-close'));
-      }
+
+    'mail.close_composer': async () => {
+      window.KyleUi?.active?.closeComposer?.();
       return { ok: true };
     }
   };
