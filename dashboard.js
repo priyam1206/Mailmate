@@ -25,6 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
     actionCount: $('actionCount'),
     attentionBadge: $('attentionBadge'),
     attentionList: $('attentionList'),
+    waitingBadge: $('waitingBadge'),
+    waitingList: $('waitingList'),
+    kyleSuggestions: $('kyleSuggestions'),
     actionList: $('actionList'),
     upcomingList: $('upcomingList'),
     emailList: $('emailList'),
@@ -48,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedEmailId: null,
     fullMessages: new Map(),
     loadingMessageIds: new Set(),
+    mailboxLoadingCount: 0,
     inboxFilter: 'all',
     currentPage: 'overview',
     calendarEvents: [],
@@ -157,11 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function bindEvents() {
     els.tabs.forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
-    els.filters.forEach(filter => filter.addEventListener('click', () => {
-      state.inboxFilter = filter.dataset.filter;
-      els.filters.forEach(item => item.classList.toggle('active', item === filter));
-      renderEmails(state.data?.emails || []);
-    }));
+    els.filters.forEach(filter => filter.addEventListener('click', () => setInboxFilter(filter.dataset.filter)));
     els.refreshBtn?.addEventListener('click', async () => {
       const btn = els.refreshBtn;
       const icon = $('refreshIcon');
@@ -175,6 +175,16 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.classList.remove('is-refreshing');
         if (label) label.textContent = 'Refresh';
       }
+    });
+    document.querySelectorAll('[data-overview-target]').forEach(button => button.addEventListener('click', () => {
+      const target = button.dataset.overviewTarget;
+      if (target === 'work') return showTab('work');
+      showTab('inbox');
+      if (target === 'attention') setInboxFilter('action');
+    }));
+    $('viewAllAttentionBtn')?.addEventListener('click', () => {
+      showTab('inbox');
+      setInboxFilter('action');
     });
     $('logoutBtn')?.addEventListener('click', logout);
 
@@ -212,6 +222,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function setInboxFilter(filterName) {
+    state.inboxFilter = filterName || 'all';
+    els.filters.forEach(item => item.classList.toggle('active', item.dataset.filter === state.inboxFilter));
+    renderEmails(state.data?.emails || []);
+  }
+
   function registerStaticObjects() {
     els.tabs.forEach(tab => window.MailmateObjects?.register({
       type: 'page',
@@ -236,6 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     els.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
     els.panels.forEach(panel => panel.classList.toggle('active', panel.id === `tab-${name}`));
     window.MailmateContext?.setPage(name);
+    window.KyleUi?.active?.setPresentationMode?.(name === 'overview' ? 'overview' : 'floating');
     window.Kyle?.setContext({
       ...(state.data || {}),
       calendarEvents: state.calendarEvents,
@@ -376,6 +393,8 @@ document.addEventListener('DOMContentLoaded', () => {
       window.Kyle?.setContext({ health: state.health, emails: [], metrics: {}, currentPage: state.currentPage });
       return;
     }
+    state.mailboxLoadingCount += 1;
+    $('tab-overview')?.classList.toggle('is-loading', state.mailboxLoadingCount > 0);
 
     clearSteps();
     setStep('auth', 'done', 'Gmail session found');
@@ -391,11 +410,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (!response.ok) throw new Error(`Dashboard returned ${response.status}`);
       setStep('fetch', 'done', 'Context loaded');
-      setStep('extract', 'active', 'Extracting work, blockers, and deadlines');
+      setStep('extract', 'active', forceRefresh ? 'Reconciling mailbox changes' : 'Extracting work, blockers, and deadlines');
       const data = await response.json();
       const changedMessages = Number(data.context_sync?.changed_messages || 0);
-      setStep('extract', 'done', changedMessages ? `Processed ${changedMessages} changed message${changedMessages === 1 ? '' : 's'}` : 'Reused processed context');
-      setStep('store', 'active', 'Saving processed context');
+      setStep('extract', 'done', changedMessages ? `${changedMessages} changed message${changedMessages === 1 ? '' : 's'} updated` : 'No mailbox changes');
+      setStep('store', 'active', forceRefresh ? 'Updating active context' : 'Saving processed context');
       const storageMode = data.context_sync?.storage?.mode || 'memory-only';
       setStep('store', 'done', storageMode === 'user-scoped-jwt' ? 'Saved private derived context' : 'Transient context ready');
 
@@ -404,7 +423,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderDashboard(data);
 
       try {
-        const workResponse = await fetch(`${API_BASE}/api/work/jobs?ensure=1`, { cache: 'no-store' });
+        const workResponse = await fetch(`${API_BASE}/api/work/jobs${forceRefresh ? '' : '?ensure=1'}`, { cache: 'no-store' });
         if (workResponse.ok) {
           workJobs = await workResponse.json();
           renderOverviewWorkingNow();
@@ -445,6 +464,9 @@ document.addEventListener('DOMContentLoaded', () => {
         els.summaryText.textContent = 'Your inbox summary is temporarily unavailable. Try refresh.';
         window.Kyle?.setContext({ health: state.health, emails: [], metrics: {}, currentPage: state.currentPage });
       }
+    } finally {
+      state.mailboxLoadingCount = Math.max(0, state.mailboxLoadingCount - 1);
+      $('tab-overview')?.classList.toggle('is-loading', state.mailboxLoadingCount > 0);
     }
   }
 
@@ -456,8 +478,13 @@ document.addEventListener('DOMContentLoaded', () => {
       'verifying', 'preparing', 'working'
     ]);
     const activeJobs = (workJobs || []).filter(j => activeStatuses.has(j.status));
+    const reviewJobs = (workJobs || []).filter(j => ['waiting_approval', 'auto_send_countdown', 'needs_input'].includes(j.status));
+    const unresolvedCount = activeJobs.length + reviewJobs.length;
+    els.actionCount.textContent = unresolvedCount;
+    const stateLabel = $('workingStateLabel');
 
     if (activeJobs.length > 0) {
+      if (stateLabel) stateLabel.textContent = 'Kyle is working';
       els.actionList.innerHTML = activeJobs.map(job => {
         const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
         const latestStep = (job.steps && job.steps.length > 0) ? job.steps[job.steps.length - 1] : null;
@@ -474,45 +501,63 @@ document.addEventListener('DOMContentLoaded', () => {
           </article>
         `;
       }).join('');
+    } else if (reviewJobs.length > 0) {
+      if (stateLabel) stateLabel.textContent = `${reviewJobs.length} ready`;
+      els.actionList.innerHTML = reviewJobs.slice(0, 2).map(job => {
+        const displayTitle = cleanJobTitle(job.clean_title || job.title, job.source?.subject);
+        return `<article class="work-ready-overview" role="button" tabindex="0" data-kyle-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-label="${escapeHtml(displayTitle)}"><span class="status-dot"></span><div><strong>${escapeHtml(displayTitle)}</strong><p>${job.status === 'needs_input' ? 'Kyle needs your input to continue.' : 'Prepared and waiting for review.'}</p></div><small>Review <i class="fas fa-arrow-right"></i></small></article>`;
+      }).join('');
     } else {
+      if (stateLabel) stateLabel.textContent = 'Standing by';
       els.actionList.innerHTML = `
         <article>
           <span class="status-dot" style="background:#94a3b8;"></span>
           <div>
-            <strong>No active agent runs</strong>
-            <p>Kyle is on standby. Prepared drafts appear in Work.</p>
+            <strong>Standing by</strong>
+            <p>Nothing is being prepared right now.</p>
           </div>
-          <small>Standby</small>
         </article>
       `;
     }
 
-    els.actionList.querySelectorAll('[data-kyle-id]').forEach(element => window.MailmateObjects?.register({
-      type: element.dataset.kyleType,
-      id: element.dataset.kyleId,
-      label: element.dataset.kyleLabel,
-      page: 'overview'
-    }, element));
+    els.actionList.querySelectorAll('[data-kyle-id]').forEach(element => {
+      window.MailmateObjects?.register({ type: element.dataset.kyleType, id: element.dataset.kyleId, label: element.dataset.kyleLabel, page: 'overview' }, element);
+      const openWork = () => { selectedJobId = element.dataset.kyleId; showTab('work'); };
+      element.addEventListener('click', openWork);
+      element.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openWork(); } });
+    });
   }
 
   function renderDashboard(data) {
     const metrics = data.metrics || {};
     els.emailCount.textContent = metrics.emails ?? 0;
-    els.importantCount.textContent = metrics.important ?? 0;
-    els.actionCount.textContent = metrics.actions ?? 0;
-    els.attentionBadge.textContent = `${metrics.important ?? 0} items`;
-    els.summaryText.textContent = data.ai_insight || 'Your Gmail context is ready. Kyle can talk through priorities when needed.';
-
     const attention = data.needs_attention || [];
+    const waiting = data.waiting_on_others || [];
+    els.importantCount.textContent = attention.length;
+    els.attentionBadge.textContent = `${attention.length} item${attention.length === 1 ? '' : 's'}`;
+    els.summaryText.textContent = overviewSummary(attention.length, waiting.length);
+    renderKyleSuggestions(attention);
     els.attentionList.innerHTML = attention.length
       ? attention.slice(0, 5).map((item, index) => {
           const title = decodeHtml(item.subject || item.title || conciseActionTitle(item.description || item.reason) || 'Your task');
           const description = decodeHtml(item.description || item.reason || 'Needs follow-up');
-          const deadline = item.deadline ? `<small>${escapeHtml(decodeHtml(item.deadline))}</small>` : '';
           const sourceId = attentionSourceId(item);
-          return `<li class="attention-link" role="button" tabindex="0" data-source-id="${escapeHtml(sourceId)}" data-kyle-type="work-item" data-kyle-id="attention-${index}" data-kyle-label="${escapeHtml(title)}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span>${deadline}<i class="fas fa-chevron-right" aria-hidden="true"></i></li>`;
+          const email = (data.emails || []).find(candidate => String(emailKey(candidate)) === sourceId) || {};
+          const context = email.context_scores || {};
+          const meta = [context.requires_reply ? 'Reply requested' : item.deadline ? 'Deadline' : 'Review requested', senderName(email.sender || item.sender || ''), item.deadline ? humanWhen(item.deadline) : formatDate(email.date || email.timestamp)].filter(Boolean).join(' · ');
+          const secondary = context.work_allowed ? '<button type="button" data-attention-action="work">Open Work</button>' : context.requires_reply ? '<button type="button" data-attention-action="draft">Draft reply</button>' : item.deadline ? '<button type="button" data-attention-action="calendar">View calendar</button>' : '';
+          return `<li class="attention-link" data-source-id="${escapeHtml(sourceId)}" data-kyle-type="email" data-kyle-id="${escapeHtml(sourceId || `attention-${index}`)}" data-kyle-label="${escapeHtml(title)}"><button class="attention-main" type="button"><span class="priority-dot" aria-hidden="true"></span><span><strong>${escapeHtml(title)}</strong><span class="attention-description">${escapeHtml(description)}</span><small>${escapeHtml(meta)}</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></button><div class="attention-actions"><button type="button" data-attention-action="email">Open email</button>${secondary}</div></li>`;
         }).join('')
-      : '<li><strong>Inbox clear</strong><span>No urgent dependencies detected in this scan.</span></li>';
+      : '<li class="overview-empty"><strong>Inbox clear</strong><span>Nothing needs your attention right now.</span></li>';
+
+    const viewAll = $('viewAllAttentionBtn');
+    if (viewAll) viewAll.hidden = attention.length <= 5;
+    if ($('viewAllAttentionCount')) $('viewAllAttentionCount').textContent = String(attention.length);
+
+    els.waitingBadge.textContent = waiting.length ? `${waiting.length} item${waiting.length === 1 ? '' : 's'}` : 'Clear';
+    els.waitingList.innerHTML = waiting.length
+      ? waiting.slice(0, 4).map(item => `<li class="waiting-link" data-source-id="${escapeHtml(attentionSourceId(item))}"><button class="attention-main" type="button"><span><strong>${escapeHtml(decodeHtml(item.subject || item.title || 'Waiting for reply'))}</strong><small>${escapeHtml(decodeHtml(item.description || item.reason || 'Waiting on someone else'))}</small></span><i class="fas fa-arrow-right"></i></button></li>`).join('')
+      : '<li class="overview-empty"><strong>Nothing you\'re waiting on.</strong></li>';
 
     renderOverviewWorkingNow();
 
@@ -524,20 +569,36 @@ document.addEventListener('DOMContentLoaded', () => {
         label: element.dataset.kyleLabel,
         page: 'overview'
         }, element);
-        const openSource = () => openSourceEmail(element.dataset.sourceId);
-        element.addEventListener('click', openSource);
-        element.addEventListener('keydown', event => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openSource();
-          }
-        });
+        element.querySelector('.attention-main')?.addEventListener('click', () => openSourceEmail(element.dataset.sourceId));
+        element.querySelectorAll('[data-attention-action]').forEach(button => button.addEventListener('click', event => {
+          event.stopPropagation();
+          const action = button.dataset.attentionAction;
+          if (action === 'email') return openSourceEmail(element.dataset.sourceId);
+          if (action === 'calendar') return showTab('calendar');
+          if (action === 'work') { const job = workJobs.find(candidate => String(candidate.source?.message_id || '') === element.dataset.sourceId); if (job) selectedJobId = job.id; return showTab('work'); }
+          if (action === 'draft') return window.Kyle?.handlePrompt?.(`Draft a reply to ${element.dataset.kyleLabel}`);
+        }));
       });
+    els.waitingList.querySelectorAll('[data-source-id]').forEach(element => element.querySelector('button')?.addEventListener('click', () => openSourceEmail(element.dataset.sourceId)));
 
     renderUpcomingFromContext();
 
     renderEmails(data.emails || []);
     renderWork(data);
+  }
+
+  function overviewSummary(attentionCount, waitingCount) {
+    if (!attentionCount) return waitingCount ? `Your inbox is clear. You're waiting on ${waitingCount} response${waitingCount === 1 ? '' : 's'}.` : 'Your inbox is mostly clear. Nothing needs attention right now.';
+    return `You have ${attentionCount} thing${attentionCount === 1 ? '' : 's'} that need${attentionCount === 1 ? 's' : ''} attention today.`;
+  }
+
+  function renderKyleSuggestions(attention) {
+    if (!els.kyleSuggestions) return;
+    const prompts = attention.length
+      ? [`Summarize these ${Math.min(attention.length, 5)}`, 'What should I handle first?', 'Draft the top reply', "What's urgent today?"]
+      : ['Summarize my inbox', "What's coming up?", 'Show unread mail', 'Check my calendar'];
+    els.kyleSuggestions.innerHTML = prompts.map(prompt => `<button type="button" data-kyle-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`).join('');
+    els.kyleSuggestions.querySelectorAll('[data-kyle-prompt]').forEach(button => button.addEventListener('click', () => window.Kyle?.handlePrompt?.(button.dataset.kylePrompt)));
   }
 
   function privacyPillHtml(gate, email = null) {
@@ -698,7 +759,10 @@ document.addEventListener('DOMContentLoaded', () => {
     window.MailmateObjects?.unregisterType('email');
     const filtered = emails.filter(email => {
       if (state.inboxFilter === 'important') return isImportant(email);
-      if (state.inboxFilter === 'action') return /action|required|approval|deadline|due|waiting|review|urgent/i.test(`${email.subject || ''} ${email.snippet || ''}`);
+      if (state.inboxFilter === 'action') {
+        const context = email.context_scores || {};
+        return Boolean(context.attention_allowed || context.requires_reply || context.work_allowed || context.calendar_allowed);
+      }
       if (state.inboxFilter === 'unread') return email.is_read === false;
       return true;
     });
@@ -1860,7 +1924,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function isImportant(email) {
-    return Boolean(email?.is_starred || (email?.labels || []).includes('IMPORTANT') || /urgent|important|deadline|action|required|approval/i.test(`${email?.subject || ''} ${email?.snippet || ''}`));
+    const context = email?.context_scores;
+    if (context && Object.prototype.hasOwnProperty.call(context, 'attention_allowed')) {
+      return Boolean(context.attention_allowed);
+    }
+    return Boolean(email?.is_starred || (email?.labels || []).includes('IMPORTANT'));
   }
 
   function senderName(sender) {
@@ -1978,32 +2046,66 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderUpcomingFromContext() {
-    const items = [];
-    (state.data?.needs_attention || []).forEach(task => {
-      if (!task.deadline) return;
-      items.push({
-        when: task.deadline,
-        title: task.subject || task.title || conciseActionTitle(task.description) || 'Deadline',
-        source: 'Email'
-      });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const items = dedupeOverviewUpcoming(combinedCalendarItems()
+      .map(item => ({ ...item, parsedStart: parseEventStart(item) }))
+      .filter(item => item.parsedStart && item.parsedStart >= today && !/^no subject$/i.test(String(item.title || '').trim()))
+      .sort((a, b) => a.parsedStart - b.parsedStart))
+      .slice(0, 6);
+    if (!items.length) {
+      els.upcomingList.innerHTML = '<p class="overview-empty-copy">Nothing upcoming.</p>';
+      return;
+    }
+    const groups = new Map();
+    items.forEach(item => {
+      const key = item.parsedStart.toDateString();
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
     });
+    els.upcomingList.innerHTML = [...groups.entries()].map(([day, dayItems]) => {
+      const date = dayItems[0].parsedStart;
+      const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+      const label = date.toDateString() === today.toDateString() ? 'Today' : date.toDateString() === tomorrow.toDateString() ? 'Tomorrow' : date.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+      return `<div class="upcoming-day"><p>${escapeHtml(label)}</p>${dayItems.map(item => `<button type="button" data-upcoming-id="${escapeHtml(item.id)}"><time>${item.all_day ? 'All day' : escapeHtml(item.parsedStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</time><span><strong>${escapeHtml(item.title || 'Calendar item')}</strong><small>${item.source === 'deadline' || item.source === 'ai' ? 'Email deadline' : 'Calendar'}</small></span><i class="fas fa-arrow-right"></i></button>`).join('')}</div>`;
+    }).join('');
+    els.upcomingList.querySelectorAll('[data-upcoming-id]').forEach(button => button.addEventListener('click', () => {
+      const event = items.find(item => String(item.id) === button.dataset.upcomingId);
+      if (event && event.source !== 'deadline') state.calendarSelectedEventId = event.id;
+      showTab('calendar');
+      requestAnimationFrame(() => document.querySelector(`[data-calendar-event="${CSS.escape(button.dataset.upcomingId)}"]`)?.focus());
+    }));
+  }
 
-    state.calendarEvents
-      .filter(event => {
-        const start = parseEventStart(event);
-        return start && start >= new Date();
-      })
-      .slice(0, 4)
-      .forEach(event => items.push({
-        when: event.start,
-        title: event.title,
-        source: event.conflict ? 'Calendar · clash' : 'Calendar'
-      }));
-
-    items.splice(4);
-    els.upcomingList.innerHTML = items.length
-      ? items.map(item => `<article><time>${escapeHtml(humanWhen(item.when))}</time><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.source)}</p></div></article>`).join('')
-      : '<p>No upcoming deadlines or calendar events found.</p>';
+  function dedupeOverviewUpcoming(items) {
+    const stop = new Set(['a','an','the','at','by','due','for','on','in','of','to','and','subject','am','pm','submission','submit']);
+    const words = value => new Set(String(value || '').toLowerCase()
+      .replace(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/g, ' ')
+      .replace(/\b\d+(?:st|nd|rd|th)?\b/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(word => word.length > 1 && !stop.has(word)));
+    const result = [];
+    for (const item of items || []) {
+      const marker = item.agent_harness?.agent_harness_marker || item.marker || '';
+      const start = item.parsedStart?.getTime?.() || 0;
+      const tokens = words(item.title);
+      const duplicateIndex = result.findIndex(existing => {
+        const existingMarker = existing.agent_harness?.agent_harness_marker || existing.marker || '';
+        if (marker && existingMarker && marker === existingMarker) return true;
+        if (Math.abs((existing.parsedStart?.getTime?.() || 0) - start) > 15 * 60 * 1000) return false;
+        const other = words(existing.title);
+        const shared = [...tokens].filter(token => other.has(token)).length;
+        return shared >= 2 && shared / Math.max(1, Math.min(tokens.size, other.size)) >= 0.66;
+      });
+      if (duplicateIndex < 0) {
+        result.push(item);
+        continue;
+      }
+      const current = result[duplicateIndex];
+      const itemScore = (item.source === 'google' ? 4 : item.source === 'ai' ? 3 : 1) - String(item.title || '').length / 500;
+      const currentScore = (current.source === 'google' ? 4 : current.source === 'ai' ? 3 : 1) - String(current.title || '').length / 500;
+      if (itemScore > currentScore) result[duplicateIndex] = item;
+    }
+    return result;
   }
 
   function humanWhen(value) {

@@ -923,7 +923,6 @@ def _mailbox_snapshot(profile, force=False):
                         'threads': deepcopy(threads),
                         'emails': deepcopy(emails),
                     }
-                mail_context_service.save_sync_state(account_key, resolved_history_id)
                 changed = bool(delta.get('changed_message_ids'))
                 return threads, emails, not changed, changed, resolved_history_id
         except Exception as exc:
@@ -936,7 +935,6 @@ def _mailbox_snapshot(profile, force=False):
             'threads': deepcopy(threads),
             'emails': deepcopy(emails),
         }
-    mail_context_service.save_sync_state(account_key, history_id, full_scan=True)
     prior_history_id = persisted_sync.get('last_history_id')
     source_changed = not prior_history_id or str(prior_history_id) != str(history_id or '')
     return threads, emails, False, source_changed, history_id
@@ -953,6 +951,11 @@ def _build_live_dashboard(profile, force_ai=False):
 
     user_id = profile.get('id') or profile.get('sub') or profile.get('email') or ''
     context_result = mail_context_service.update(user_id, emails)
+    mail_context_service.save_sync_state(
+        user_id,
+        history_id,
+        full_scan=not mailbox_cached and bool(source_changed),
+    )
     context_by_message = {row['gmail_message_id']: row for row in context_result['rows']}
     for email in emails:
         email['context_scores'] = context_by_message.get(str(email.get('id') or email.get('gmail_id') or ''), {})

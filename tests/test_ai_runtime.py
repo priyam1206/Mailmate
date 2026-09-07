@@ -201,3 +201,16 @@ def test_mailbox_snapshot_reuses_unchanged_history(monkeypatch):
     assert calls['threads'] == 1
     assert first[2:4] == (False, True)
     assert second[2:4] == (True, False)
+
+
+def test_manual_dashboard_refresh_reconciles_without_enqueuing_work(monkeypatch):
+    calls = {'reconcile': 0, 'enqueue': 0}
+    monkeypatch.setattr(mailmate_app, 'get_user_profile', lambda: {'email': 'user@example.com'})
+    monkeypatch.setattr(mailmate_app, '_build_live_dashboard', lambda profile, force_ai=False: {
+        'emails': [], 'needs_attention': [], 'metrics': {}, 'user': profile,
+    })
+    monkeypatch.setattr(mailmate_app.work_agent_service, 'reconcile_jobs_with_gmail', lambda user_id: calls.__setitem__('reconcile', calls['reconcile'] + 1))
+    monkeypatch.setattr(mailmate_app.work_agent_service, 'sync_and_enqueue', lambda *args: calls.__setitem__('enqueue', calls['enqueue'] + 1))
+    response = mailmate_app.app.test_client().get('/api/dashboard/overview?refresh=true')
+    assert response.status_code == 200
+    assert calls == {'reconcile': 1, 'enqueue': 0}

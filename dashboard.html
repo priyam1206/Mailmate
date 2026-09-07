@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=32">
+  <link rel="stylesheet" href="./dashboard.css?v=33">
   <link rel="stylesheet" href="/remote-worker-ui.css?v=8">
   <link rel="stylesheet" href="/compute-ui-fix.css?v=1">
   <link rel="stylesheet" href="./mailmate-master-polish.css?v=1">
@@ -53,45 +53,39 @@
       </header>
 
       <section class="tab-panel active" id="tab-overview">
-        <section class="overview-brief">
-          <div>
-            <p class="section-label">Today</p>
-            <h2 id="overviewGreeting">Good evening</h2>
-            <p id="summaryText">Loading your latest Gmail brief...</p>
+        <div class="overview-inner">
+          <section class="overview-brief">
+            <div><p class="section-label">Today</p><h2 id="overviewGreeting">Good evening</h2><p id="summaryText">Loading your latest Gmail brief...</p></div>
+            <button class="refresh-pill-btn" id="refreshBtn" type="button" aria-label="Refresh Gmail" title="Refresh Gmail"><i class="fas fa-arrows-rotate" id="refreshIcon"></i><span id="refreshLabel">Refresh</span></button>
+          </section>
+          <section class="overview-kyle" aria-label="Ask Kyle">
+            <div id="kyleOverviewHome"></div>
+            <div class="kyle-suggestions" id="kyleSuggestions" aria-label="Suggested questions"></div>
+          </section>
+          <div class="metric-strip" aria-label="Inbox summary">
+            <button type="button" data-overview-target="attention"><strong id="importantCount">--</strong><span>Needs attention</span></button>
+            <button type="button" data-overview-target="work"><strong id="actionCount">--</strong><span>Active work</span></button>
+            <button type="button" data-overview-target="inbox"><strong id="emailCount">--</strong><span>Recent emails</span></button>
           </div>
-          <button class="refresh-pill-btn" id="refreshBtn" type="button" aria-label="Refresh Gmail" title="Refresh Gmail">
-            <i class="fas fa-arrows-rotate" id="refreshIcon"></i>
-            <span id="refreshLabel">Refresh</span>
-          </button>
-        </section>
-        <div class="metric-strip" aria-label="Inbox summary">
-          <div><strong id="importantCount">--</strong><span>need attention</span></div>
-          <div><strong id="actionCount">--</strong><span>active work</span></div>
-          <div><strong id="emailCount">--</strong><span>recent emails</span></div>
-        </div>
-        <div class="overview-grid">
-          <div class="overview-col-primary">
-            <section class="workspace-section">
-              <div class="section-heading"><p class="section-label">Needs attention</p><span id="attentionBadge">--</span></div>
-              <ul class="attention-list" id="attentionList"><li>Waiting for analysis.</li></ul>
+          <section class="workspace-section attention-section">
+            <div class="section-heading"><div><p class="section-label">Needs attention</p><p class="section-description">Important messages that need a decision or response.</p></div><span id="attentionBadge">--</span></div>
+            <ul class="attention-list" id="attentionList"><li>Loading current priorities.</li></ul>
+            <button class="overview-text-action" id="viewAllAttentionBtn" type="button" hidden>View all <span id="viewAllAttentionCount"></span> <i class="fas fa-arrow-right"></i></button>
+          </section>
+          <div class="overview-grid">
+            <section class="workspace-section working-section">
+              <div class="section-heading"><p class="section-label">Kyle / Working now</p><span id="workingStateLabel">Agent activity</span></div>
+              <div class="work-now-list" id="actionList"><article><span class="status-dot"></span><div><strong>Checking Work</strong><p>Loading current agent state.</p></div><small>Starting</small></article></div>
             </section>
-            <section class="workspace-section">
-              <div class="section-heading"><p class="section-label">Waiting on others</p><span id="waitingBadge">--</span></div>
-              <ul class="attention-list" id="waitingList"><li>None.</li></ul>
-            </section>
-          </div>
-          <div class="overview-col-secondary">
-            <section class="workspace-section">
-              <div class="section-heading"><p class="section-label">Working now</p><span>Agent activity</span></div>
-              <div class="work-now-list" id="actionList">
-                <article><span class="status-dot"></span><div><strong>Reviewing recent Gmail</strong><p>Finding work, blockers, and deadlines.</p></div><small>Starting</small></article>
-              </div>
-            </section>
-            <section class="workspace-section">
-              <div class="section-heading"><p class="section-label">Upcoming</p><span>From your inbox</span></div>
-              <div class="upcoming-list" id="upcomingList"><p>Upcoming deadlines will appear after Gmail analysis.</p></div>
+            <section class="workspace-section upcoming-section">
+              <div class="section-heading"><p class="section-label">Upcoming</p><span>Calendar and deadlines</span></div>
+              <div class="upcoming-list" id="upcomingList"><p>Loading upcoming commitments.</p></div>
             </section>
           </div>
+          <section class="workspace-section waiting-section">
+            <div class="section-heading"><p class="section-label">Waiting on others</p><span id="waitingBadge">--</span></div>
+            <ul class="attention-list" id="waitingList"><li><strong>Nothing you're waiting on.</strong></li></ul>
+          </section>
         </div>
       </section>
 
@@ -508,10 +502,10 @@
   <script src="./kyle-executor.js?v=21"></script>
   <script src="./kyle-planner.js?v=21"></script>
   <script src="./kyle-audio.js?v=30"></script>
-  <script src="./kyle-ui.js?v=30"></script>
+  <script src="./kyle-ui.js?v=32"></script>
   <script src="./kyle.js?v=30"></script>
   <script src="./calendar-conflicts.js?v=21"></script>
-  <script src="./dashboard.js?v=32"></script>
+  <script src="./dashboard.js?v=34"></script>
   <script src="/remote-worker-ui.js?v=5"></script>
 </body>
 </html>

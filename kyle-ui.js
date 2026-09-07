@@ -141,6 +141,7 @@
     let captionTimer = null;
     let surfaceTimer = null;
     let boundHandlers = {};
+    let presentationMode = 'floating';
 
     function createFloatingMount() {
       const existing = document.getElementById('kyleMount');
@@ -235,8 +236,36 @@
         DONE: 'Kyle finished'
       };
       stateLabel.textContent = textByState[next] || 'Kyle';
+      const placeholderByState = {
+        IDLE: 'Ask Kyle anything...', LISTENING: 'Listening...', TRANSCRIBING: 'Understanding your request...',
+        THINKING: 'Understanding your request...', NAVIGATING: 'Taking you there...', WORKING: 'Working on it...',
+        ACTING: 'Working on it...', OBSERVING: 'Checking the result...', WAITING_APPROVAL: 'Review needed',
+        APPROVAL: 'Review needed', SUCCESS: 'Done', DONE: 'Done', ERROR: 'Kyle needs attention'
+      };
+      input.placeholder = placeholderByState[next] || 'Ask Kyle anything...';
       widget.classList.toggle('is-expanded', next !== 'IDLE');
       drawCloud(parseFloat(root.style.getPropertyValue('--orb-amplitude')) || 0, 0.02);
+    }
+
+    function setPresentationMode(mode, options = {}) {
+      const next = mode === 'overview' ? 'overview' : 'floating';
+      const target = next === 'overview' ? document.getElementById('kyleOverviewHome') : document.body;
+      if (!target || (presentationMode === next && mount.parentElement === target)) return;
+      const canMeasure = typeof form.getBoundingClientRect === 'function';
+      const before = canMeasure ? form.getBoundingClientRect() : { left: 0, top: 0, width: 0 };
+      presentationMode = next;
+      mount.classList.toggle('kyle-overview-mount', next === 'overview');
+      mount.classList.toggle('kyle-floating-mount', next === 'floating');
+      target.appendChild(mount);
+      mount.style.transform = '';
+      const after = canMeasure ? form.getBoundingClientRect() : { left: 0, top: 0, width: 0 };
+      if (!options.immediate && typeof form.animate === 'function' && before.width && after.width) {
+        form.animate([
+          { transform: `translate(${before.left - after.left}px, ${before.top - after.top}px) scaleX(${before.width / after.width})`, transformOrigin: 'right center', opacity: 0.9 },
+          { transform: 'translate(0, 0) scaleX(1)', transformOrigin: 'right center', opacity: 1 }
+        ], { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+      }
+      mount.dataset.presentation = next;
     }
 
     function selectSurfaceView(mode) {
@@ -642,6 +671,19 @@
         input.value = '';
         handlers.onText(prompt);
       });
+      form.addEventListener('click', event => {
+        if (presentationMode === 'overview' && event.target === form) input.focus();
+      });
+      document.addEventListener?.('keydown', event => {
+        if (event.key === '/' && presentationMode === 'overview' && !/input|textarea/i.test(document.activeElement?.tagName || '')) {
+          event.preventDefault();
+          input.focus();
+        }
+        if (event.key === 'Escape') {
+          closeSurface();
+          input.blur();
+        }
+      });
     }
 
     window.addEventListener('kyle:state', event => setState(event.detail.state));
@@ -700,6 +742,7 @@
     drawCloud(0, 0);
     setState(store.current);
     setMuted(store.muted);
+    setPresentationMode(document.getElementById('tab-overview')?.classList.contains('active') ? 'overview' : 'floating', { immediate: true });
 
 
     function showCommandCard(opts = {}) {
@@ -859,7 +902,8 @@
       renderCommandSteps,
       updateCommandStep,
       renderActionChips,
-      showErrorRecovery
+      showErrorRecovery,
+      setPresentationMode
     };
     window.KyleUi.active = uiApi;
     return uiApi;
