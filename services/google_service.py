@@ -302,6 +302,11 @@ class _ReadableHtmlParser(HTMLParser):
         elif not self._ignored_depth and tag in self._BLOCK_TAGS:
             self.parts.append('\n')
 
+    def handle_comment(self, data):
+        # Suppress all HTML comments, including MSO/Outlook conditional
+        # comments like <!--[if !mso]-->, <!--[if false]-->, <!-->.
+        pass
+
     def handle_data(self, data):
         if not self._ignored_depth:
             self.parts.append(data)
@@ -347,13 +352,27 @@ def _clean_message_text(value):
     return value.strip()
 
 
+def _strip_mso_conditionals(html_text):
+    """Remove Outlook/Word MSO conditional comment blocks that leak raw comment
+    markers (<!--[if !mso]-->, <!--[if false]-->, <!--[endif]-->, etc.) into
+    the extracted plain text."""
+    # Remove full conditional blocks: <!--[if ...]>...</[endif]-->
+    html_text = re.sub(r'<!--\[if[^\]]*\]>.*?<!\[endif\]-->', '', html_text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove standalone MSO markers that do not wrap a block
+    html_text = re.sub(r'<!--\[if[^>]*>.*?-->', '', html_text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove bare close-comment shorthand used by Google mail (<!-->)
+    html_text = re.sub(r'<!-->', '', html_text)
+    return html_text
+
+
 def _readable_message_body(payload, fallback=''):
     plain, rich = _message_body_parts(payload)
     if plain:
         return _clean_message_text('\n\n'.join(part for part in plain if part.strip()))
     if rich:
+        clean_html = _strip_mso_conditionals('\n'.join(rich))
         parser = _ReadableHtmlParser()
-        parser.feed('\n'.join(rich))
+        parser.feed(clean_html)
         parser.close()
         return _clean_message_text(''.join(parser.parts))
     return _clean_message_text(fallback)

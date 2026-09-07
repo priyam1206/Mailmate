@@ -679,13 +679,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const hasFullBody = Boolean(email.body);
     let bodyContent = '';
     if (hasFullBody) {
-      bodyContent = escapeHtml(email.body);
+      bodyContent = linkifyText(email.body);
     } else if (loading) {
       bodyContent = `
         <div class="email-prefetch-indicator"><i class="fas fa-circle-notch fa-spin"></i> Loading full message...</div>
         <div class="email-snippet-content">${escapeHtml(email.snippet || 'Loading preview...')}</div>`;
     } else {
-      bodyContent = escapeHtml(email.body || email.snippet || 'This message has no readable text body.');
+      bodyContent = linkifyText(email.body || email.snippet || 'This message has no readable text body.');
     }
 
     els.emailDetail.innerHTML = `
@@ -1597,6 +1597,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const div = document.createElement('div');
     div.textContent = String(value ?? '');
     return div.innerHTML;
+  }
+
+  /**
+   * Safely render plain-text email body: escape HTML, linkify URLs, and
+   * convert newlines to <br> so the message displays with proper formatting.
+   * Also strips MSO/Outlook conditional comment artifacts (<!--[if !mso]><!-->
+   * etc.) that the server-side HTML parser lets through into extracted text.
+   */
+  function linkifyText(value) {
+    // 0. Strip MSO/Outlook conditional comment markers BEFORE HTML-escaping.
+    //    These leak into the plain-text body as literal strings like:
+    //      <!--[if !mso]><!-->   <!--[if false]><!-->   <!--<![endif]-->
+    //    Fixing here means already-cached bodies in state.fullMessages are
+    //    cleaned immediately, with no server restart required.
+    let text = String(value ?? '');
+    // Full conditional blocks: <!--[if ...]>...<![endif]-->
+    text = text.replace(/<!--\[if[^\]]*\]>[\s\S]*?<!\[endif\]-->/gi, '');
+    // Opening markers: <!--[if ...]><!-->  or  <!--[if ...]>
+    text = text.replace(/<!--\[if[^\]]*\]><!-->/gi, '');
+    text = text.replace(/<!--\[if[^\]]*\]>/gi, '');
+    // Closing markers: <!--<![endif]-->  and  <!--[endif]-->
+    text = text.replace(/<!--<!\[endif\]-->/gi, '');
+    text = text.replace(/<!--\[endif\]-->/gi, '');
+    // Bare empty comment shorthand: <!-->
+    text = text.replace(/<!-{2,}>/g, '');
+
+    // 1. Escape all HTML entities
+    const escaped = escapeHtml(text);
+    // 2. Linkify angle-bracket wrapped URLs: &lt;https://...&gt;
+    const withAngle = escaped.replace(
+      /&lt;(https?:\/\/[^\s&>]+?)&gt;/gi,
+      (_, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="email-link">${url}</a>`
+    );
+    // 3. Linkify remaining bare URLs not already inside an <a> tag
+    const withLinks = withAngle.replace(
+      /(?<![">/])(https?:\/\/[^\s<>"')\]]+)/gi,
+      url => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="email-link">${url}</a>`
+    );
+    // 4. Convert newlines to <br> for readable paragraph layout
+    return withLinks.replace(/\n/g, '<br>');
   }
 
   function conciseActionTitle(value) {

@@ -373,7 +373,9 @@ h2 { font-size: 1rem; }
 .email-detail-header { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .email-detail-header h2 { margin-top: 10px; font-size: 1.35rem; line-height: 1.35; }
 .email-detail-meta { margin-top: 14px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 0.78rem; }
-.email-body { padding-top: 24px; color: var(--soft); line-height: 1.75; white-space: pre-wrap; max-width: 900px; }
+.email-body { padding-top: 24px; color: var(--soft); line-height: 1.75; word-break: break-word; max-width: 900px; }
+.email-body .email-link { color: var(--accent, #7c6af7); text-decoration: underline; word-break: break-all; }
+.email-body .email-link:hover { opacity: 0.8; }
 .email-loading { color: var(--muted); animation: pulseDot 900ms ease-in-out infinite alternate; }
 
 .work-layout {
