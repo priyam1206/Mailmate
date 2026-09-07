@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import ipaddress
 import requests
+import uuid
 from copy import deepcopy
 from dateutil import parser as date_parser
 
@@ -1325,7 +1326,9 @@ def send_mail_endpoint():
         return jsonify({'code': 'invalid_recipient', 'error': 'A valid recipient email is required.'}), 400
     if not body:
         return jsonify({'code': 'empty_body', 'error': 'Message body is required.'}), 400
-    if not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', operation_id):
+    if not operation_id:
+        operation_id = f"op_{int(time.time() * 1000)}_{uuid.uuid4().hex[:12]}"
+    elif not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', operation_id):
         return jsonify({'code': 'invalid_operation_id', 'error': 'A valid operation_id is required.'}), 400
 
     user_id = str(profile.get('email') or profile.get('id') or 'default').lower()
@@ -2162,8 +2165,11 @@ def _infer_agent_actions(message, resolved, context=None):
                 {'tool': 'navigation.open', 'args': {'page': 'calendar'}},
                 {'tool': 'calendar.preview_create', 'args': {'payload': payload}},
             ])
-    elif reference and reference['type'] == 'email' and re.search(r'\b(open|show|read|reply|respond)\b', lower):
+    elif reference and reference['type'] == 'email' and re.search(r'\b(open|show|read|reply|respond|recent|latest|newest|find)\b', lower):
+        if not any(action.get('args', {}).get('page') == 'inbox' for action in actions):
+            actions.append({'tool': 'navigation.open', 'args': {'page': 'inbox'}})
         actions.append({'tool': 'inbox.open_email', 'args': {'reference': reference}})
+        actions.append({'tool': 'ui.highlight', 'args': {'reference': reference}})
     elif reference and reference['type'] == 'calendar-event' and re.search(r'\b(open|show|edit|move|reschedule|change)\b', lower):
         moving = bool(re.search(r'\b(move|reschedule|change)\b', lower))
         clock = _parse_clock(lower)
@@ -2484,6 +2490,34 @@ def kyle_agent_endpoint():
         for k, v in data['context'].items():
             if k not in merged_context:
                 merged_context[k] = v
+
+    # Resolve recent email or sender query into exact reference if not yet resolved
+    if not any(item.get('type') == 'email' for item in resolved):
+        lower_msg = message.lower()
+        if re.search(r'\b(most\s+recent|latest|newest)\s+(?:e?mail|message)\b', lower_msg) or re.search(r'\bshow\s+(?:me\s+)?(?:the\s+)?recent\s+(?:e?mail|message)\b', lower_msg):
+            ctx_emails = merged_context.get('emails') or []
+            if ctx_emails:
+                top_e = ctx_emails[0]
+                resolved.append({
+                    'type': 'email',
+                    'id': str(top_e.get('id') or top_e.get('gmail_id')),
+                    'label': _agent_text(top_e.get('subject') or 'Recent email', 160)
+                })
+        else:
+            sender_m = re.search(r'\b(?:show\s+|find\s+)?(?:mails?|emails?|messages?)\s+from\s+([A-Za-z]+)\b', lower_msg)
+            if sender_m and sender_m.group(1).lower() not in {'this', 'that', 'me', 'it'}:
+                s_name = sender_m.group(1).lower()
+                ctx_emails = merged_context.get('emails') or []
+                matching = [e for e in ctx_emails if s_name in (e.get('sender') or '').lower()]
+                if matching:
+                    top_m = matching[0]
+                    resolved.append({
+                        'type': 'email',
+                        'id': str(top_m.get('id') or top_m.get('gmail_id')),
+                        'label': _agent_text(top_m.get('subject') or 'Email', 160)
+                    })
+    # Update known references with newly resolved references
+    known = _agent_known_references(ui_context, resolved)
 
     # 1. Contextual Email Composer & Intent Handling
     mail_intent_res = _handle_mail_intent(

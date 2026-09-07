@@ -91,6 +91,9 @@
     element.classList.remove('kyle-focus');
     void element.offsetWidth;
     element.classList.add('kyle-focus');
+    if (window.KyleSpotlight?.spotlight) {
+      window.KyleSpotlight.spotlight(element, { duration: 2400 });
+    }
     setTimeout(() => element.classList.remove('kyle-focus'), duration(1800));
     return true;
   }
@@ -102,6 +105,12 @@
     detail.classList.remove('kyle-reveal');
     void detail.offsetWidth;
     detail.classList.add('kyle-reveal');
+    if (reference?.type === 'email') {
+      const header = detail.querySelector('.email-detail-header') || detail;
+      if (window.KyleSpotlight?.spotlight) {
+        window.KyleSpotlight.spotlight(header, { duration: 3200, scroll: false });
+      }
+    }
     setTimeout(() => detail.classList.remove('kyle-reveal'), duration(650));
     await wait(190);
     return true;

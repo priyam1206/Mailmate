@@ -8,7 +8,10 @@
           <div class="kyle-action-panel" id="kyleActionPanel" aria-live="polite" aria-hidden="true">
             <header class="kyle-panel-header">
               <div class="kyle-panel-header-titles">
-                <h3 class="kyle-panel-title" id="kylePanelTitle">Reply</h3>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <h3 class="kyle-panel-title" id="kylePanelTitle">Kyle</h3>
+                  <span class="kyle-card-badge" id="kyleCardBadge" style="display:none;"></span>
+                </div>
                 <p class="kyle-panel-subtitle" id="kylePanelSubtitle"></p>
               </div>
               <div class="kyle-panel-header-actions">
@@ -39,6 +42,22 @@
                 </div>
                 <p class="kyle-hud-status" id="kyleHudStatus">Processing request...</p>
                 <div class="kyle-hud-steps" id="kyleHudSteps"></div>
+              </div>
+
+              <!-- Command Card View with Live Steps & Contextual Action Chips -->
+              <div class="kyle-command-view" id="kyleCommandView" style="display:none;">
+                <div class="kyle-step-list" id="kyleStepList"></div>
+                <div class="kyle-command-result" id="kyleCommandResult" style="display:none;"></div>
+                <div class="kyle-action-chips" id="kyleActionChips" style="display:none;"></div>
+              </div>
+
+              <!-- Structured Error Recovery View -->
+              <div class="kyle-error-view" id="kyleErrorView" style="display:none;">
+                <div class="kyle-error-card">
+                  <div class="kyle-error-title"><i class="fas fa-triangle-exclamation"></i> <span id="kyleErrorTitle">Action Needed</span></div>
+                  <p class="kyle-error-reason" id="kyleErrorReason">Something went wrong.</p>
+                  <div class="kyle-error-actions" id="kyleErrorActions"></div>
+                </div>
               </div>
 
               <div class="kyle-confirmation-view" id="kyleConfirmationView" style="display:none;">
@@ -88,10 +107,19 @@
     const panel = mount.querySelector('#kyleActionPanel');
     const panelTitle = mount.querySelector('#kylePanelTitle');
     const panelSubtitle = mount.querySelector('#kylePanelSubtitle');
+    const cardBadge = mount.querySelector('#kyleCardBadge');
     const panelMicBtn = mount.querySelector('#kylePanelMicBtn');
     const panelCloseBtn = mount.querySelector('#kylePanelCloseBtn');
     const composerView = mount.querySelector('#kyleComposerView');
     const hudView = mount.querySelector('#kyleActivityHudView');
+    const commandView = mount.querySelector('#kyleCommandView');
+    const stepList = mount.querySelector('#kyleStepList');
+    const commandResult = mount.querySelector('#kyleCommandResult');
+    const actionChips = mount.querySelector('#kyleActionChips');
+    const errorView = mount.querySelector('#kyleErrorView');
+    const errorTitle = mount.querySelector('#kyleErrorTitle');
+    const errorReason = mount.querySelector('#kyleErrorReason');
+    const errorActions = mount.querySelector('#kyleErrorActions');
     const confirmationView = mount.querySelector('#kyleConfirmationView');
     const confirmationCopy = mount.querySelector('#kyleConfirmationCopy');
     const confirmationList = mount.querySelector('#kyleConfirmationList');
@@ -150,9 +178,21 @@
         const x = size * field.x + Math.sin(cloudPhase * (0.72 + index * 0.08) + index * 1.6) * drift;
         const y = size * field.y + Math.cos(cloudPhase * (0.58 + index * 0.09) + index * 1.2) * drift;
         const radius = size * field.radius * (1 + energy * Math.sin(cloudPhase * 1.3 + index) * 0.15);
+        const st = widget?.dataset?.state || 'IDLE';
+        let rO = 0, gO = 0, bO = 0;
+        if (st === 'NAVIGATING' || st === 'THINKING') { rO = -12; gO = 4; bO = 32; }
+        else if (st === 'WORKING' || st === 'ACTING') { rO = 8; gO = -4; bO = 32; }
+        else if (st === 'SUCCESS' || st === 'DONE') { rO = -18; gO = 32; bO = 6; }
+        else if (st === 'ERROR') { rO = 35; gO = -18; bO = -18; }
+        else if (st === 'WAITING_APPROVAL' || st === 'APPROVAL') { rO = 28; gO = 14; bO = -12; }
+
+        const rC = Math.min(255, Math.max(0, field.light + rO));
+        const gC = Math.min(255, Math.max(0, field.light + gO));
+        const bC = Math.min(255, Math.max(0, field.light - 3 + bO));
+
         const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
-        gradient.addColorStop(0, `rgba(${field.light}, ${field.light}, ${Math.max(0, field.light - 3)}, ${field.alpha})`);
-        gradient.addColorStop(0.52, `rgba(${field.light}, ${field.light}, ${field.light}, ${field.alpha * 0.34})`);
+        gradient.addColorStop(0, `rgba(${rC}, ${gC}, ${bC}, ${field.alpha})`);
+        gradient.addColorStop(0.52, `rgba(${rC}, ${gC}, ${bC}, ${field.alpha * 0.34})`);
         gradient.addColorStop(1, 'rgba(120, 120, 118, 0)');
         context.globalCompositeOperation = field.light > 190 ? 'screen' : 'multiply';
         context.fillStyle = gradient;
@@ -181,44 +221,55 @@
         LISTENING: 'Kyle is listening',
         TRANSCRIBING: 'Kyle is transcribing',
         THINKING: 'Kyle is thinking',
+        NAVIGATING: 'Kyle is guiding',
+        WORKING: 'Kyle is working',
         SPEAKING: 'Kyle is speaking',
         INTERRUPTED: 'Kyle was interrupted',
         ERROR: 'Kyle needs attention',
         RESULT: 'Kyle has results',
         ACTING: 'Kyle is acting',
         OBSERVING: 'Kyle is checking the result',
-        WAITING_APPROVAL: 'Kyle is waiting for approval',
+        APPROVAL: 'Kyle needs approval',
+        WAITING_APPROVAL: 'Kyle needs approval',
+        SUCCESS: 'Kyle finished',
         DONE: 'Kyle finished'
       };
       stateLabel.textContent = textByState[next] || 'Kyle';
       widget.classList.toggle('is-expanded', next !== 'IDLE');
+      drawCloud(parseFloat(root.style.getPropertyValue('--orb-amplitude')) || 0, 0.02);
     }
 
     function selectSurfaceView(mode) {
       currentPanelMode = mode;
-      composerView.style.display = mode === 'email_review' ? 'flex' : 'none';
-      hudView.style.display = mode === 'activity' ? 'flex' : 'none';
-      confirmationView.style.display = mode === 'calendar_confirmation' ? 'flex' : 'none';
-      surfaceResult.style.display = ['result', 'error'].includes(mode) ? 'block' : 'none';
-      panel.dataset.mode = mode;
+      if (composerView) composerView.style.display = mode === 'email_review' ? 'flex' : 'none';
+      if (hudView) hudView.style.display = mode === 'activity' ? 'flex' : 'none';
+      if (commandView) commandView.style.display = mode === 'command' ? 'block' : 'none';
+      if (errorView) errorView.style.display = mode === 'error_recovery' ? 'block' : 'none';
+      if (confirmationView) confirmationView.style.display = mode === 'calendar_confirmation' ? 'flex' : 'none';
+      if (surfaceResult) surfaceResult.style.display = ['result', 'error'].includes(mode) ? 'block' : 'none';
+      if (panel) panel.dataset.mode = mode;
     }
 
     function openSurface(mode, title = 'Kyle', subtitle = '') {
       clearTimeout(surfaceTimer);
       selectSurfaceView(mode);
-      panelTitle.textContent = title;
-      panelSubtitle.textContent = subtitle;
-      panel.classList.add('is-open');
-      panel.setAttribute('aria-hidden', 'false');
+      if (panelTitle) panelTitle.textContent = title;
+      if (panelSubtitle) panelSubtitle.textContent = subtitle;
+      if (panel) {
+        panel.classList.add('is-open');
+        panel.setAttribute('aria-hidden', 'false');
+      }
     }
 
     function closeSurface() {
       clearTimeout(surfaceTimer);
-      panel.classList.remove('is-open');
-      panel.setAttribute('aria-hidden', 'true');
+      if (panel) {
+        panel.classList.remove('is-open');
+        panel.setAttribute('aria-hidden', 'true');
+        panel.dataset.mode = 'compact';
+      }
       activeDraft = null;
       currentPanelMode = 'compact';
-      panel.dataset.mode = 'compact';
     }
 
     function showSurfaceResult(title, text, options = {}) {
@@ -298,10 +349,10 @@
       `).join('');
     }
 
-    surfaceResult.addEventListener('click', event => {
-      const button = event.target.closest('[data-result]');
+    surfaceResult?.addEventListener?.('click', event => {
+      const button = event.target?.closest?.('[data-result]');
       if (!button) return;
-      window.KyleActions.openEmail(button.dataset.result);
+      window.KyleActions?.openEmail?.(button.dataset.result);
       closeSurface();
     });
 
@@ -549,27 +600,27 @@
       showSurfaceResult(failed ? 'Partially complete' : 'Done', message, { error: deleted === 0 && failed > 0, autoHideMs: failed ? 0 : 3200 });
     }
 
-    panelCloseBtn.addEventListener('click', () => {
+    panelCloseBtn?.addEventListener?.('click', () => {
       if (currentPanelMode === 'calendar_confirmation') window.KyleExecutor?.cancelPending?.();
       closeSurface();
     });
-    panelMicBtn?.addEventListener('click', () => boundHandlers.onMute?.());
-    subjectInput.addEventListener('input', () => {
+    panelMicBtn?.addEventListener?.('click', () => boundHandlers.onMute?.());
+    subjectInput?.addEventListener?.('input', () => {
       if (activeDraft) activeDraft.operation_id = null;
     });
-    bodyInput.addEventListener('input', () => {
+    bodyInput?.addEventListener?.('input', () => {
       if (activeDraft) activeDraft.operation_id = null;
     });
-    changeBtn.addEventListener('click', () => {
+    changeBtn?.addEventListener?.('click', () => {
       if (currentPanelMode === 'calendar_confirmation') {
         window.KyleExecutor?.cancelPending?.();
         closeSurface();
         return;
       }
-      bodyInput.focus();
+      bodyInput?.focus?.();
       setComposerStatus('Editing draft... ask Kyle to revise or type directly.');
     });
-    sendBtn.addEventListener('click', () => {
+    sendBtn?.addEventListener?.('click', () => {
       if (currentPanelMode === 'calendar_confirmation') {
         sendBtn.disabled = true;
         sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
@@ -650,6 +701,142 @@
     setState(store.current);
     setMuted(store.muted);
 
+
+    function showCommandCard(opts = {}) {
+      openSurface('command', opts.title || 'Kyle', opts.subtitle || '');
+      if (panelFooter) panelFooter.style.display = 'none';
+
+      if (cardBadge) {
+        if (opts.badge) {
+          cardBadge.style.display = 'inline-flex';
+          cardBadge.className = `kyle-card-badge ${opts.badge.toLowerCase()}`;
+          cardBadge.textContent = opts.badge;
+        } else {
+          cardBadge.style.display = 'none';
+        }
+      }
+
+      renderCommandSteps(opts.steps || []);
+
+      if (commandResult) {
+        if (opts.resultHtml) {
+          commandResult.style.display = 'block';
+          commandResult.innerHTML = opts.resultHtml;
+        } else {
+          commandResult.style.display = 'none';
+          commandResult.innerHTML = '';
+        }
+      }
+
+      renderActionChips(opts.actions || []);
+    }
+
+    function renderCommandSteps(steps = []) {
+      if (!stepList) return;
+      if (!steps || !steps.length) {
+        stepList.innerHTML = '';
+        return;
+      }
+      stepList.innerHTML = steps.map(s => {
+        const status = s.status || 'done';
+        let iconHtml = '<i class="fas fa-check"></i>';
+        if (status === 'active') iconHtml = '<i class="fas fa-arrow-right"></i>';
+        else if (status === 'pending') iconHtml = '<i class="fas fa-circle" style="font-size: 0.45rem;"></i>';
+        else if (status === 'failed') iconHtml = '<i class="fas fa-xmark"></i>';
+        return `
+          <div class="kyle-step-item ${status}" data-step-id="${escapeHtml(s.id || s.label)}">
+            <span class="kyle-step-icon">${iconHtml}</span>
+            <span class="kyle-step-label">${escapeHtml(s.label || '')}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function updateCommandStep(stepIdOrText, updates = {}) {
+      if (!stepList) return;
+      const el = stepList.querySelector(`[data-step-id="${stepIdOrText}"]`) ||
+                 [...stepList.querySelectorAll('.kyle-step-item')].find(item => item.textContent.includes(stepIdOrText));
+      if (!el) return;
+      if (updates.status) {
+        el.className = `kyle-step-item ${updates.status}`;
+        const icon = el.querySelector('.kyle-step-icon');
+        if (icon) {
+          if (updates.status === 'done') icon.innerHTML = '<i class="fas fa-check"></i>';
+          else if (updates.status === 'active') icon.innerHTML = '<i class="fas fa-arrow-right"></i>';
+          else if (updates.status === 'failed') icon.innerHTML = '<i class="fas fa-xmark"></i>';
+          else icon.innerHTML = '<i class="fas fa-circle" style="font-size: 0.45rem;"></i>';
+        }
+      }
+      if (updates.label) {
+        const label = el.querySelector('.kyle-step-label');
+        if (label) label.textContent = updates.label;
+      }
+    }
+
+    function renderActionChips(actions = []) {
+      if (!actionChips) return;
+      if (!actions || !actions.length) {
+        actionChips.style.display = 'none';
+        actionChips.innerHTML = '';
+        return;
+      }
+      actionChips.style.display = 'flex';
+      actionChips.innerHTML = actions.map((a, idx) => `
+        <button class="kyle-action-chip ${a.primary ? 'primary' : ''}" type="button" data-chip-index="${idx}">
+          ${a.icon ? `<i class="${escapeHtml(a.icon)}"></i>` : ''}
+          <span>${escapeHtml(a.label || 'Action')}</span>
+        </button>
+      `).join('');
+
+      [...actionChips.querySelectorAll('.kyle-action-chip')].forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.chipIndex);
+          const act = actions[idx];
+          if (act?.onClick) {
+            act.onClick();
+          } else if (act?.prompt) {
+            window.Kyle?.handlePrompt?.(act.prompt);
+          }
+        });
+      });
+    }
+
+    function showErrorRecovery(errorInfo = {}) {
+      openSurface('error_recovery', 'Kyle', errorInfo.subtitle || 'Action Needed');
+      if (panelFooter) panelFooter.style.display = 'none';
+      if (cardBadge) {
+        cardBadge.style.display = 'inline-flex';
+        cardBadge.className = 'kyle-card-badge error';
+        cardBadge.textContent = 'ERROR';
+      }
+
+      if (errorTitle) errorTitle.textContent = errorInfo.title || 'Could not complete action';
+      if (errorReason) errorReason.textContent = errorInfo.reason || 'An unexpected error occurred.';
+
+      const actions = errorInfo.actions || [];
+      if (errorActions) {
+        if (actions.length) {
+          errorActions.innerHTML = actions.map((a, idx) => `
+            <button class="kyle-btn ${a.primary ? 'primary-btn' : 'secondary-btn'}" type="button" data-err-action="${idx}">
+              ${a.icon ? `<i class="${escapeHtml(a.icon)}"></i> ` : ''}${escapeHtml(a.label || 'Retry')}
+            </button>
+          `).join('');
+
+          [...errorActions.querySelectorAll('[data-err-action]')].forEach(btn => {
+            btn.addEventListener('click', () => {
+              const idx = Number(btn.dataset.errAction);
+              const act = actions[idx];
+              if (act?.onClick) act.onClick();
+            });
+          });
+        } else {
+          errorActions.innerHTML = `
+            <button class="kyle-btn secondary-btn" type="button" onclick="window.KyleUi?.active?.closeSurface?.()">Dismiss</button>
+          `;
+        }
+      }
+    }
+
     const uiApi = {
       bind,
       setAmplitude,
@@ -667,7 +854,12 @@
       showCalendarConfirmation,
       showDeleteResult,
       showSurfaceResult,
-      closeSurface
+      closeSurface,
+      showCommandCard,
+      renderCommandSteps,
+      updateCommandStep,
+      renderActionChips,
+      showErrorRecovery
     };
     window.KyleUi.active = uiApi;
     return uiApi;

@@ -347,6 +347,25 @@
       return;
     }
 
+    // Fast-Path: Deterministic Guided Flows for Core UI Commands
+    const isRecentEmail = /\b(most\s+recent\s+(?:e?mail|message)|latest\s+(?:e?mail|message)|newest\s+(?:e?mail|message)|show\s+(?:me\s+)?(?:the\s+)?recent\s+(?:e?mail|message)|open\s+(?:the\s+)?latest\s+(?:e?mail|message))\b/i.test(cleanPrompt);
+    if (isRecentEmail) {
+      await executeRecentEmailGuidance(cleanPrompt, run);
+      return;
+    }
+
+    const senderMatch = cleanPrompt.match(/\b(?:show\s+|find\s+)?(?:mails?|emails?|messages?)\s+from\s+([a-zA-Z]+)\b/i);
+    if (senderMatch && !['this', 'that', 'me', 'it'].includes(senderMatch[1].toLowerCase())) {
+      await executeSenderEmailGuidance(senderMatch[1], cleanPrompt, run);
+      return;
+    }
+
+    const isCalendar = /\b(open|show|go\s+to)\s+(?:my\s+)?calendar\b/i.test(cleanPrompt);
+    if (isCalendar) {
+      await executeCalendarGuidance(cleanPrompt, run);
+      return;
+    }
+
     const resolution = window.KyleReferents?.resolvePrompt(cleanPrompt) || {
       hasReference: false,
       references: [],
@@ -419,7 +438,7 @@
       speak(voice || reply, run);
     } catch (error) {
       console.error('[Kyle Voice] chat failed:', error.message || error);
-      fail(error.message || 'Kyle chat failed.');
+      showStructuredError(error.message || 'Kyle chat failed.', () => handlePrompt(cleanPrompt, run));
     }
   }
 
@@ -588,12 +607,289 @@
     if (active) interrupt(false);
   }
 
-  function fail(message) {
+  function showStructuredError(errInfo, retryCallback = null) {
     store.set(store.states.ERROR);
     ui.setAmplitude(0, 0);
-    ui.setLiveText(message, 4200);
-    window.dispatchEvent(new CustomEvent('harness:error', { detail: { message } }));
-    setTimeout(() => store.set(store.states.IDLE), 650);
+
+    let title = 'Action could not complete';
+    let reason = 'Something went wrong while processing your request.';
+    let actions = [];
+
+    const raw = String(errInfo?.message || errInfo || '').toLowerCase();
+    if (raw.includes('failed to fetch') || raw.includes('networkerror') || raw.includes('timed out') || raw.includes('aborted') || raw.includes('connection')) {
+      title = 'Server connection took too long';
+      reason = 'Could not establish connection with the AI server. The backend might be busy or restarting.';
+      actions = [
+        { label: 'Retry now', primary: true, icon: 'fas fa-arrows-rotate', onClick: () => { if (retryCallback) retryCallback(); else ui.closeSurface(); } },
+        { label: 'Check Status', icon: 'fas fa-signal', onClick: () => window.KyleActions?.openPage('status') },
+        { label: 'Open Inbox', icon: 'fas fa-inbox', onClick: () => window.KyleActions?.openPage('inbox') }
+      ];
+    } else if (raw.includes('inbox') || raw.includes('message') || raw.includes('empty')) {
+      title = 'Inbox data unavailable';
+      reason = 'The message list could not be loaded from your mailbox.';
+      actions = [
+        { label: 'Refresh Inbox', primary: true, icon: 'fas fa-arrows-rotate', onClick: () => window.AgentMail?.refresh?.() },
+        { label: 'Open Inbox', icon: 'fas fa-inbox', onClick: () => window.KyleActions?.openPage('inbox') }
+      ];
+    } else if (raw.includes('reconnect_google') || raw.includes('token') || raw.includes('auth')) {
+      title = 'Google session expired';
+      reason = 'Your Gmail session needs to be renewed to access or send emails.';
+      actions = [
+        { label: 'Reconnect Google', primary: true, icon: 'fab fa-google', onClick: () => window.location.href = '/login' },
+        { label: 'Check Status', icon: 'fas fa-signal', onClick: () => window.KyleActions?.openPage('status') }
+      ];
+    } else {
+      title = 'Kyle needs attention';
+      reason = String(errInfo?.message || errInfo || 'Request could not be completed.');
+      actions = [
+        { label: 'Retry', primary: true, icon: 'fas fa-arrows-rotate', onClick: () => { if (retryCallback) retryCallback(); else ui.closeSurface(); } },
+        { label: 'Dismiss', onClick: () => ui.closeSurface() }
+      ];
+    }
+
+    if (ui.showErrorRecovery) {
+      ui.showErrorRecovery({ title, reason, actions });
+    }
+    ui.setLiveText(reason, 4500);
+    window.dispatchEvent(new CustomEvent('harness:error', { detail: { message: reason } }));
+  }
+
+  function fail(message) {
+    showStructuredError(message);
+  }
+
+  async function executeRecentEmailGuidance(cleanPrompt, run) {
+    store.set(store.states.THINKING);
+
+    ui.showCommandCard?.({
+      title: 'Kyle',
+      subtitle: cleanPrompt,
+      badge: 'THINKING',
+      steps: [
+        { id: 'step_nav', label: 'Switch to Inbox', status: 'active' },
+        { id: 'step_fetch', label: 'Check latest messages', status: 'pending' },
+        { id: 'step_spotlight', label: 'Highlight newest email', status: 'pending' },
+        { id: 'step_open', label: 'Open message thread', status: 'pending' }
+      ]
+    });
+
+    // 1. Navigate to Inbox
+    store.set(store.states.NAVIGATING);
+    await window.KyleMotion?.wait?.(150);
+    window.KyleActions?.openPage('inbox');
+    ui.updateCommandStep?.('step_nav', { status: 'done', label: 'Switched to Inbox' });
+
+    // 2. Ensure inbox data is loaded
+    store.set(store.states.WORKING);
+    ui.updateCommandStep?.('step_fetch', { status: 'active', label: 'Checking latest messages…' });
+    let emails = window.AgentMail?.getEmails?.() || store.context?.emails || [];
+    if (!emails.length) {
+      try {
+        await window.AgentMail?.refresh?.();
+        await window.KyleMotion?.wait?.(300);
+        emails = window.AgentMail?.getEmails?.() || store.context?.emails || [];
+      } catch (err) {
+        console.warn('[Kyle] inbox refresh failed:', err);
+      }
+    }
+
+    if (!emails.length) {
+      ui.updateCommandStep?.('step_fetch', { status: 'failed', label: 'No messages found in inbox' });
+      showStructuredError({
+        title: 'Inbox is empty or loading',
+        reason: 'Could not find any messages in your inbox yet.',
+        actions: [
+          { label: 'Refresh data', primary: true, icon: 'fas fa-arrows-rotate', onClick: () => executeRecentEmailGuidance(cleanPrompt, run) },
+          { label: 'Open Inbox', icon: 'fas fa-inbox', onClick: () => window.KyleActions?.openPage('inbox') }
+        ]
+      });
+      return;
+    }
+    ui.updateCommandStep?.('step_fetch', { status: 'done', label: 'Checked latest messages' });
+
+    // 3. Spotlight top email row
+    ui.updateCommandStep?.('step_spotlight', { status: 'active', label: 'Highlighting newest message…' });
+    const topEmail = emails[0];
+    const topEmailRow = document.querySelector('.email-item[data-index="0"]') ||
+                        document.querySelector('.email-item');
+    if (topEmailRow && window.KyleSpotlight?.spotlight) {
+      window.KyleSpotlight.spotlight(topEmailRow, { duration: 2500, scroll: true });
+      await window.KyleMotion?.wait?.(400);
+    }
+    ui.updateCommandStep?.('step_spotlight', { status: 'done', label: 'Highlighted newest message' });
+
+    // 4. Open email thread
+    ui.updateCommandStep?.('step_open', { status: 'active', label: 'Opening thread…' });
+    if (topEmail && window.AgentMail?.openEmail) {
+      await window.AgentMail.openEmail(topEmail);
+      await window.KyleMotion?.wait?.(350);
+    } else if (topEmailRow) {
+      topEmailRow.click();
+      await window.KyleMotion?.wait?.(350);
+    }
+    ui.updateCommandStep?.('step_open', { status: 'done', label: 'Opened message thread' });
+
+    // 5. Spotlight email detail header
+    const emailHeader = document.querySelector('.email-detail-header');
+    if (emailHeader && window.KyleSpotlight?.spotlight) {
+      window.KyleSpotlight.spotlight(emailHeader, { duration: 3500, scroll: false });
+    }
+
+    // 6. Present result & contextual action chips
+    store.set(store.states.SUCCESS);
+    const sender = (topEmail?.sender || 'Sender').split('<')[0].trim();
+    const subject = topEmail?.subject || 'No Subject';
+
+    ui.showCommandCard?.({
+      title: 'Most recent mail',
+      subtitle: `From: ${sender} · ${subject}`,
+      badge: 'SUCCESS',
+      steps: [
+        { label: 'Switched to Inbox', status: 'done' },
+        { label: 'Checked latest messages', status: 'done' },
+        { label: 'Highlighted newest message', status: 'done' },
+        { label: 'Opened message thread', status: 'done' }
+      ],
+      actions: [
+        {
+          label: 'Summarize',
+          icon: 'fas fa-wand-magic-sparkles',
+          primary: true,
+          onClick: () => {
+            handlePrompt(`Summarize this email: "${subject}" from ${sender}`);
+          }
+        },
+        {
+          label: 'Draft reply',
+          icon: 'fas fa-reply',
+          onClick: () => {
+            const rawSender = topEmail?.sender || '';
+            const match = rawSender.match(/<(.+)>/);
+            const addr = match ? match[1] : rawSender;
+            window.KyleUi?.active?.openComposer?.({
+              to: addr,
+              recipient: rawSender,
+              subject: subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`,
+              thread_id: topEmail?.thread_id || topEmail?.threadId || topEmail?.id
+            }, 'reply');
+          }
+        },
+        {
+          label: 'Mark important',
+          icon: 'fas fa-star',
+          onClick: () => {
+            ui.setLiveText('Marked as important.', 2500);
+          }
+        }
+      ]
+    });
+
+    const voiceNarration = `This is your most recent email from ${sender} regarding ${subject}. Would you like a summary or a reply draft?`;
+    store.addMessage('kyle', voiceNarration);
+    ui.setLiveText(voiceNarration, 5000);
+    speak(voiceNarration, run);
+
+    setTimeout(() => {
+      if (store.current === store.states.SUCCESS) store.set(store.states.IDLE);
+    }, 4000);
+  }
+
+  async function executeCalendarGuidance(cleanPrompt, run) {
+    store.set(store.states.NAVIGATING);
+    ui.showCommandCard?.({
+      title: 'Calendar',
+      subtitle: cleanPrompt,
+      badge: 'NAVIGATING',
+      steps: [
+        { id: 'step_cal_nav', label: 'Switch to Calendar', status: 'active' },
+        { id: 'step_cal_spot', label: 'Highlight current day schedule', status: 'pending' }
+      ]
+    });
+
+    await window.KyleMotion?.wait?.(150);
+    window.KyleActions?.openPage('calendar');
+    ui.updateCommandStep?.('step_cal_nav', { status: 'done', label: 'Switched to Calendar' });
+
+    store.set(store.states.WORKING);
+    ui.updateCommandStep?.('step_cal_spot', { status: 'active', label: 'Locating current day…' });
+
+    const todayCol = document.querySelector('.calendar-day-column.is-today') ||
+                     document.querySelector('.calendar-day-column');
+    if (todayCol && window.KyleSpotlight?.spotlight) {
+      window.KyleSpotlight.spotlight(todayCol, { duration: 3000, scroll: true });
+    }
+    ui.updateCommandStep?.('step_cal_spot', { status: 'done', label: 'Calendar ready' });
+
+    store.set(store.states.SUCCESS);
+    const reply = "Here is your calendar for this week.";
+    store.addMessage('kyle', reply);
+    ui.setLiveText(reply, 4000);
+    speak(reply, run);
+
+    setTimeout(() => {
+      if (store.current === store.states.SUCCESS) store.set(store.states.IDLE);
+    }, 3500);
+  }
+
+  async function executeSenderEmailGuidance(senderName, cleanPrompt, run) {
+    store.set(store.states.NAVIGATING);
+    ui.showCommandCard?.({
+      title: `Emails from ${senderName}`,
+      subtitle: cleanPrompt,
+      badge: 'NAVIGATING',
+      steps: [
+        { id: 'step_s_nav', label: 'Switch to Inbox', status: 'active' },
+        { id: 'step_s_find', label: `Filter messages from ${senderName}`, status: 'pending' },
+        { id: 'step_s_open', label: 'Open newest matching email', status: 'pending' }
+      ]
+    });
+
+    await window.KyleMotion?.wait?.(150);
+    window.KyleActions?.openPage('inbox');
+    ui.updateCommandStep?.('step_s_nav', { status: 'done', label: 'Switched to Inbox' });
+
+    store.set(store.states.WORKING);
+    ui.updateCommandStep?.('step_s_find', { status: 'active', label: `Searching messages from ${senderName}…` });
+
+    let emails = window.AgentMail?.getEmails?.() || store.context?.emails || [];
+    const matched = emails.filter(e => (e.sender || '').toLowerCase().includes(senderName.toLowerCase()));
+
+    if (!matched.length) {
+      ui.updateCommandStep?.('step_s_find', { status: 'failed', label: `No emails found from ${senderName}` });
+      showStructuredError({
+        title: `No emails from ${senderName}`,
+        reason: `Could not find any emails from ${senderName} in your inbox.`,
+        actions: [
+          { label: 'Show all mail', primary: true, icon: 'fas fa-inbox', onClick: () => window.KyleActions?.openPage('inbox') }
+        ]
+      });
+      return;
+    }
+
+    ui.updateCommandStep?.('step_s_find', { status: 'done', label: `Found ${matched.length} email${matched.length === 1 ? '' : 's'}` });
+
+    const topMatch = matched[0];
+    const topRow = document.querySelector(`[data-kyle-id="${topMatch.id || topMatch.gmail_id}"]`) ||
+                   document.querySelector('.email-item');
+    if (topRow && window.KyleSpotlight?.spotlight) {
+      window.KyleSpotlight.spotlight(topRow, { duration: 2500, scroll: true });
+    }
+
+    ui.updateCommandStep?.('step_s_open', { status: 'active', label: 'Opening thread…' });
+    if (window.AgentMail?.openEmail) {
+      await window.AgentMail.openEmail(topMatch);
+    }
+    ui.updateCommandStep?.('step_s_open', { status: 'done', label: 'Opened thread' });
+
+    store.set(store.states.SUCCESS);
+    const reply = `I found ${matched.length} email${matched.length === 1 ? '' : 's'} from ${senderName} and opened the latest one.`;
+    store.addMessage('kyle', reply);
+    ui.setLiveText(reply, 4500);
+    speak(reply, run);
+
+    setTimeout(() => {
+      if (store.current === store.states.SUCCESS) store.set(store.states.IDLE);
+    }, 4000);
   }
 
   function setContext(context) {

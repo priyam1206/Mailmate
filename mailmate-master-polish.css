@@ -69,3 +69,238 @@
 @media (prefers-reduced-motion:reduce) {
   .kyle-action-panel, .kyle-shell, .orb-visual, .kyle-hud-step { animation:none !important; transition:none !important; }
 }
+
+/* =========================================================================
+   KYLE GUIDED ASSISTANT ORB, SPOTLIGHT ENGINE & COMMAND CARD REDESIGN
+   ========================================================================= */
+
+/* 1. Reusable Spotlight Engine */
+.kyle-spotlight-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(1.5px);
+  -webkit-backdrop-filter: blur(1.5px);
+  z-index: 1700;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.kyle-spotlight-overlay.is-visible {
+  opacity: 1;
+}
+
+.kyle-spotlight-active {
+  position: relative !important;
+  z-index: 1750 !important;
+  border-radius: 8px;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.9), 0 0 26px rgba(96, 165, 250, 0.6) !important;
+  transition: box-shadow 220ms ease !important;
+}
+
+.kyle-spotlight-pulse {
+  animation: kyleSpotlightGlow 1.6s ease-in-out infinite alternate !important;
+}
+
+@keyframes kyleSpotlightGlow {
+  0% {
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.85), 0 0 20px rgba(96, 165, 250, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 5px rgba(96, 165, 250, 1), 0 0 34px rgba(96, 165, 250, 0.82);
+  }
+}
+
+/* 2. Distinct Visual Orb States */
+.kyle-widget[data-state="IDLE"] .orb-visual {
+  animation: kyleIdleBreathe 4.2s ease-in-out infinite alternate;
+}
+@keyframes kyleIdleBreathe {
+  0% { transform: scale(1); box-shadow: inset 0 0 16px rgba(255,255,255,.34), 0 0 0 1px rgba(255,255,255,.16), 0 10px 24px rgba(0,0,0,.18); }
+  100% { transform: scale(1.035); box-shadow: inset 0 0 20px rgba(255,255,255,.45), 0 0 0 1px rgba(255,255,255,.24), 0 14px 28px rgba(0,0,0,.24); }
+}
+
+.kyle-widget[data-state="LISTENING"] .orb-visual {
+  animation: kyleListenPulse 1.8s ease-in-out infinite !important;
+  box-shadow: inset 0 0 24px rgba(255, 255, 255, 0.65), 0 0 0 4px rgba(96, 165, 250, 0.45), 0 0 30px rgba(96, 165, 250, 0.3) !important;
+}
+
+.kyle-widget[data-state="THINKING"] .orb-visual {
+  animation: kyleThinkDrift 2.4s ease-in-out infinite alternate !important;
+  box-shadow: inset 0 0 24px rgba(255,255,255,.6), 0 0 0 2px rgba(147, 197, 253, 0.6), 0 0 28px rgba(59, 130, 246, 0.35) !important;
+}
+
+.kyle-widget[data-state="NAVIGATING"] .orb-visual {
+  animation: kyleNavPulse 1.4s ease-in-out infinite alternate !important;
+  box-shadow: inset 0 0 22px rgba(255, 255, 255, 0.55), 0 0 0 3px rgba(59, 130, 246, 0.7), 0 0 32px rgba(59, 130, 246, 0.45) !important;
+}
+@keyframes kyleNavPulse {
+  0% { transform: scale(1) translateY(0); }
+  100% { transform: scale(1.04) translateY(-3px); }
+}
+
+.kyle-widget[data-state="WORKING"] .orb-visual,
+.kyle-widget[data-state="ACTING"] .orb-visual {
+  animation: kyleWorkingPulse 1.2s ease-in-out infinite alternate !important;
+  box-shadow: inset 0 0 22px rgba(255, 255, 255, 0.55), 0 0 0 2px rgba(139, 92, 246, 0.65), 0 0 26px rgba(139, 92, 246, 0.35) !important;
+}
+@keyframes kyleWorkingPulse {
+  0% { transform: scale(0.99); opacity: 0.88; }
+  100% { transform: scale(1.03); opacity: 1; }
+}
+
+.kyle-widget[data-state="WAITING_APPROVAL"] .orb-visual,
+.kyle-widget[data-state="APPROVAL"] .orb-visual {
+  animation: kyleApprovalGlow 2s ease-in-out infinite alternate !important;
+  box-shadow: inset 0 0 22px rgba(255, 255, 255, 0.5), 0 0 0 3px rgba(245, 158, 11, 0.8), 0 0 30px rgba(245, 158, 11, 0.4) !important;
+}
+@keyframes kyleApprovalGlow {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.03); }
+}
+
+.kyle-widget[data-state="SUCCESS"] .orb-visual,
+.kyle-widget[data-state="DONE"] .orb-visual {
+  animation: kyleSuccessBounce 520ms cubic-bezier(0.175, 0.885, 0.32, 1.275) 1 !important;
+  box-shadow: inset 0 0 24px rgba(255, 255, 255, 0.6), 0 0 0 3px rgba(16, 185, 129, 0.9), 0 0 32px rgba(16, 185, 129, 0.5) !important;
+}
+@keyframes kyleSuccessBounce {
+  0% { transform: scale(0.92); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.kyle-widget[data-state="ERROR"] .orb-visual {
+  animation: kyleErrorShake 360ms ease-in-out 1 !important;
+  box-shadow: inset 0 0 22px rgba(255, 255, 255, 0.5), 0 0 0 3px rgba(239, 68, 68, 0.85), 0 0 28px rgba(239, 68, 68, 0.45) !important;
+}
+@keyframes kyleErrorShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+}
+
+/* 3. Command Card & Live Step Log */
+.kyle-card-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a1a19a;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.kyle-card-badge.navigating { background: rgba(59, 130, 246, 0.18); color: #60a5fa; }
+.kyle-card-badge.thinking { background: rgba(147, 197, 253, 0.18); color: #93c5fd; }
+.kyle-card-badge.working { background: rgba(139, 92, 246, 0.18); color: #a78bfa; }
+.kyle-card-badge.success { background: rgba(16, 185, 129, 0.18); color: #34d399; }
+.kyle-card-badge.error { background: rgba(239, 68, 68, 0.18); color: #f87171; }
+
+.kyle-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+.kyle-step-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 0.79rem;
+  color: #d1d5db;
+  transition: all 180ms ease;
+  animation: mailmateStepIn 180ms ease both;
+}
+.kyle-step-item.active {
+  background: rgba(59, 130, 246, 0.12);
+  color: #ffffff;
+  font-weight: 500;
+  border-left: 2px solid #3b82f6;
+}
+.kyle-step-icon {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 18px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+.kyle-step-item.done .kyle-step-icon { color: #10b981; }
+.kyle-step-item.active .kyle-step-icon { color: #60a5fa; }
+.kyle-step-item.pending .kyle-step-icon { color: #6b7280; }
+.kyle-step-item.failed .kyle-step-icon { color: #ef4444; }
+
+/* Contextual Action Chips */
+.kyle-action-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.kyle-action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e5e7eb;
+  font-size: 0.77rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+.kyle-action-chip:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+.kyle-action-chip.primary {
+  background: #3b82f6;
+  border-color: #60a5fa;
+  color: #ffffff;
+}
+.kyle-action-chip.primary:hover {
+  background: #2563eb;
+}
+
+/* Error Recovery View */
+.kyle-error-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.kyle-error-title {
+  color: #f87171;
+  font-size: 0.88rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kyle-error-reason {
+  color: #d1d5db;
+  font-size: 0.81rem;
+  line-height: 1.45;
+}
+.kyle-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
