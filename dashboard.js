@@ -754,7 +754,9 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'needs_input':
         return { label: 'Needs input', cls: 'badge-needs_input' };
       case 'resolved_external':
-        return { label: 'Replied via Gmail', cls: 'badge-resolved_external' };
+        return { label: 'Replied manually in Gmail', cls: 'badge-resolved_external' };
+      case 'ignored_outbound':
+        return { label: 'Ignored sent mail', cls: 'badge-cancelled' };
       case 'sent':
       case 'approved_sent':
         return { label: 'Sent via Gmail', cls: 'badge-sent' };
@@ -822,7 +824,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
     const readyStatuses = new Set(['waiting_approval', 'auto_send_countdown']);
     const needsInputStatuses = new Set(['needs_input']);
-    const historyStatuses = new Set(['sent', 'approved_sent', 'resolved_external', 'cancelled', 'failed']);
+    const historyStatuses = new Set(['sent', 'approved_sent', 'resolved_external', 'ignored_outbound', 'cancelled', 'failed']);
 
     const activeList = list.filter(j => activeStatuses.has(j.status));
     const readyList = list.filter(j => readyStatuses.has(j.status));
@@ -971,6 +973,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (collapsiblesGroup) collapsiblesGroup.style.display = 'flex';
 
     const isResolvedExternal = job.status === 'resolved_external';
+    const isIgnoredOutbound = job.status === 'ignored_outbound';
     const isNeedsInput = job.status === 'needs_input';
     const isSent = job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal;
     const isCountdown = job.status === 'auto_send_countdown';
@@ -985,9 +988,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (policyBanner) {
       if (isResolvedExternal) {
         policyBanner.className = 'policy-banner auto-sent';
-        if (policyBadge) policyBadge.textContent = 'RESOLVED IN GMAIL';
-        if (policyCat) policyCat.textContent = 'Handled outside Mailmate';
-        if (policyExpl) policyExpl.textContent = 'You replied to this thread directly in Gmail. Mailmate reconciled this task and cleaned up its draft.';
+        if (policyBadge) policyBadge.textContent = 'VERIFIED IN GMAIL';
+        if (policyCat) policyCat.textContent = 'Replied manually';
+        if (policyExpl) policyExpl.textContent = 'Mailmate found a newer outbound Gmail message after the exact source email. This task is resolved.';
+      } else if (isIgnoredOutbound) {
+        policyBanner.className = 'policy-banner requires-approval';
+        if (policyBadge) policyBadge.textContent = 'SENT MAIL';
+        if (policyCat) policyCat.textContent = 'Not an inbound task';
+        if (policyExpl) policyExpl.textContent = 'This message was sent by you. Kyle Work only starts from verified inbound requests.';
       } else if (isNeedsInput) {
         policyBanner.className = 'policy-banner requires-approval';
         if (policyBadge) policyBadge.textContent = 'NEEDS INPUT';
@@ -1061,11 +1069,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const draftBadge = $('workDraftBadge');
     if (replyText) {
       replyText.value = job.output?.suggested_reply || (job.reply_draft || {}).body || '';
-      replyText.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal);
+      replyText.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal || isIgnoredOutbound);
     }
     if (draftBadge) {
       if (isResolvedExternal) {
-        draftBadge.innerHTML = `<span style="color:#0d9488;"><i class="fas fa-envelope-open-text"></i> Handled in Gmail · Draft removed</span>`;
+        draftBadge.innerHTML = `<span style="color:#0d9488;"><i class="fas fa-envelope-open-text"></i> Manual Gmail reply verified</span>`;
+      } else if (isIgnoredOutbound) {
+        draftBadge.innerHTML = `<span style="color:#64748b;"><i class="fas fa-ban"></i> Sent mail ignored</span>`;
+      } else if (job.status === 'sent' || job.status === 'approved_sent') {
+        const verified = job.output?.gmail_send_verified === true;
+        const sentId = job.output?.gmail_sent_message_id || '';
+        draftBadge.innerHTML = `<span style="color:#1e8e48;"><i class="fas fa-check-circle"></i> ${verified ? 'Sent & verified in Gmail' : 'Sent via Gmail API'}${sentId ? ` · ${escapeHtml(sentId.slice(-8))}` : ''}</span>`;
       } else if (isNeedsInput) {
         draftBadge.innerHTML = `<span style="color:#dc2626;"><i class="fas fa-circle-exclamation"></i> Deliverable missing</span>`;
       } else if (job.output?.gmail_draft_id) {
@@ -1078,7 +1092,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 4. Action Buttons
     const saveDraftBtn = $('workSaveDraftBtn');
     if (saveDraftBtn) {
-      saveDraftBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal || isNeedsInput);
+      saveDraftBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal || isIgnoredOutbound || isNeedsInput);
       saveDraftBtn.onclick = async () => {
         saveDraftBtn.disabled = true;
         saveDraftBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
@@ -1119,7 +1133,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const rerunBtn = $('workRerunBtn');
     if (rerunBtn) {
-      rerunBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal);
+      rerunBtn.disabled = (job.status === 'sent' || job.status === 'approved_sent' || isResolvedExternal || isIgnoredOutbound);
       rerunBtn.onclick = async () => {
         rerunBtn.disabled = true;
         rerunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rerunning...';
@@ -1137,7 +1151,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (approveBtn) {
       if (isResolvedExternal) {
         approveBtn.disabled = true;
-        approveBtn.innerHTML = '<i class="fas fa-check-double"></i> Replied via Gmail';
+        approveBtn.innerHTML = '<i class="fas fa-check-double"></i> Manual reply verified';
+      } else if (isIgnoredOutbound) {
+        approveBtn.disabled = true;
+        approveBtn.innerHTML = '<i class="fas fa-ban"></i> Sent mail ignored';
       } else if (isNeedsInput) {
         approveBtn.disabled = true;
         approveBtn.innerHTML = '<i class="fas fa-circle-question"></i> Needs Input';
@@ -1187,7 +1204,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const artifactsSection = $('workArtifactsSection');
     const artifactsList = $('workArtifactsList');
     if (artifactsSection && artifactsList) {
-      const artifacts = job.artifacts || [];
+      const artifacts = (job.artifacts || []).filter(art => {
+        if (art.type === 'email_draft' && !job.output?.gmail_draft_id) return false;
+        return true;
+      });
       if (artifacts.length > 0) {
         artifactsSection.style.display = 'flex';
         artifactsList.innerHTML = artifacts.map(art => {
@@ -1354,6 +1374,23 @@ document.addEventListener('DOMContentLoaded', () => {
     autoPrepEl?.addEventListener('change', saveSettings);
     createDraftsEl?.addEventListener('change', saveSettings);
     modeRadios.forEach(r => r.addEventListener('change', saveSettings));
+
+    const kyleVoiceEl = $('settingKyleVoice');
+    if (kyleVoiceEl) {
+      const isMuted = localStorage.getItem('kyle_muted') === 'true';
+      kyleVoiceEl.checked = !isMuted;
+      kyleVoiceEl.addEventListener('change', () => {
+        const shouldMute = !kyleVoiceEl.checked;
+        localStorage.setItem('kyle_muted', shouldMute ? 'true' : 'false');
+        if (window.Kyle?.store) {
+          window.Kyle.store.muted = shouldMute;
+        }
+        window.dispatchEvent(new CustomEvent('kyle:toggle-mute'));
+      });
+      window.addEventListener('kyle:mute-change', event => {
+        kyleVoiceEl.checked = !event.detail?.muted;
+      });
+    }
   }
 
 
@@ -2097,5 +2134,35 @@ document.addEventListener('DOMContentLoaded', () => {
     getSelectedEventId: () => state.calendarSelectedEventId,
     getEvents: () => [...state.calendarEvents],
     open: () => showTab('calendar')
+  };
+
+  window.AgentMail = {
+    getSelectedEmail: () => {
+      if (!state.selectedEmailId) return null;
+      const selected = state.data?.emails?.find(email => emailKey(email) === state.selectedEmailId);
+      if (!selected) return null;
+      return { ...selected, ...(state.fullMessages.get(emailKey(selected)) || {}) };
+    },
+    getEmails: () => [...(state.data?.emails || [])],
+    findContact: query => {
+      const q = String(query || '').toLowerCase().trim();
+      if (!q) return [];
+      const contacts = new Map();
+      (state.data?.emails || []).forEach(e => {
+        const raw = e.sender || '';
+        const match = raw.match(/^(.*?)\s*<(.+?)>$/);
+        const name = match ? match[1].replace(/["']/g, '').trim() : raw;
+        const email = match ? match[2].trim() : raw;
+        if (email && email.includes('@')) {
+          const key = email.toLowerCase();
+          if (!contacts.has(key)) {
+            contacts.set(key, { name: name || key.split('@')[0], email, full: raw });
+          }
+        }
+      });
+      return [...contacts.values()].filter(c => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q));
+    },
+    openEmail: openEmail,
+    refresh: () => loadDashboard(true)
   };
 });
