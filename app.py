@@ -31,7 +31,7 @@ os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 from email.utils import parseaddr
 from services.whisper_service import whisper_service
-from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft
+from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft, find_sent_message_by_rfc_id
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.work_agent_service import work_agent_service
@@ -39,6 +39,8 @@ from services.privacy_gate import PrivacyGate
 from services.system_context_service import system_context_service
 from services.automation_service import automation_service
 from services.calendar_conflicts import calculate_conflicts
+from services.agent.inference_broker import inference_broker
+from services.agent.token_budget import approximate_tokens, bounded_payload
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-secret-key-123')
@@ -49,7 +51,8 @@ app.config.update(
 CORS(app)
 
 # Initialize local Whisper STT in background
-whisper_service.initialize()
+if str(os.getenv('MAILMATE_DISABLE_WHISPER_INIT', '')).strip().lower() not in {'1', 'true', 'yes', 'on'}:
+    whisper_service.initialize()
 
 APP_TIMEZONE = os.getenv('APP_TIMEZONE', 'Asia/Kolkata')
 
@@ -68,6 +71,8 @@ CACHE_REPROCESS_SECONDS = max(CACHE_SYNC_SECONDS, int(os.getenv('CACHE_REPROCESS
 AI_CALENDAR_SYNC_SECONDS = max(30, int(os.getenv('AI_CALENDAR_SYNC_SECONDS', '180')))
 _ai_calendar_last_sync = {}
 CALENDAR_DISMISSALS_FILE = DATA_DIR / 'calendar_dismissals.json'
+_mail_send_lock = threading.Lock()
+_mail_send_operations = {}
 _calendar_dismissal_lock = threading.Lock()
 
 
@@ -297,6 +302,20 @@ def config():
 
 # MAILMATE_EMBEDDED_COMPUTE_PROXY_START
 MAILMATE_COMPUTE_MAX_BYTES = 2 * 1024 * 1024
+_compute_health_lock = threading.Lock()
+_compute_health_cache = {}
+_compute_generation_lock = threading.Lock()
+_compute_generation_cache = {}
+_compute_generation_inflight = {}
+
+
+def _env_truthy(name):
+    return str(os.getenv(name, '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _worker_host_enabled():
+    value = str(os.getenv('MAILMATE_WORKER_HOST', '')).strip().lower()
+    return bool(value) and value not in {'0', 'false', 'no', 'off'}
 
 def _mailmate_compute_authorized():
     # Same-machine and Tailscale devices may use the inference-only route.
@@ -348,26 +367,97 @@ def embedded_compute_completion():
     if len(messages) > 64:
         return jsonify({"error": "too_many_messages"}), 400
 
+    request_kind = request.headers.get('X-Mailmate-Request-Kind', 'work').strip().lower()
+    if request_kind not in {'interactive', 'work', 'automation', 'background'}:
+        request_kind = 'work'
+    payload = bounded_payload(payload, max_input_tokens=3500)
+    payload.setdefault('chat_template_kwargs', {})['enable_thinking'] = False
+    payload['max_tokens'] = max(1, min(int(payload.get('max_tokens') or 500), 800))
+    input_tokens = sum(approximate_tokens(item.get('content') or '') for item in payload['messages'])
+
+    request_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+    now = time.monotonic()
+    with _compute_generation_lock:
+        cached = _compute_generation_cache.get(request_hash)
+        if cached and now - cached['at'] < 8:
+            response = jsonify(cached['body'])
+            response.headers['X-Mailmate-Input-Tokens-Approx'] = str(input_tokens)
+            response.headers['X-Mailmate-Single-Flight'] = 'cache'
+            return response, cached['status']
+        flight = _compute_generation_inflight.get(request_hash)
+        if flight is None:
+            flight = threading.Event()
+            _compute_generation_inflight[request_hash] = flight
+            leader = True
+        else:
+            leader = False
+
+    if not leader:
+        flight.wait(timeout=int(os.getenv('MAILMATE_WORKER_TIMEOUT_SECONDS', '45')) + 5)
+        with _compute_generation_lock:
+            cached = _compute_generation_cache.get(request_hash)
+        if not cached:
+            return jsonify({'error': 'local_model_unavailable'}), 503
+        response = jsonify(cached['body'])
+        response.headers['X-Mailmate-Input-Tokens-Approx'] = str(input_tokens)
+        response.headers['X-Mailmate-Single-Flight'] = 'shared'
+        return response, cached['status']
+
     base = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:2806/v1").rstrip("/")
     try:
-        upstream = requests.post(
-            f"{base}/chat/completions",
-            json=payload,
-            timeout=int(os.getenv("MAILMATE_WORKER_TIMEOUT_SECONDS", "75")),
-        )
+        with inference_broker.slot(request_kind):
+            upstream = requests.post(
+                f"{base}/chat/completions",
+                json=payload,
+                timeout=int(os.getenv("MAILMATE_WORKER_TIMEOUT_SECONDS", "45")),
+            )
+        try:
+            body = upstream.json()
+            status = upstream.status_code
+            if status < 400 and isinstance(body, dict):
+                choices = body.get('choices') or []
+                message = (choices[0].get('message') or {}) if choices else {}
+                content = str(message.get('content') or '').strip()
+                reasoning = str(message.get('reasoning_content') or '').strip()
+                finish_reason = choices[0].get('finish_reason') if choices else None
+                if not content and (reasoning or finish_reason == 'length'):
+                    body, status = {
+                        'error': 'invalid_model_output',
+                        'detail': 'Local model reasoning consumed the response budget.',
+                    }, 502
+        except Exception:
+            body, status = {'error': 'invalid_upstream_response', 'status': upstream.status_code}, 502
     except requests.RequestException:
-        return jsonify({"error": "local_model_unavailable"}), 503
+        body, status = {'error': 'local_model_unavailable'}, 503
+    finally:
+        with _compute_generation_lock:
+            if 'body' in locals():
+                _compute_generation_cache.clear()
+                _compute_generation_cache[request_hash] = {'at': time.monotonic(), 'body': body, 'status': status}
+            event = _compute_generation_inflight.pop(request_hash, None)
+            if event:
+                event.set()
 
-    try:
-        body = upstream.json()
-    except Exception:
-        return jsonify({"error": "invalid_upstream_response", "status": upstream.status_code}), 502
-
-    return jsonify(body), upstream.status_code
+    response = jsonify(body)
+    response.headers['X-Mailmate-Input-Tokens-Approx'] = str(input_tokens)
+    response.headers['X-Mailmate-Single-Flight'] = 'leader'
+    return response, status
 # MAILMATE_EMBEDDED_COMPUTE_PROXY_END
 
 # MAILMATE_REMOTE_COMPUTE_STATUS_START
-def _mailmate_probe_local_compute():
+def _cached_compute_probe(cache_key, probe, ttl=5):
+    now = time.monotonic()
+    with _compute_health_lock:
+        cached = _compute_health_cache.get(cache_key)
+        if cached and now - cached['at'] < ttl:
+            return dict(cached['value'])
+    value = probe()
+    with _compute_health_lock:
+        _compute_health_cache[cache_key] = {'at': now, 'value': dict(value)}
+    return value
+
+
+def _mailmate_probe_local_compute_uncached():
     base = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:2806/v1").rstrip("/")
     started = time.perf_counter()
     try:
@@ -387,7 +477,11 @@ def _mailmate_probe_local_compute():
         }
 
 
-def _mailmate_probe_remote_compute():
+def _mailmate_probe_local_compute():
+    return _cached_compute_probe('local', _mailmate_probe_local_compute_uncached)
+
+
+def _mailmate_probe_remote_compute_uncached():
     base = os.getenv("MAILMATE_REMOTE_WORKER_URL", "http://100.114.2.88:5000/api/compute").strip().rstrip("/")
     if not base:
         return {
@@ -420,10 +514,20 @@ def _mailmate_probe_remote_compute():
         }
 
 
+def _mailmate_probe_remote_compute():
+    return _cached_compute_probe('remote', _mailmate_probe_remote_compute_uncached)
+
+
 @app.route("/api/compute/status")
 def mailmate_compute_status():
-    local = _mailmate_probe_local_compute()
-    remote = _mailmate_probe_remote_compute()
+    is_host = _worker_host_enabled()
+    client_local = _env_truthy('MAILMATE_CLIENT_LOCAL_LM')
+    local = _mailmate_probe_local_compute() if is_host or client_local else {
+        'configured': False, 'available': False, 'status': None, 'latency_ms': None,
+    }
+    remote = _mailmate_probe_remote_compute() if not is_host else {
+        'configured': False, 'available': False, 'status': None, 'latency_ms': None,
+    }
 
     ready = bool(local.get("available") or remote.get("available"))
     mode = (
@@ -439,7 +543,7 @@ def mailmate_compute_status():
         "Priyam's Tailscale workstation"
     ).strip() or "Priyam's Tailscale workstation"
 
-    role = "host" if os.getenv("MAILMATE_WORKER_HOST") else "client"
+    role = "host" if is_host else "client"
 
     return jsonify({
         "ok": True,
@@ -448,6 +552,7 @@ def mailmate_compute_status():
         "role": role,
         "local": local,
         "remote": remote,
+        "inference": inference_broker.status(),
         "connect_label": label,
         "requires_hotspot": bool(
             not local.get("available")
@@ -1138,6 +1243,7 @@ def send_mail_endpoint():
         return jsonify({'error': 'Not authenticated'}), 401
 
     data = request.get_json(silent=True) or {}
+    operation_id = str(data.get('operation_id') or '').strip()
     to = str(data.get('to') or data.get('recipient') or '').strip()
     subject = str(data.get('subject') or 'No Subject').strip()
     body = str(data.get('body') or '').strip()
@@ -1145,19 +1251,106 @@ def send_mail_endpoint():
     in_reply_to = data.get('in_reply_to')
     draft_id = data.get('draft_id')
 
-    if not to or not body:
-        return jsonify({'error': 'Recipient and body are required'}), 400
+    _, recipient = parseaddr(to)
+    recipient = recipient.strip().lower()
+    if not re.fullmatch(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,63}', recipient, re.I):
+        return jsonify({'code': 'invalid_recipient', 'error': 'A valid recipient email is required.'}), 400
+    if not body:
+        return jsonify({'code': 'empty_body', 'error': 'Message body is required.'}), 400
+    if not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', operation_id):
+        return jsonify({'code': 'invalid_operation_id', 'error': 'A valid operation_id is required.'}), 400
+
+    user_id = str(profile.get('email') or profile.get('id') or 'default').lower()
+    operation_key = f'{user_id}:{operation_id}'
+    payload_digest = hashlib.sha256(json.dumps({
+        'to': recipient,
+        'subject': subject,
+        'body': body,
+        'thread_id': thread_id,
+        'in_reply_to': in_reply_to,
+        'draft_id': draft_id,
+    }, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+    message_id_header = f'<mailmate.{operation_id}@mailmate.local>'
+
+    with _mail_send_lock:
+        cutoff = time.time() - 1800
+        for key, value in list(_mail_send_operations.items()):
+            if value.get('updated_at', 0) < cutoff:
+                _mail_send_operations.pop(key, None)
+        existing = _mail_send_operations.get(operation_key)
+        if existing and existing.get('digest') != payload_digest:
+            return jsonify({'code': 'operation_conflict', 'error': 'This send operation was already used for different content.'}), 409
+        if existing and existing.get('status') == 'sent':
+            return jsonify({'ok': True, 'status': 'sent', 'message_id': existing.get('message_id'), 'idempotent_replay': True})
+        if existing and existing.get('status') == 'pending':
+            return jsonify({'ok': False, 'status': 'sending', 'operation_id': operation_id}), 202
+
+    if existing and existing.get('status') == 'unknown' and not draft_id:
+        try:
+            reconciled = find_sent_message_by_rfc_id(message_id_header)
+        except Exception:
+            reconciled = None
+        if reconciled:
+            with _mail_send_lock:
+                _mail_send_operations[operation_key] = {
+                    'digest': payload_digest, 'status': 'sent', 'message_id': reconciled.get('id'), 'updated_at': time.time(),
+                }
+            return jsonify({'ok': True, 'status': 'sent', 'message_id': reconciled.get('id'), 'reconciled': True})
+        return jsonify({'ok': False, 'status': 'unknown', 'operation_id': operation_id, 'code': 'send_unconfirmed'}), 202
+
+    with _mail_send_lock:
+        _mail_send_operations[operation_key] = {
+            'digest': payload_digest, 'status': 'pending', 'message_id': None, 'updated_at': time.time(),
+        }
 
     try:
         if draft_id:
             result = send_gmail_draft(draft_id)
         else:
-            result = send_gmail_direct(to=to, subject=subject, body=body, thread_id=thread_id, in_reply_to=in_reply_to)
+            result = send_gmail_direct(
+                to=recipient,
+                subject=subject,
+                body=body,
+                thread_id=thread_id,
+                in_reply_to=in_reply_to,
+                message_id_header=message_id_header,
+            )
         msg_id = result.get('id') if isinstance(result, dict) else (result if isinstance(result, str) else None)
-        return jsonify({'ok': True, 'result': result, 'message_id': msg_id})
+        with _mail_send_lock:
+            _mail_send_operations[operation_key] = {
+                'digest': payload_digest, 'status': 'sent', 'message_id': msg_id, 'updated_at': time.time(),
+            }
+        return jsonify({'ok': True, 'status': 'sent', 'result': result, 'message_id': msg_id})
+    except GmailInsufficientPermissionError as exc:
+        with _mail_send_lock:
+            _mail_send_operations[operation_key] = {
+                'digest': payload_digest, 'status': 'error', 'message_id': None, 'updated_at': time.time(),
+            }
+        return jsonify({'code': 'reconnect_google', 'error': str(exc)}), 403
     except Exception as exc:
         app.logger.exception('Send mail failed')
-        return jsonify({'error': str(exc)}), 500
+        reconciled = None
+        if not draft_id:
+            try:
+                reconciled = find_sent_message_by_rfc_id(message_id_header)
+            except Exception:
+                pass
+        if reconciled:
+            with _mail_send_lock:
+                _mail_send_operations[operation_key] = {
+                    'digest': payload_digest, 'status': 'sent', 'message_id': reconciled.get('id'), 'updated_at': time.time(),
+                }
+            return jsonify({'ok': True, 'status': 'sent', 'message_id': reconciled.get('id'), 'reconciled': True})
+        with _mail_send_lock:
+            _mail_send_operations[operation_key] = {
+                'digest': payload_digest, 'status': 'unknown', 'message_id': None, 'updated_at': time.time(),
+            }
+        return jsonify({
+            'code': 'send_unconfirmed',
+            'error': "Couldn't confirm send; checking Gmail is required.",
+            'status': 'unknown',
+            'operation_id': operation_id,
+        }), 503
 
 
 @app.route('/api/stt/status', methods=['GET'])
@@ -1979,6 +2172,17 @@ def _find_contacts_by_name(query, emails):
     return matched
 
 
+def _explicit_email_address(text):
+    match = re.search(r'(?<![\w.+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,63})(?![\w.-])', str(text or ''), re.I)
+    return match.group(1).lower() if match else ''
+
+
+def _email_display_name(address):
+    local = str(address or '').split('@', 1)[0]
+    words = [word for word in re.split(r'[._+-]+', local) if word]
+    return ' '.join(word.capitalize() for word in words) or address
+
+
 def _handle_mail_intent(message, active_draft, selected_email, context_emails, user_profile):
     lower = message.lower().strip()
     user_name = user_profile.get('name') or 'Priyam'
@@ -2026,6 +2230,7 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
     # Matches: "reply to Rupayan saying I'll send it tonight", "reply saying ...", "reply to this"
     if re.search(r'\breply\b', lower):
         target_name = None
+        explicit_address = _explicit_email_address(message)
         name_match = re.search(r'\breply\s+to\s+([A-Za-z]+)\b', lower)
         if name_match and name_match.group(1).lower() not in {'this', 'that', 'the', 'it', 'me'}:
             target_name = name_match.group(1)
@@ -2035,7 +2240,14 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
         in_reply_to = None
         thread_subject = 'Update'
 
-        if target_name:
+        if explicit_address:
+            contacts = _find_contacts_by_name(explicit_address, context_emails)
+            target_contact = contacts[0] if contacts else {
+                'name': _email_display_name(explicit_address),
+                'email': explicit_address,
+                'full': explicit_address,
+            }
+        elif target_name:
             contacts = _find_contacts_by_name(target_name, context_emails)
             if len(contacts) > 1:
                 options_str = ", ".join([f"{c['name']} ({c['email']})" for c in contacts])
@@ -2050,15 +2262,19 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 matching_email = next((e for e in context_emails if target_contact['email'] in (e.get('sender') or '').lower()), None)
                 if matching_email:
                     thread_id = matching_email.get('threadId') or matching_email.get('thread_id') or matching_email.get('id')
-                    in_reply_to = matching_email.get('id') or matching_email.get('gmail_id')
+                    in_reply_to = matching_email.get('rfc_message_id') or None
                     thread_subject = matching_email.get('subject') or thread_subject
             else:
-                target_contact = {'name': target_name.capitalize(), 'email': '', 'full': target_name.capitalize()}
+                return {
+                    'reply': f"What's {target_name.capitalize()}'s email address?",
+                    'actions': [],
+                    'mode': 'recipient_required',
+                }
         elif selected_email:
             s_name, s_addr = parseaddr(selected_email.get('sender') or '')
             target_contact = {'name': s_name or 'Sender', 'email': s_addr, 'full': selected_email.get('sender') or ''}
             thread_id = selected_email.get('threadId') or selected_email.get('thread_id') or selected_email.get('id')
-            in_reply_to = selected_email.get('id') or selected_email.get('gmail_id')
+            in_reply_to = selected_email.get('rfc_message_id') or None
             thread_subject = selected_email.get('subject') or thread_subject
 
         if target_contact:
@@ -2097,11 +2313,12 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
 
     # Case 3: Compose new email intent
     # Matches: "Email Aarush and ask if he finished the report", "write an email to Aarush asking..."
+    explicit_address = _explicit_email_address(message)
     compose_match = re.search(r'\b(?:email|write\s+(?:an?\s+)?email\s+to|compose\s+(?:an?\s+)?email\s+to|send\s+(?:an?\s+)?email\s+to)\s+([A-Za-z]+)\b', lower)
     if compose_match:
         target_name = compose_match.group(1)
         if target_name.lower() not in {'this', 'that', 'the', 'it', 'me'}:
-            contacts = _find_contacts_by_name(target_name, context_emails)
+            contacts = _find_contacts_by_name(explicit_address or target_name, context_emails)
             if len(contacts) > 1:
                 options_str = ", ".join([f"{c['name']} ({c['email']})" for c in contacts])
                 return {
@@ -2110,7 +2327,20 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                     'mode': 'contact_disambiguation',
                     'contacts': contacts
                 }
-            target_contact = contacts[0] if contacts else {'name': target_name.capitalize(), 'email': '', 'full': target_name.capitalize()}
+            if contacts:
+                target_contact = contacts[0]
+            elif explicit_address:
+                target_contact = {
+                    'name': _email_display_name(explicit_address),
+                    'email': explicit_address,
+                    'full': explicit_address,
+                }
+            else:
+                return {
+                    'reply': f"What's {target_name.capitalize()}'s email address?",
+                    'actions': [],
+                    'mode': 'recipient_required',
+                }
 
             intent_m = re.search(r'\b(?:and\s+ask|asking|about|saying|that)\s+(.*)$', message, re.I)
             user_intent = intent_m.group(1).strip() if intent_m else message

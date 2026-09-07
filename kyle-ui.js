@@ -313,6 +313,7 @@
         body: draft.body || '',
         thread_id: draft.thread_id || null,
         in_reply_to: draft.in_reply_to || null,
+        operation_id: draft.operation_id || null,
         mode: mode
       };
       const displayName = (activeDraft.recipient || activeDraft.to || '').split('<')[0].trim() || activeDraft.to || 'Contact';
@@ -325,8 +326,9 @@
       panelStatus.style.color = 'var(--muted)';
       changeBtn.style.display = '';
       changeBtn.textContent = 'Edit';
-      sendBtn.disabled = false;
+      sendBtn.disabled = !isValidEmail(activeDraft.to);
       sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+      if (!isValidEmail(activeDraft.to)) setComposerStatus('A valid recipient email is required.', true);
     }
 
     function closeComposer() {
@@ -345,10 +347,12 @@
 
       if (draft.subject !== undefined) {
         activeDraft.subject = draft.subject;
+        activeDraft.operation_id = null;
         subjectInput.value = draft.subject;
       }
       if (draft.body !== undefined) {
         activeDraft.body = draft.body;
+        activeDraft.operation_id = null;
         bodyInput.value = draft.body;
         bodyInput.classList.add('draft-revised');
         setTimeout(() => bodyInput.classList.remove('draft-revised'), 700);
@@ -375,14 +379,23 @@
       panelStatus.style.color = isError ? '#ef4444' : 'var(--muted)';
     }
 
+    function isValidEmail(value) {
+      return /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,63}$/i.test(String(value || '').trim());
+    }
+
+    function createOperationId() {
+      if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+      return `mail_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+    }
+
     async function sendCurrentComposer() {
       if (isSending) return { ok: false, error: 'Already sending' };
       const current = getActiveDraft();
       if (!current) return { ok: false, error: 'No active draft' };
-      const to = current.to || current.recipient;
-      if (!to) {
-        setComposerStatus('Recipient email is required.', true);
-        return { ok: false, error: 'Recipient missing' };
+      const to = String(current.to || '').trim();
+      if (!isValidEmail(to)) {
+        setComposerStatus('A valid recipient email is required.', true);
+        return { ok: false, error: 'Invalid recipient' };
       }
       const subject = (subjectInput.value || '').trim();
       const body = (bodyInput.value || '').trim();
@@ -397,7 +410,9 @@
       setComposerStatus('Sending via Gmail API...');
 
       try {
+        activeDraft.operation_id = activeDraft.operation_id || createOperationId();
         const payload = {
+          operation_id: activeDraft.operation_id,
           to: to,
           subject: subject,
           body: body,
@@ -405,31 +420,37 @@
           in_reply_to: current.in_reply_to || null
         };
 
-        let res = null;
-        let lastNetworkError = null;
-        for (const delay of [0, 450, 1200]) {
-          if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-          try {
-            res = await fetch('/api/mail/send', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-            break;
-          } catch (networkError) {
-            lastNetworkError = networkError;
-          }
+        const requestSend = () => fetch('/api/mail/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        let res;
+        try {
+          res = await requestSend();
+        } catch (networkError) {
+          setComposerStatus("Couldn't confirm send; checking Gmail...");
+          await new Promise(resolve => setTimeout(resolve, 1400));
+          res = await requestSend();
         }
-        if (!res) throw lastNetworkError || new Error('Mailmate backend is unreachable.');
         const data = await res.json().catch(() => ({}));
+        if (res.status === 202 && ['sending', 'unknown'].includes(data.status)) {
+          isSending = false;
+          sendBtn.disabled = false;
+          sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Check send';
+          setComposerStatus("Couldn't confirm send yet. Your draft is unchanged.", true);
+          return { ok: false, unknown: true, operationId: payload.operation_id };
+        }
         if (!res.ok || !data.ok) {
-          throw new Error(data.error || `Send failed (${res.status})`);
+          const error = new Error(data.error || `Send failed (${res.status})`);
+          error.code = data.code;
+          error.status = res.status;
+          throw error;
         }
 
         sendBtn.innerHTML = '<i class="fas fa-check"></i> Sent';
-        setComposerStatus('Sent successfully via Gmail.');
-        const recipientName = (current.recipient || to).split('<')[0].trim();
-        const doneMsg = `Sent email to ${recipientName}.`;
+        setComposerStatus(`Sent to ${to}`);
+        const doneMsg = `Sent to ${to}.`;
         setLiveText(doneMsg, 4000);
         window.Kyle?.store?.addMessage?.('kyle', doneMsg);
 
@@ -437,7 +458,7 @@
           closeComposer();
           isSending = false;
           window.AgentMail?.refresh?.();
-        }, 750);
+        }, 2000);
 
         return { ok: true, messageId: data.message_id };
       } catch (err) {
@@ -445,7 +466,15 @@
         isSending = false;
         sendBtn.disabled = false;
         sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
-        setComposerStatus(`Failed to send: ${err.message}`, true);
+        if (err.code !== 'send_unconfirmed') activeDraft.operation_id = null;
+        const message = err.code === 'reconnect_google'
+          ? 'Reconnect Google to grant Gmail send access.'
+          : err.code === 'invalid_recipient'
+            ? 'Invalid recipient email.'
+            : err.code === 'send_unconfirmed'
+              ? "Couldn't confirm send; checking Gmail is required."
+              : `Failed to send: ${err.message}`;
+        setComposerStatus(message, true);
         return { ok: false, error: err.message };
       }
     }
@@ -525,6 +554,12 @@
       closeSurface();
     });
     panelMicBtn?.addEventListener('click', () => boundHandlers.onMute?.());
+    subjectInput.addEventListener('input', () => {
+      if (activeDraft) activeDraft.operation_id = null;
+    });
+    bodyInput.addEventListener('input', () => {
+      if (activeDraft) activeDraft.operation_id = null;
+    });
     changeBtn.addEventListener('click', () => {
       if (currentPanelMode === 'calendar_confirmation') {
         window.KyleExecutor?.cancelPending?.();

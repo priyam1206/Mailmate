@@ -21,6 +21,7 @@ from services.google_service import (
 from services.auto_send_policy import AutoSendPolicy
 from services.privacy_gate import PrivacyGate
 from services.agent import AgentSession, AgentLoop, PolicyEngine, ToolRegistry, Verifier
+from services.agent.models.lmstudio import LMStudioModel, ModelTimeout, ModelUnavailable
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -501,9 +502,12 @@ class WorkAgentService:
                         "clean_title": display_title,
                         "kind": "assignment-prep" if is_academic else "email-reply",
                         "status": "queued",
+                        "current_step": "Queued for local AI",
+                        "activity_label": "Queued for local AI",
                         "source": {
                             "type": "gmail",
                             "message_id": msg_id,
+                            "rfc_message_id": email.get("rfc_message_id") or "",
                             "thread_id": thread_id,
                             "sender": sender,
                             "subject": subject,
@@ -797,13 +801,108 @@ class WorkAgentService:
             job["steps"] = list(session.steps)
             job["artifacts"] = list(session.artifacts)
             if step_record:
-                job["current_step"] = step_record.get("thought") or step_record.get("action") or "Working"
-                job["activity_label"] = step_record.get("action") or "Working"
+                labels = {
+                    'work.create_checklist': 'Understood request',
+                    'mail.prepare_reply': 'Drafted reply',
+                    'file.create_markdown': 'Created file',
+                    'file.create_docx': 'Created document',
+                    'file.create_pdf': 'Created PDF',
+                    'work.finish': 'Ready for review',
+                }
+                activity = labels.get(step_record.get('action'), 'Preparing work')
+                job["current_step"] = activity
+                job["activity_label"] = activity
                 job["step_index"] = session.step_count
                 job["step_count"] = session.step_count
             job["checkpoint"] = session.to_dict()
             job["updated_at"] = _now()
             self._write_jobs(jobs)
+
+    def _set_job_activity(self, job_id, status, label):
+        with self._lock:
+            jobs = self._read_jobs()
+            job = jobs.get(job_id)
+            if not job:
+                return
+            job['status'] = status
+            job['current_step'] = label
+            job['activity_label'] = label
+            job['updated_at'] = _now()
+            self._write_jobs(jobs)
+
+    @staticmethod
+    def _complex_work_required(source):
+        text = f"{source.get('subject', '')} {source.get('snippet', '')}".lower()
+        return bool(re.search(
+            r'\b(research|compare sources|investigate|slides?|presentation|spreadsheet|codebase|debug|pdf attachment|ambiguous)\b',
+            text,
+        ))
+
+    def _run_fast_work_path(self, session, source):
+        """Prepare common email work with one model call and deterministic execution."""
+        self._set_job_activity(session.job_id, 'planning', 'Queued for local AI')
+        try:
+            plan = LMStudioModel(timeout=min(self.timeout, 25)).work_plan(source)
+        except (ModelUnavailable, ModelTimeout):
+            if session.routing == 'LOCAL_ONLY':
+                session.status = 'waiting_local_model'
+                session.summary = 'Kyle paused because local compute is temporarily unavailable. Progress is saved.'
+                return session
+            return None
+        except Exception as exc:
+            print(f'[WorkAgent] Fast WorkPlan notice ({session.job_id}): {exc}')
+            return None
+
+        self._set_job_activity(session.job_id, 'drafting_reply', 'Drafting reply')
+        registry = ToolRegistry()
+        checklist = [_clean(item, 240) for item in (plan.get('checklist') or plan.get('requirements') or [])[:6] if _clean(item, 240)]
+        if not checklist:
+            checklist = ['Review the request', 'Prepare the requested response', 'Verify details before sending']
+        session.set_checklist(checklist)
+        session.record_step('', 'work.create_checklist', {'items': checklist}, {'allowed': True}, {
+            'ok': True, 'summary': 'Requirements organized',
+        })
+
+        reply = plan.get('reply') if isinstance(plan.get('reply'), dict) else {}
+        sender_match = re.search(r'[\w.+-]+@[\w.-]+', str(source.get('sender') or ''))
+        to_email = sender_match.group(0) if sender_match else ''
+        clean_subject = re.sub(r'^(Re:\s*)+', '', source.get('subject') or 'Update', flags=re.I)
+        subject = str(reply.get('subject') or f'Re: {clean_subject}')[:180]
+        body = str(reply.get('body') or '').strip()
+        if not body:
+            return None
+        session.set_reply(body, subject=subject, to=to_email)
+        session.record_step('', 'mail.prepare_reply', {'subject': subject, 'to': to_email}, {'allowed': True}, {
+            'ok': True, 'summary': 'Reply drafted',
+        })
+
+        artifacts = list(plan.get('artifacts') or [])[:2]
+        combined = f"{source.get('subject', '')} {source.get('snippet', '')}".lower()
+        if not artifacts and re.search(r'\b(assignment|submission|report|project|da)\b', combined):
+            artifacts = [{
+                'type': 'markdown',
+                'filename': 'work_checklist.md',
+                'spec': {
+                    'title': source.get('subject') or 'Work checklist',
+                    'sections': [{'heading': 'Action items', 'content': '\n'.join(f'- [ ] {item}' for item in checklist)}],
+                },
+            }]
+        for artifact in artifacts:
+            kind = str(artifact.get('type') or 'markdown').lower()
+            if kind not in {'markdown', 'docx', 'pdf'}:
+                continue
+            filename = str(artifact.get('filename') or f'work_plan.{"md" if kind == "markdown" else kind}')
+            args = {'filename': filename, 'spec': artifact.get('spec') or {'content': '\n'.join(checklist)}}
+            action = f'file.create_{kind}'
+            observation = registry.execute(action, args, session)
+            session.record_step('', action, {'filename': filename}, {'allowed': True}, observation, 'done' if observation.get('ok') else 'error')
+
+        session.summary = _clean(plan.get('summary') or source.get('snippet') or 'Work prepared.', 1200)
+        self._set_job_activity(session.job_id, 'verifying', 'Verifying result')
+        session.status = 'finished'
+        session.finish_reason = 'fast_work_plan'
+        Verifier().finalize(session)
+        return session
 
     def _execute_job(self, job_id, user_id):
         with self._lock:
@@ -812,6 +911,8 @@ class WorkAgentService:
             if not job or job.get("status") == "cancelled":
                 return
             job["status"] = "preparing"
+            job["current_step"] = "Reading request"
+            job["activity_label"] = "Reading request"
             job["updated_at"] = _now()
             self._write_jobs(jobs)
 
@@ -846,7 +947,7 @@ class WorkAgentService:
             source_email=source,
             routing=routing,
             autonomy_level=autonomy_level,
-            max_steps=20,
+            max_steps=10,
             max_tool_failures=3,
             max_research_calls=4,
             max_generated_files=5,
@@ -875,9 +976,13 @@ class WorkAgentService:
             except Exception as checkpoint_exc:
                 print(f"[WorkAgent] Checkpoint restore notice: {checkpoint_exc}")
 
-        # Step 3: Run Agent Loop
-        loop = AgentLoop(session)
-        final_session = loop.run()
+        # Step 3: Common email work uses one structured plan. Complex work keeps the bounded loop.
+        final_session = None
+        if not checkpoint and not self._complex_work_required(source):
+            final_session = self._run_fast_work_path(session, source)
+        if final_session is None:
+            loop = AgentLoop(session)
+            final_session = loop.run()
 
         # Step 4: Handle needs_input (e.g. required specific deliverable like OS PDF is missing)
         if final_session.status == "needs_input":
@@ -941,7 +1046,8 @@ class WorkAgentService:
                     to=to_email,
                     subject=reply_subject,
                     body=suggested_reply,
-                    thread_id=source.get("thread_id")
+                    thread_id=source.get("thread_id"),
+                    in_reply_to=source.get("rfc_message_id") or None,
                 )
                 draft_id = draft_res.get("id")
                 final_session.add_artifact({
