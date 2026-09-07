@@ -362,25 +362,8 @@
       return;
     }
 
-    // Fast-Path: Deterministic Guided Flows for Core UI Commands
-    const isRecentEmail = /\b(most\s+recent\s+(?:e?mail|message)|latest\s+(?:e?mail|message)|newest\s+(?:e?mail|message)|show\s+(?:me\s+)?(?:the\s+)?recent\s+(?:e?mail|message)|open\s+(?:the\s+)?latest\s+(?:e?mail|message))\b/i.test(cleanPrompt);
-    if (isRecentEmail) {
-      await executeRecentEmailGuidance(cleanPrompt, run);
-      return;
-    }
-
-    const senderMatch = cleanPrompt.match(/\b(?:show\s+|find\s+)?(?:mails?|emails?|messages?)\s+from\s+(.+)$/i);
-    if (senderMatch) {
-      let candidate = senderMatch[1]
-        .replace(/[?.!]+$/, '')
-        .replace(/\b(please|in\s+(?:my\s+)?inbox|today|this\s+week)\b/gi, '')
-        .trim();
-      if (candidate && !['this', 'that', 'me', 'it', 'them'].includes(candidate.toLowerCase())) {
-        await executeSenderEmailGuidance(candidate, cleanPrompt, run);
-        return;
-      }
-    }
-
+    // Only obvious navigation keeps a local fast path. Mail meaning and search
+    // are planned by the server agent so multi-word names and context are semantic.
     const isCalendar = /\b(open|show|go\s+to)\s+(?:my\s+)?calendar\b/i.test(cleanPrompt);
     if (isCalendar) {
       await executeCalendarGuidance(cleanPrompt, run);
@@ -423,6 +406,21 @@
       if (!response.ok) throw new Error(`Kyle returned ${response.status}`);
 
       const data = await response.json();
+      if (data.mode !== 'semantic-agent') {
+        const recentFallback = /\b(most\s+recent|latest|newest|show\s+(?:me\s+)?(?:the\s+)?recent)\s+(?:e?mail|message)\b/i.test(cleanPrompt);
+        if (recentFallback) {
+          await executeRecentEmailGuidance(cleanPrompt, run);
+          return;
+        }
+        const senderFallback = cleanPrompt.match(/\b(?:show\s+|find\s+)?(?:mails?|emails?|messages?)\s+from\s+(.+)$/i);
+        if (senderFallback) {
+          const candidate = senderFallback[1].replace(/[?.!]+$/, '').trim();
+          if (candidate) {
+            await executeSenderEmailGuidance(candidate, cleanPrompt, run);
+            return;
+          }
+        }
+      }
       let reply = String(data.reply || data.text || '').trim() || 'Done.';
       let voice = String(data.voice || compactVoice(reply)).trim();
 
@@ -1080,7 +1078,7 @@
   }
 
   function getUserId() {
-    return localStorage.getItem('userId') || store.context?.user_id || '';
+    return window.localStorage?.getItem?.('userId') || store.context?.user_id || '';
   }
 
   window.Kyle = { store, setContext, startListening, interrupt, handlePrompt };

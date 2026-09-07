@@ -55,6 +55,17 @@
     if (transactions.length > 20) transactions.shift();
     setState('ACTING');
 
+    const subtitles = {
+      'inbox.open_email': 'Reading the selected email...',
+      'navigation.open': 'Opening the right page...',
+      'mail.compose': 'Drafting your email...',
+      'mail.reply': 'Drafting your reply...',
+      'mail.update_draft': 'Updating the draft...',
+      'mail.send_draft': 'Sending through Gmail...',
+      'work.focus': 'Opening the Work item...',
+      'calendar.open_event': 'Opening the calendar event...'
+    };
+
     for (const action of plan.steps || []) {
       const policy = window.KylePolicy?.evaluate(action) || { allowed: false, reason: 'Policy unavailable.' };
       if (!policy.allowed) {
@@ -67,6 +78,7 @@
 
       const step = { action, status: 'running', startedAt: new Date().toISOString() };
       transaction.steps.push(step);
+      window.KyleUi?.active?.setSubtitle?.(subtitles[action.tool] || 'Working on that...');
       window.dispatchEvent(new CustomEvent('kyle:action-start', { detail: { transaction, action } }));
 
       try {
@@ -82,6 +94,7 @@
         if (typeof result?.undo === 'function') transaction.undo.push(result.undo);
         if (action.args?.reference && result !== false) transaction.changedObjects.push(action.args.reference);
         window.dispatchEvent(new CustomEvent('kyle:action-complete', { detail: { transaction, action, result, observation } }));
+        if (action.tool === 'mail.send_draft') window.KyleUi?.active?.setSubtitle?.('Verifying the send...');
         if (result?.requiresApproval && result?.previewId) {
           const commitTool = action.tool === 'calendar.preview_move' ? 'calendar.commit_move'
             : action.tool === 'calendar.preview_create' ? 'calendar.commit_create'
@@ -118,6 +131,7 @@
     transaction.narration = observedNarration(transaction);
     transaction.completedAt = new Date().toISOString();
     if (transaction.status === 'complete') setState('DONE');
+    if (transaction.status === 'complete') window.KyleUi?.active?.setSubtitle?.('Done.', { autoHideMs: 2200 });
     return transaction;
   }
 

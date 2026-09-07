@@ -205,6 +205,39 @@ body {
   will-change: filter;
 }
 
+.hero-identity {
+  position: fixed;
+  z-index: 14;
+  left: 50%;
+  top: calc(50% + min(15vw, 145px));
+  transform: translateX(-50%);
+  width: min(90vw, 720px);
+  text-align: center;
+  pointer-events: none;
+  color: #dadde2;
+}
+
+.hero-identity h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.hero-identity p {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: 0;
+  animation: hero-byline-in 700ms ease 2.1s forwards;
+}
+
+@keyframes hero-byline-in {
+  to { opacity: 0.72; }
+}
+
 /* Scroll Prompt Indicator (Bottom Center on Landing) */
 .scroll-prompt {
   position: fixed;
@@ -561,6 +594,7 @@ body.app-active {
 
 body.app-active .dot-logo,
 body.app-active .scroll-prompt,
+body.app-active .hero-identity,
 body.app-active .auth-container {
   opacity: 0 !important;
   pointer-events: none !important;

@@ -1,4 +1,3 @@
-import threading
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
@@ -9,6 +8,8 @@ from services.google_service import get_user_profile
 from services.work_agent_service import work_agent_service
 from services.calendar_service import list_events as calendar_list_events
 from services.calendar_conflicts import calculate_conflicts
+from services.mail_context_service import mail_context_service
+from services.google_service import get_gmail_permissions
 
 _APP_TZ = timezone(timedelta(hours=5, minutes=30))  # Default fallback IST
 
@@ -88,9 +89,19 @@ class SystemContextService:
         except Exception as e:
             print(f"[SystemContext] Calendar fetch/conflict error: {e}")
 
-        # 4. Mail & Needs Attention Context
-        needs_attention = []
-        recent_emails_count = 0
+        # 4. Mail intelligence is minimized active context, never raw mailbox data.
+        mail_rows = mail_context_service.list_context(user_id)
+        needs_attention = [row for row in mail_rows if row.get('attention_allowed')]
+        recent_index = [{
+            'id': row.get('gmail_message_id'), 'thread_id': row.get('gmail_thread_id'),
+            'title': row.get('display_title'), 'sender': row.get('sender_display'),
+            'summary': row.get('summary'), 'requires_reply': bool(row.get('requires_reply')),
+        } for row in mail_rows[:30]]
+        recent_emails_count = len(mail_rows)
+        try:
+            gmail_permissions = get_gmail_permissions()
+        except Exception:
+            gmail_permissions = {'authenticated': False}
 
         with self._lock:
             self._context_version += 1
@@ -125,6 +136,17 @@ class SystemContextService:
                 "mail": {
                     "needs_attention": needs_attention,
                     "recent_count": recent_emails_count,
+                    "recent": recent_index,
+                    "counts": {
+                        "needs_attention": len(needs_attention),
+                        "requires_reply": sum(1 for row in mail_rows if row.get('requires_reply')),
+                    },
+                },
+                "runtime": {
+                    "gmail": gmail_permissions,
+                    "supabase": mail_context_service.status(),
+                    "local_model": {"role": "work-and-local-only"},
+                    "gemini": {"role": "interactive-and-cloud-allowed"},
                 },
                 "diagnostics": {
                     "context_version": version,

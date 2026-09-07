@@ -15,7 +15,10 @@
     if (UI_TOOLS.has(tool)) return { allowed: true, risk: 'ui' };
     if (WRITE_TOOLS.has(tool)) {
       if (tool === 'mail.send_draft') {
-        return { allowed: true, risk: 'write' };
+        if (!action.args?.explicit_send) {
+          return { allowed: false, approvalRequired: true, reason: 'Say send when you want Kyle to deliver this draft.' };
+        }
+        return { allowed: true, risk: 'write', basis: 'explicit-user-send' };
       }
       const previewId = String(action.args?.previewId || '');
       if (!previewId) return { allowed: false, reason: 'A visible preview is required before this write.' };

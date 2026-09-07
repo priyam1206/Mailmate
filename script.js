@@ -160,20 +160,25 @@ document.addEventListener('DOMContentLoaded', () => {
     sampleCtx.textAlign = 'center';
     sampleCtx.textBaseline = 'middle';
     sampleCtx.fillStyle = '#ffffff';
-    sampleCtx.fillText('CIPHERSQUAD', centerX, centerY);
-
-    const pixels = sampleCtx.getImageData(0, 0, width, height).data;
-    const targets = [];
     const step = width < 700 ? 3 : 4;
     const startY = Math.max(0, Math.floor(centerY - fontSize));
     const endY = Math.min(height, Math.ceil(centerY + fontSize));
 
-    for (let y = startY; y < endY; y += step) {
-      for (let x = 0; x < width; x += step) {
-        const pixelIndex = (y * width + x) * 4;
-        if (pixels[pixelIndex + 3] > 70) targets.push({ x, y });
+    function textTargets(label) {
+      sampleCtx.clearRect(0, 0, width, height);
+      sampleCtx.fillText(label, centerX, centerY);
+      const pixels = sampleCtx.getImageData(0, 0, width, height).data;
+      const points = [];
+      for (let y = startY; y < endY; y += step) {
+        for (let x = 0; x < width; x += step) {
+          if (pixels[(y * width + x) * 4 + 3] > 70) points.push({ x, y });
+        }
       }
+      return points;
     }
+
+    const targets = textTargets('CIPHERSQUAD');
+    const productTargets = textTargets('MAILMATE');
 
     const maxScreenDist = Math.hypot(width, height);
     logoDots.length = 0;
@@ -188,6 +193,8 @@ document.addEventListener('DOMContentLoaded', () => {
         y: target.y + Math.sin(initAngle) * initDist,
         baseX: target.x,
         baseY: target.y,
+        productX: productTargets[index % productTargets.length]?.x ?? target.x,
+        productY: productTargets[index % productTargets.length]?.y ?? target.y,
         scatterX: Math.cos(angle) * dist,
         scatterY: Math.sin(angle) * dist,
         delay: (index % 150) * 3,
@@ -263,8 +270,12 @@ document.addEventListener('DOMContentLoaded', () => {
     for (let i = 0; i < logoDots.length; i++) {
       const dot = logoDots[i];
       const entryProgress = Math.max(0, Math.min(1, (elapsed - dot.delay) / 600));
-      const targetX = dot.baseX + dot.scatterX * currentScatter;
-      const targetY = dot.baseY + dot.scatterY * currentScatter;
+      const morphLinear = Math.max(0, Math.min(1, (elapsed - 1300) / 900));
+      const morph = morphLinear * morphLinear * (3 - 2 * morphLinear);
+      const wordX = dot.baseX + (dot.productX - dot.baseX) * morph;
+      const wordY = dot.baseY + (dot.productY - dot.baseY) * morph;
+      const targetX = wordX + dot.scatterX * currentScatter;
+      const targetY = wordY + dot.scatterY * currentScatter;
       const springRate = 0.085 * (0.3 + entryProgress * 0.7);
       dot.x += (targetX - dot.x) * springRate;
       dot.y += (targetY - dot.y) * springRate;

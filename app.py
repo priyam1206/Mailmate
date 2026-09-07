@@ -44,6 +44,8 @@ from services.calendar_conflicts import calculate_conflicts
 from services.agent.inference_broker import inference_broker
 from services.agent.token_budget import approximate_tokens, bounded_payload
 from services.mail_context_service import mail_context_service
+from services.kyle_agent_planner import plan_kyle_turn
+from services.mail_sync_service import MailSyncService
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-secret-key-123')
@@ -630,6 +632,12 @@ def auth_google_callback():
         session.pop('code_verifier', None)
 
     user_id = profile.get('id') or profile.get('sub') or profile.get('email') or ''
+    # The worker is defined during module initialization and starts after auth;
+    # it does not depend on the dashboard being opened.
+    try:
+        mail_sync_service.start(profile)
+    except Exception as sync_exc:
+        app.logger.info('Background Gmail sync will retry on first API request: %s', sync_exc)
     params = {
         'connected': 'true',
         'userId': user_id,
@@ -997,6 +1005,13 @@ def _build_live_dashboard(profile, force_ai=False):
     return overview
 
 
+mail_sync_service = MailSyncService(
+    snapshot_builder=_build_live_dashboard,
+    enqueue_work=work_agent_service.sync_and_enqueue,
+    interval_seconds=CACHE_SYNC_SECONDS,
+)
+
+
 @app.route('/api/dashboard/overview')
 def dashboard_overview():
     try:
@@ -1007,13 +1022,12 @@ def dashboard_overview():
         force = str(request.args.get('refresh', '')).lower() in {'1', 'true', 'yes'}
         live_payload = _build_live_dashboard(profile, force_ai=force)
         user_id = profile.get('email') or profile.get('id')
+        mail_sync_service.start(profile)
         try:
             if force:
                 # Manual refresh is reconciliation-only: fetch current Gmail state
                 # and resolve/delete existing work without starting new AI work.
                 work_agent_service.reconcile_jobs_with_gmail(user_id)
-            else:
-                threading.Thread(target=work_agent_service.sync_and_enqueue, args=(user_id, live_payload), daemon=True).start()
         except Exception as sync_exc:
             app.logger.debug('Work sync notice: %s', sync_exc)
         return jsonify(live_payload)
@@ -2112,7 +2126,7 @@ def _sanitize_agent_action(action, known):
             }
         }
     if tool == 'mail.send_draft':
-        return {'tool': tool, 'args': {}}
+        return {'tool': tool, 'args': {'explicit_send': bool(args.get('explicit_send'))}}
     if tool == 'mail.close_composer':
         return {'tool': tool, 'args': {}}
 
@@ -2589,8 +2603,56 @@ def kyle_agent_endpoint():
                     })
     # Update known references with newly resolved references
     known = _agent_known_references(ui_context, resolved)
+    for email in (merged_context.get('emails') or [])[:50]:
+        email_id = str(email.get('id') or email.get('gmail_id') or '')
+        if email_id:
+            ref = {'type': 'email', 'id': email_id, 'label': _agent_text(email.get('subject') or 'Email'), 'page': 'inbox', 'metadata': {}}
+            known[f'email:{email_id}'] = ref
+    for job in ((merged_context.get('work') or {}).get('all') or [])[:50]:
+        job_id = str(job.get('id') or '')
+        if job_id:
+            ref = {'type': 'work-item', 'id': job_id, 'label': _agent_text(job.get('clean_title') or job.get('title') or 'Work item'), 'page': 'work', 'metadata': {}}
+            known[f'work-item:{job_id}'] = ref
+    for event in ((merged_context.get('calendar') or {}).get('events') or [])[:100]:
+        event_id = str(event.get('id') or '')
+        if event_id:
+            ref = {'type': 'calendar-event', 'id': event_id, 'label': _agent_text(event.get('title') or 'Calendar event'), 'page': 'calendar', 'metadata': {}}
+            known[f'calendar-event:{event_id}'] = ref
 
-    # 1. Contextual Email Composer & Intent Handling
+    # The semantic planner is the primary brain. Deterministic handlers below are
+    # retained only as an offline fallback and for hard validation.
+    planner_context = dict(merged_context)
+    planner_context.update({
+        'ui': ui_context,
+        'resolved': resolved,
+        'active_draft': active_draft,
+    })
+    try:
+        planned = plan_kyle_turn(
+            message,
+            planner_context,
+            selected_email=selected_email,
+            fetch_message=get_gmail_message,
+        )
+        planned_actions = []
+        for candidate in planned.get('actions') or []:
+            sanitized = _sanitize_agent_action(candidate, known)
+            if sanitized and sanitized not in planned_actions:
+                planned_actions.append(sanitized)
+        reply = planned.get('reply') or 'I am ready.'
+        return jsonify({
+            **planned,
+            'reply': reply,
+            'text': reply,
+            'voice': planned.get('voice') or _compact_voice(reply),
+            'actions': planned_actions,
+            'mode': 'semantic-agent',
+            'context_version': system_ctx.get('context_version', 1),
+        })
+    except Exception as planner_exc:
+        app.logger.info('Kyle semantic planner unavailable; using guarded fallback: %s', planner_exc)
+
+    # Contextual mail fallback. It is not the canonical intent engine.
     mail_intent_res = _handle_mail_intent(
         message=message,
         active_draft=active_draft,

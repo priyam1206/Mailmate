@@ -333,6 +333,25 @@
       showSurfaceResult('Kyle', value, { autoHideMs });
     }
 
+    function setSubtitle(text, options = {}) {
+      clearTimeout(captionTimer);
+      const value = String(text || '').trim();
+      caption.textContent = value;
+      caption.classList.toggle('is-visible', Boolean(value));
+      widget.classList.toggle('has-caption', Boolean(value));
+      if (value && options.autoHideMs) {
+        captionTimer = setTimeout(() => setSubtitle(''), Number(options.autoHideMs));
+      }
+    }
+
+    function showResponse(text, options = {}) {
+      showSurfaceResult(options.title || 'Kyle', text, options);
+    }
+
+    function showActionPanel(config = {}) {
+      showCommandCard(config);
+    }
+
     function setMuted(muted) {
       if (!panelMicBtn) return;
       panelMicBtn.innerHTML = muted ? '<i class="fas fa-volume-xmark"></i>' : '<i class="fas fa-volume-high"></i>';
@@ -694,7 +713,7 @@
     });
     window.addEventListener('kyle:motion-caption', event => {
       const detail = event.detail || {};
-      setLiveText(detail.text || '', detail.transient ? 2400 : 0);
+      setSubtitle(detail.text || '', { autoHideMs: detail.transient ? 2400 : 0 });
     });
     window.addEventListener('kyle:composer-open', event => {
       const detail = event.detail || {};
@@ -884,6 +903,9 @@
       bind,
       setAmplitude,
       setLiveText,
+      setSubtitle,
+      showResponse,
+      showActionPanel,
       setMuted,
       renderResults,
       renderBrief,

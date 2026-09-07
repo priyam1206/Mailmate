@@ -35,6 +35,28 @@ def test_prize_phishing_never_becomes_work():
     assert row['calendar_allowed'] is False
 
 
+def test_informational_exam_is_attention_and_calendar_not_work(monkeypatch):
+    monkeypatch.setenv('MAILMATE_SEMANTIC_CLASSIFIER_ENABLED', '0')
+    row = classify_message(message(
+        subject='Lab exam announcement',
+        snippet='The lab exam will be held on October 7.',
+    ), {'routing': 'CLOUD_ALLOWED'})
+    assert row['attention_allowed'] is True
+    assert row['calendar_allowed'] is True
+    assert row['work_allowed'] is False
+
+
+def test_assignment_submission_is_work(monkeypatch):
+    monkeypatch.setenv('MAILMATE_SEMANTIC_CLASSIFIER_ENABLED', '0')
+    row = classify_message(message(
+        subject='Operating Systems assignment',
+        snippet='Please prepare the lab report and submit it before October 7.',
+    ), {'routing': 'CLOUD_ALLOWED'})
+    assert row['attention_allowed'] is True
+    assert row['calendar_allowed'] is True
+    assert row['work_allowed'] is True
+
+
 def test_context_rows_never_contain_mail_content(monkeypatch):
     monkeypatch.setenv('SUPABASE_CONTEXT_ENABLED', '0')
     service = MailContextService()
