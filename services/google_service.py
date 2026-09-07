@@ -1,3 +1,5 @@
+import threading
+import time
 import os
 import json
 import base64
@@ -160,29 +162,31 @@ def handle_callback(url, state=None, code_verifier=None):
     return creds
 
 
-_GMAIL_CLIENT_CACHE = {
-    'service': None,
-    'token': None,
-}
+_THREAD_LOCAL = threading.local()
+
+
+def _reset_gmail_service():
+    """Reset the thread-local Gmail client if a network, timeout, or SSL error occurs."""
+    _THREAD_LOCAL.gmail_service = None
+    _THREAD_LOCAL.gmail_token = None
 
 
 def _gmail_service():
     creds = get_credentials()
     if not creds:
-        _GMAIL_CLIENT_CACHE['service'] = None
-        _GMAIL_CLIENT_CACHE['token'] = None
+        _reset_gmail_service()
         return None
 
     current_token = getattr(creds, 'token', None)
-    cached_service = _GMAIL_CLIENT_CACHE.get('service')
-    cached_token = _GMAIL_CLIENT_CACHE.get('token')
+    cached_service = getattr(_THREAD_LOCAL, 'gmail_service', None)
+    cached_token = getattr(_THREAD_LOCAL, 'gmail_token', None)
 
     if cached_service and current_token and current_token == cached_token and getattr(creds, 'valid', True):
         return cached_service
 
     service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
-    _GMAIL_CLIENT_CACHE['service'] = service
-    _GMAIL_CLIENT_CACHE['token'] = current_token
+    _THREAD_LOCAL.gmail_service = service
+    _THREAD_LOCAL.gmail_token = current_token
     return service
 
 
@@ -461,7 +465,17 @@ def get_gmail_threads():
     if not service:
         return [], []
 
-    profile = service.users().getProfile(userId='me').execute()
+    try:
+        profile = service.users().getProfile(userId='me').execute()
+    except Exception as exc:
+        _reset_gmail_service()
+        service = _gmail_service()
+        if not service:
+            return [], []
+        try:
+            profile = service.users().getProfile(userId='me').execute()
+        except Exception:
+            return [], []
     my_email = str(profile.get('emailAddress') or '').strip().lower()
     limit = max(1, min(int(os.getenv('GMAIL_FETCH_LIMIT', '20') or 20), 50))
     query = _gmail_query()
@@ -609,29 +623,36 @@ def update_gmail_draft(draft_id, to, subject, body, thread_id=None, in_reply_to=
 
 def send_gmail_draft(draft_id):
     """Send an exact existing draft after explicit human approval."""
-    creds = get_credentials()
-    if not creds:
-        raise RuntimeError("Google account not connected")
-    service = build('gmail', 'v1', credentials=creds)
-    try:
-        sent = service.users().drafts().send(userId='me', body={'id': draft_id}).execute()
-        return {
-            'id': sent.get('id'),
-            'thread_id': sent.get('threadId'),
-            'labels': sent.get('labelIds', [])
-        }
-    except HttpError as err:
-        if err.resp.status == 403 or 'insufficient' in str(err).lower():
-            raise GmailInsufficientPermissionError()
-        raise err
+    last_error = None
+    for attempt in range(2):
+        service = _gmail_service()
+        if not service:
+            raise RuntimeError("Google account not connected")
+        try:
+            sent = service.users().drafts().send(userId='me', body={'id': draft_id}).execute()
+            return {
+                'id': sent.get('id'),
+                'thread_id': sent.get('threadId'),
+                'labels': sent.get('labelIds', [])
+            }
+        except HttpError as err:
+            if err.resp.status == 403 or 'insufficient' in str(err).lower():
+                raise GmailInsufficientPermissionError()
+            raise err
+        except Exception as err:
+            last_error = err
+            _reset_gmail_service()
+            if attempt == 0:
+                time.sleep(0.3)
+                continue
+            raise err
+    if last_error:
+        raise last_error
 
 
 def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None):
     """Send an exact email message directly via Gmail API users.messages.send."""
     from email.message import EmailMessage
-    service = _gmail_service()
-    if not service:
-        raise RuntimeError("Google account not connected")
 
     msg = EmailMessage()
     msg.set_content(body or '')
@@ -648,17 +669,31 @@ def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None):
     if thread_id:
         body_payload['threadId'] = thread_id
 
-    try:
-        sent = service.users().messages().send(userId='me', body=body_payload).execute()
-        return {
-            'id': sent.get('id'),
-            'thread_id': sent.get('threadId'),
-            'labels': sent.get('labelIds', [])
-        }
-    except HttpError as err:
-        if err.resp.status == 403 or 'insufficient' in str(err).lower():
-            raise GmailInsufficientPermissionError()
-        raise err
+    last_error = None
+    for attempt in range(2):
+        service = _gmail_service()
+        if not service:
+            raise RuntimeError("Google account not connected")
+        try:
+            sent = service.users().messages().send(userId='me', body=body_payload).execute()
+            return {
+                'id': sent.get('id'),
+                'thread_id': sent.get('threadId'),
+                'labels': sent.get('labelIds', [])
+            }
+        except HttpError as err:
+            if err.resp.status == 403 or 'insufficient' in str(err).lower():
+                raise GmailInsufficientPermissionError()
+            raise err
+        except Exception as err:
+            last_error = err
+            _reset_gmail_service()
+            if attempt == 0:
+                time.sleep(0.3)
+                continue
+            raise err
+    if last_error:
+        raise last_error
 
 
 def get_gmail_thread(thread_id):
@@ -725,11 +760,12 @@ def get_gmail_thread(thread_id):
 
 def get_gmail_draft(draft_id):
     """Fetch an existing Gmail draft by ID. Returns None if it no longer exists."""
-    creds = get_credentials()
-    if not creds or not draft_id:
+    if not draft_id:
+        return None
+    service = _gmail_service()
+    if not service:
         return None
     try:
-        service = build('gmail', 'v1', credentials=creds)
         draft = service.users().drafts().get(userId='me', id=draft_id).execute()
         return draft
     except HttpError as err:
@@ -738,6 +774,7 @@ def get_gmail_draft(draft_id):
         print(f"[Gmail] get_gmail_draft error ({draft_id}): {err}")
         return None
     except Exception as e:
+        _reset_gmail_service()
         print(f"[Gmail] get_gmail_draft error ({draft_id}): {e}")
         return None
 
@@ -747,11 +784,12 @@ def delete_gmail_draft(draft_id):
     Safely delete an exact Mailmate-created Gmail draft.
     Does nothing if draft does not exist or account is disconnected.
     """
-    creds = get_credentials()
-    if not creds or not draft_id:
+    if not draft_id:
+        return False
+    service = _gmail_service()
+    if not service:
         return False
     try:
-        service = build('gmail', 'v1', credentials=creds)
         service.users().drafts().delete(userId='me', id=draft_id).execute()
         return True
     except HttpError as err:
@@ -762,6 +800,7 @@ def delete_gmail_draft(draft_id):
         print(f"[Gmail] delete_gmail_draft error ({draft_id}): {err}")
         return False
     except Exception as e:
+        _reset_gmail_service()
         print(f"[Gmail] delete_gmail_draft error ({draft_id}): {e}")
         return False
 

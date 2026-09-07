@@ -2192,6 +2192,6 @@ if __name__ == '__main__':
     print(f"Flask server running on http://localhost:{port}")
     print(f"[Static] project root: {BASE_DIR}")
     print(f"[Static] styles.css: {(BASE_DIR / 'styles.css').is_file()}")
-    app.run(port=port, host='0.0.0.0', debug=True, use_reloader=False)
+    app.run(port=port, host='0.0.0.0', debug=False, threaded=True)
 
 
