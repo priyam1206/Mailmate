@@ -245,6 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function showTab(name) {
     state.currentPage = name;
+    document.querySelector('.main')?.classList.toggle('is-overview-page', name === 'overview');
     const copy = pageCopy[name] || pageCopy.overview;
     els.pageTitle.textContent = copy[0];
     els.pageSubtitle.textContent = copy[1];
@@ -254,6 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     document.querySelector('.main')?.scrollTo?.({ top: 0, left: 0, behavior: 'auto' });
     window.MailmateContext?.setPage(name);
+    window.KyleCanvas?.onPageChange?.(name);
     window.KyleUi?.active?.setPresentationMode?.(name === 'overview' ? 'overview' : 'floating');
     window.Kyle?.setContext({
       ...(state.data || {}),
@@ -397,6 +399,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     state.mailboxLoadingCount += 1;
     $('tab-overview')?.classList.toggle('is-loading', state.mailboxLoadingCount > 0);
+    window.KyleCanvas?.setDataLoading?.(true);
 
     clearSteps();
     setStep('auth', 'done', 'Gmail session found');
@@ -456,6 +459,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       state.mailboxLoadingCount = Math.max(0, state.mailboxLoadingCount - 1);
       $('tab-overview')?.classList.toggle('is-loading', state.mailboxLoadingCount > 0);
+      window.KyleCanvas?.setDataLoading?.(state.mailboxLoadingCount > 0);
     }
   }
 
@@ -574,6 +578,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderEmails(data.emails || []);
     renderWork(data);
+    window.KyleCanvas?.animateDashboardArrival?.();
   }
 
   function overviewSummary(attentionCount, waitingCount) {

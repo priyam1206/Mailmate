@@ -351,6 +351,7 @@
 
     store.addMessage('user', cleanPrompt);
     ui.setLiveText(cleanPrompt);
+    const overviewCanvasStarted = window.KyleCanvas?.beginForPrompt?.(cleanPrompt) || false;
 
     if (window.KylePlanner?.isUndo(cleanPrompt)) {
       const undone = await window.KyleExecutor?.undoLast?.();
@@ -500,6 +501,10 @@
         return;
       }
       if (!data) throw lastError || new Error('Kyle returned no response');
+
+      const useOverviewCanvas = window.KyleCanvas?.shouldPresent?.(cleanPrompt, data) || false;
+      if (overviewCanvasStarted && !useOverviewCanvas) window.KyleCanvas?.cancelPending?.();
+
       if (data.mode !== 'semantic-agent') {
         const recentFallback = /\b(most\s+recent|latest|newest|show\s+(?:me\s+)?(?:the\s+)?recent)\s+(?:e?mail|message)\b/i.test(cleanPrompt);
         if (recentFallback) {
@@ -551,15 +556,21 @@
         }
       }
       applyCommand(data.command);
-      if (data.brief?.items?.length) {
+      if (data.brief?.items?.length && !useOverviewCanvas) {
         ui.renderBrief(data.brief.title || 'Kyle', data.brief.items);
+      }
+
+      if (useOverviewCanvas) {
+        window.KyleCanvas?.prepare?.({ canvas: data.canvas, reply, text: reply, prompt: cleanPrompt });
       }
 
       store.addMessage('kyle', reply);
       ui.setLiveText(voice || reply, 5200);
-      speak(voice || reply, run);
+      const revealCanvas = useOverviewCanvas ? () => window.KyleCanvas?.reveal?.() : null;
+      speak(voice || reply, run, revealCanvas);
     } catch (error) {
       console.error('[Kyle Voice] chat failed:', error.message || error);
+      window.KyleCanvas?.showError?.(error.message || 'Kyle chat failed.');
       showStructuredError(error.message || 'Kyle chat failed.', () => handlePrompt(cleanPrompt, run));
     }
   }
@@ -589,9 +600,16 @@
     return spoken;
   }
 
-  function speak(text, run) {
+  function speak(text, run, onReady = null) {
     stopSpeech(false);
+    let readyCalled = false;
+    const signalReady = () => {
+      if (readyCalled) return;
+      readyCalled = true;
+      try { onReady?.(); } catch (_) {}
+    };
     if (store.muted || !text) {
+      signalReady();
       store.set(window.KyleExecutor?.pending?.() ? store.states.WAITING_APPROVAL : store.states.IDLE);
       return;
     }
@@ -601,15 +619,15 @@
     smoothedSpeechEnergy = 0;
     startSpeechAnimation(text, run);
     if (typeof window.Audio === 'function' && window.URL?.createObjectURL) {
-      speakWithElevenLabs(text, run).then(played => {
-        if (!played && run === activeRun) speakWithBrowser(text, run);
+      speakWithElevenLabs(text, run, signalReady).then(played => {
+        if (!played && run === activeRun) speakWithBrowser(text, run, signalReady);
       });
       return;
     }
-    speakWithBrowser(text, run);
+    speakWithBrowser(text, run, signalReady);
   }
 
-  async function speakWithElevenLabs(text, run) {
+  async function speakWithElevenLabs(text, run, onReady = null) {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     speechRequest = controller;
     try {
@@ -630,6 +648,7 @@
         if (run === activeRun) speakWithBrowser(text, run);
       };
       await elevenAudio.play();
+      onReady?.();
       return true;
     } catch (error) {
       if (error?.name !== 'AbortError') {
@@ -642,8 +661,9 @@
     }
   }
 
-  function speakWithBrowser(text, run) {
+  function speakWithBrowser(text, run, onReady = null) {
     if (!('speechSynthesis' in window)) {
+      onReady?.();
       finishSpeech(run);
       return;
     }
@@ -658,7 +678,7 @@
     utterance.volume = 1;
     chooseVoice(utterance);
 
-    utterance.onstart = () => {};
+    utterance.onstart = () => onReady?.();
 
     utterance.onend = () => finishSpeech(run);
     utterance.onerror = event => {
@@ -668,6 +688,7 @@
 
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
+    setTimeout(() => { if (run === activeRun) onReady?.(); }, 260);
   }
 
   function chooseVoice(target) {

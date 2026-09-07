@@ -3158,3 +3158,644 @@ body > .kyle-action-panel.is-open {
     max-height: min(72vh, 580px) !important;
   }
 }
+
+
+/* MAILMATE_OVERVIEW_CANVAS_V1 */
+html, body, .main, .tab-panel, .email-list, .email-detail, .work-history, .work-run,
+.kyle-transcript, .kyle-panel-body, .kyle-composer-textarea, .kyle-canvas {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar, body::-webkit-scrollbar, .main::-webkit-scrollbar, .tab-panel::-webkit-scrollbar,
+.email-list::-webkit-scrollbar, .email-detail::-webkit-scrollbar, .work-history::-webkit-scrollbar,
+.work-run::-webkit-scrollbar, .kyle-transcript::-webkit-scrollbar, .kyle-panel-body::-webkit-scrollbar,
+.kyle-composer-textarea::-webkit-scrollbar, .kyle-canvas::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+#tab-overview { min-height: calc(100vh - 150px); padding-bottom: 112px; }
+#tab-overview .overview-inner { width: min(1100px, 100%); margin: 0 auto; }
+#tab-overview .overview-brief { padding-top: clamp(24px, 5vh, 66px); transition: opacity 190ms ease, transform 240ms cubic-bezier(.22,1,.36,1); }
+#overviewDataSurface { transition: opacity 190ms ease, transform 240ms cubic-bezier(.22,1,.36,1), filter 220ms ease; }
+#tab-overview .overview-brief.is-canvas-away, #overviewDataSurface.is-canvas-away { opacity: 0; transform: translateY(-9px); filter: blur(2px); pointer-events: none; }
+#tab-overview.is-data-loading:not(.kyle-canvas-active) #overviewDataSurface { animation: overviewBreath 1.25s ease-in-out infinite alternate; }
+#tab-overview.is-data-loading:not(.kyle-canvas-active) #summaryText { position: relative; overflow: hidden; }
+#tab-overview.is-data-loading:not(.kyle-canvas-active) #summaryText::after {
+  content: ""; position: absolute; inset: 0; width: 42%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.62), transparent);
+  transform: translateX(-140%); animation: overviewShimmer 1.15s ease-in-out infinite; pointer-events: none;
+}
+[data-theme="dark"] #tab-overview.is-data-loading:not(.kyle-canvas-active) #summaryText::after {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.10), transparent);
+}
+.overview-arrive { animation: overviewContentArrive 520ms cubic-bezier(.22,1,.36,1) both; animation-delay: var(--overview-delay,0ms); }
+
+#tab-overview .overview-kyle {
+  position: fixed; left: 216px; right: 0; bottom: 22px; z-index: 1550;
+  display: flex; justify-content: center; align-items: flex-end; margin: 0; max-width: none; pointer-events: none;
+}
+#tab-overview #kyleOverviewHome { width: min(780px, calc(100vw - 292px)); min-height: 58px; pointer-events: auto; }
+#tab-overview .kyle-suggestions { display: none !important; }
+.kyle-overview-mount, .kyle-overview-mount .kyle-global, .kyle-overview-mount .kyle-widget { width: 100%; }
+.kyle-overview-mount .kyle-shell,
+.kyle-overview-mount .kyle-widget:hover .kyle-shell,
+.kyle-overview-mount .kyle-widget:focus-within .kyle-shell,
+.kyle-overview-mount .kyle-widget.is-expanded .kyle-shell,
+.kyle-overview-mount .kyle-widget:not([data-state="IDLE"]) .kyle-shell {
+  width: 100% !important; height: 58px !important; min-height: 58px; padding: 5px 8px 5px 20px !important;
+  border-radius: 999px !important; box-shadow: 0 16px 48px rgba(0,0,0,.18), 0 2px 12px rgba(0,0,0,.10) !important;
+}
+.kyle-overview-mount .kyle-orb { display: none !important; }
+.kyle-overview-mount .prompt-input,
+.kyle-overview-mount .kyle-widget:hover .prompt-input,
+.kyle-overview-mount .kyle-widget:focus-within .prompt-input,
+.kyle-overview-mount .kyle-widget.is-expanded .prompt-input,
+.kyle-overview-mount .kyle-widget:not([data-state="IDLE"]) .prompt-input {
+  width: auto !important; flex: 1 1 auto; padding: 0 12px 0 2px !important; opacity: 1 !important; pointer-events: auto !important; font-size: .98rem;
+}
+.kyle-overview-mount .send-icon { opacity: 1 !important; transform: scale(1) !important; pointer-events: auto !important; }
+.kyle-overview-mount .kyle-history-toggle, .kyle-overview-mount .kyle-caption-bubble,
+.kyle-overview-mount .kyle-transcript, .kyle-overview-mount .kyle-result-panel { display: none !important; }
+
+.kyle-canvas { width: 100%; min-height: min(64vh,650px); padding: clamp(26px,4.8vh,70px) 0 130px; overflow: visible; }
+.kyle-canvas[hidden] { display: none !important; }
+.kyle-canvas-stage { width: min(940px,100%); margin: 0 auto; }
+.kyle-canvas-topline { min-height: 30px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 34px; }
+.kyle-canvas-kicker { color: var(--muted); font-size: .7rem; font-weight: 700; letter-spacing: .14em; }
+.kyle-canvas-back { padding: 0; border: 0; color: var(--muted); background: transparent; font-size: .76rem; cursor: pointer; }
+.kyle-canvas-back:hover { color: var(--text); }
+.kyle-canvas-query { max-width: 720px; margin-bottom: 16px; color: var(--muted); font-size: .85rem; line-height: 1.55; }
+.kyle-canvas-thinking { min-height: 260px; display: flex; align-items: center; gap: 9px; }
+.kyle-canvas-thinking > span { width: 8px; height: 8px; border-radius: 50%; background: var(--text); animation: canvasDot 1s ease-in-out infinite; }
+.kyle-canvas-thinking > span:nth-child(2) { animation-delay: 120ms; }
+.kyle-canvas-thinking > span:nth-child(3) { animation-delay: 240ms; }
+.kyle-canvas-thinking small { margin-left: 8px; color: var(--muted); font-size: .82rem; }
+.kyle-canvas-answer > h2 { max-width: 900px; margin: 0; font-family: "Space Grotesk",sans-serif; font-size: clamp(2.2rem,4.2vw,4.6rem); line-height: .98; letter-spacing: -.045em; font-weight: 600; }
+.kyle-canvas-lede { max-width: 820px; margin-top: 22px; color: var(--soft); font-size: clamp(1rem,1.45vw,1.24rem); line-height: 1.7; }
+.kyle-canvas-highlights { display: flex; flex-wrap: wrap; gap: 30px; margin-top: 34px; }
+.kyle-canvas-highlight { display: grid; gap: 3px; min-width: 100px; transition: opacity 360ms ease, transform 440ms cubic-bezier(.22,1,.36,1); }
+.kyle-canvas-highlight strong { font-family: "Space Grotesk",sans-serif; font-size: clamp(1.65rem,2.6vw,2.6rem); line-height: 1; color: var(--text); }
+.kyle-canvas-highlight:nth-child(3n+1) strong { color: #6c63ff; }
+.kyle-canvas-highlight:nth-child(3n+2) strong { color: #d97706; }
+.kyle-canvas-highlight:nth-child(3n) strong { color: #16825d; }
+[data-theme="dark"] .kyle-canvas-highlight:nth-child(3n+1) strong { color: #a9a4ff; }
+[data-theme="dark"] .kyle-canvas-highlight:nth-child(3n+2) strong { color: #f1b25b; }
+[data-theme="dark"] .kyle-canvas-highlight:nth-child(3n) strong { color: #62caa3; }
+.kyle-canvas-highlight span { color: var(--muted); font-size: .76rem; }
+.kyle-canvas-sections { display: grid; gap: 40px; margin-top: 48px; }
+.kyle-canvas-section { max-width: 900px; transition: opacity 420ms ease, transform 520ms cubic-bezier(.22,1,.36,1); }
+.kyle-canvas-highlight.is-pending, .kyle-canvas-section.is-pending { opacity: 0; transform: translateY(14px); }
+.kyle-canvas-section h3 { margin: 0 0 16px; font-family: "Space Grotesk",sans-serif; font-size: clamp(1.15rem,1.9vw,1.6rem); font-weight: 600; }
+.kyle-canvas-list { display: grid; gap: 18px; }
+.kyle-canvas-item { display: grid; gap: 5px; max-width: 860px; }
+.kyle-canvas-item > strong, .kyle-canvas-link { width: fit-content; padding: 0; border: 0; color: var(--text); background: transparent; font: inherit; font-size: .96rem; font-weight: 700; text-align: left; }
+.kyle-canvas-link { cursor: pointer; text-decoration: underline; text-decoration-color: rgba(108,99,255,.35); text-underline-offset: 4px; }
+.kyle-canvas-link:hover { text-decoration-color: currentColor; }
+.kyle-canvas-item p { max-width: 790px; color: var(--soft); font-size: .9rem; line-height: 1.6; }
+.kyle-canvas-item small { color: var(--muted); font-size: .74rem; }
+.kyle-canvas.is-error .kyle-canvas-answer > h2 { color: #b42318; }
+
+.kyle-canvas-composer-host { width: min(860px,100%); margin-top: 34px; }
+.kyle-action-panel.kyle-overview-inline-composer {
+  position: relative !important; inset: auto !important; left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
+  width: 100% !important; max-height: none !important; margin: 0 !important; overflow: visible !important; border: 0 !important;
+  border-radius: 0 !important; background: transparent !important; box-shadow: none !important; transform: none !important;
+  opacity: 1 !important; pointer-events: auto !important; z-index: auto !important;
+}
+.kyle-overview-inline-composer .kyle-panel-header { padding: 0 0 22px; border: 0; background: transparent; cursor: default; }
+.kyle-overview-inline-composer .kyle-panel-title { color: var(--text); font-family: "Space Grotesk",sans-serif; font-size: clamp(1.7rem,2.7vw,2.6rem); }
+.kyle-overview-inline-composer .kyle-panel-subtitle { margin-top: 6px; color: var(--muted); font-size: .84rem; }
+.kyle-overview-inline-composer #kylePanelMinimizeBtn { display: none; }
+.kyle-overview-inline-composer .kyle-panel-close-btn { color: var(--muted); background: transparent; border-color: transparent; }
+.kyle-overview-inline-composer .kyle-panel-body { max-height: none; padding: 0; overflow: visible; }
+.kyle-overview-inline-composer .kyle-composer-view { gap: 18px; }
+.kyle-overview-inline-composer .kyle-composer-label { color: var(--muted); }
+.kyle-overview-inline-composer .kyle-composer-input, .kyle-overview-inline-composer .kyle-composer-textarea {
+  padding: 10px 0; color: var(--text); background: transparent; border: 0; border-bottom: 1px solid var(--line-strong); border-radius: 0;
+}
+.kyle-overview-inline-composer .kyle-composer-textarea { min-height: 170px; max-height: none; resize: none; }
+.kyle-overview-inline-composer .kyle-composer-loading { min-height: 110px; color: var(--muted); }
+.kyle-overview-inline-composer .kyle-composer-loading i { color: var(--text); }
+.kyle-overview-inline-composer .kyle-panel-footer { max-height: none; margin-top: 18px; padding: 14px 0 0; border: 0; background: transparent; }
+.kyle-overview-inline-composer .kyle-panel-status { color: var(--muted); }
+.kyle-overview-inline-composer .kyle-btn.secondary-btn { color: var(--text); background: transparent; border: 0; }
+.kyle-overview-inline-composer .kyle-btn.primary-btn { color: var(--surface-strong); background: var(--text); }
+body > .kyle-action-panel:not(.kyle-overview-inline-composer) { position: fixed !important; }
+
+@keyframes overviewBreath { from { opacity: .58; transform: translateY(2px); } to { opacity: .82; transform: translateY(0); } }
+@keyframes overviewShimmer { to { transform: translateX(340%); } }
+@keyframes overviewContentArrive { from { opacity: 0; transform: translateY(14px) scale(.994); filter: blur(3px); } to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); } }
+@keyframes canvasDot { 0%,80%,100% { opacity: .24; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-4px); } }
+
+@media (max-width: 980px) {
+  #tab-overview .overview-kyle { left: 76px; }
+  #tab-overview #kyleOverviewHome { width: min(760px,calc(100vw - 116px)); }
+}
+@media (max-width: 680px) {
+  #tab-overview { padding-bottom: 100px; }
+  #tab-overview .overview-kyle { left: 0; right: 0; bottom: 14px; padding: 0 12px; }
+  #tab-overview #kyleOverviewHome { width: 100%; }
+  .kyle-canvas { padding-top: 22px; }
+  .kyle-canvas-answer > h2 { font-size: clamp(2rem,11vw,3.2rem); }
+  .kyle-canvas-highlights { gap: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview-arrive, #tab-overview.is-data-loading #overviewDataSurface, .kyle-canvas-thinking > span { animation: none !important; }
+}
+
+
+/* MAILMATE_OVERVIEW_DOCK_V2_REPAIRED */
+
+/* Sidebar already communicates that the user is on Overview. */
+.main.is-overview-page .topbar {
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+}
+
+.main.is-overview-page .topbar > div:first-child {
+  display: none !important;
+}
+
+.main.is-overview-page .topbar .profile {
+  position: fixed;
+  top: 18px;
+  right: 24px;
+  z-index: 1450;
+}
+
+.main.is-overview-page #tab-overview {
+  padding-top: 0;
+}
+
+/* The original Overview Kyle section becomes only a source location. */
+#tab-overview .overview-kyle {
+  display: none !important;
+}
+
+/* kyleOverviewHome is now portaled directly under body.
+   This makes the bar genuinely browser-viewport-fixed. */
+body > #kyleOverviewHome {
+  position: fixed !important;
+  left: 216px !important;
+  right: 0 !important;
+  bottom: max(18px, env(safe-area-inset-bottom)) !important;
+  top: auto !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 58px;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 26px;
+  z-index: 1550;
+  pointer-events: none;
+  transform: none !important;
+  filter: none !important;
+}
+
+body > #kyleOverviewHome.is-active {
+  display: flex;
+}
+
+body > #kyleOverviewHome > .kyle-overview-mount {
+  width: min(780px, calc(100vw - 292px)) !important;
+  max-width: 780px;
+  pointer-events: auto;
+}
+
+body > #kyleOverviewHome .kyle-shell {
+  margin: 0 !important;
+}
+
+.main.is-overview-page #tab-overview .overview-brief {
+  padding-top: clamp(26px, 6vh, 72px);
+}
+
+.main.is-overview-page #tab-overview.kyle-canvas-active .kyle-canvas {
+  padding-top: clamp(22px, 4vh, 52px);
+}
+
+@media (max-width: 980px) {
+  body > #kyleOverviewHome {
+    left: 76px !important;
+    padding: 0 18px;
+  }
+
+  body > #kyleOverviewHome > .kyle-overview-mount {
+    width: min(760px, calc(100vw - 116px)) !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .main.is-overview-page .topbar .profile {
+    top: 10px;
+    right: 12px;
+  }
+
+  body > #kyleOverviewHome {
+    left: 0 !important;
+    right: 0 !important;
+    bottom: max(12px, env(safe-area-inset-bottom)) !important;
+    padding: 0 12px;
+  }
+
+  body > #kyleOverviewHome > .kyle-overview-mount {
+    width: 100% !important;
+    max-width: none;
+  }
+}
+
+
+/* MAILMATE_NO_REDUNDANT_PAGE_HEADINGS_V1 */
+
+/* The sidebar already communicates the active destination.
+   Remove duplicated page eyebrow/title/subtitle chrome everywhere. */
+.topbar {
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+  position: relative;
+}
+
+/* First child contains eyebrow + h1 + subtitle. */
+.topbar > div:first-child {
+  display: none !important;
+}
+
+/* Profile remains available without consuming vertical layout space. */
+.topbar .profile {
+  position: fixed !important;
+  top: 18px !important;
+  right: 24px !important;
+  z-index: 1450 !important;
+}
+
+/* Reclaim the space previously reserved for page headings. */
+.tab-panel {
+  padding-top: 8px !important;
+}
+
+/* Dense pages can begin essentially at the top of the content column. */
+#tab-inbox,
+#tab-work,
+#tab-calendar,
+#tab-automations,
+#tab-status,
+#tab-integrations,
+#tab-settings {
+  padding-top: 6px !important;
+}
+
+/* Overview already has its own canvas/brief spacing rules. */
+#tab-overview {
+  padding-top: 0 !important;
+}
+
+/* Make toolbars sit naturally near the top after removing titles. */
+.inbox-toolbar,
+.page-action-row,
+.calendar-toolbar {
+  margin-top: 0 !important;
+}
+
+/* Main content keeps enough top inset for the profile button but no
+   full-page title block. */
+.main {
+  padding-top: 18px !important;
+}
+
+@media (max-width: 980px) {
+  .topbar .profile {
+    top: 14px !important;
+    right: 16px !important;
+  }
+
+  .main {
+    padding-top: 14px !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .topbar .profile {
+    top: 10px !important;
+    right: 12px !important;
+  }
+
+  .main {
+    padding-top: 10px !important;
+  }
+
+  .tab-panel {
+    padding-top: 4px !important;
+  }
+}
+
+
+/* MAILMATE_FLOATING_KYLE_GEOMETRY_V1 */
+
+/* ---------- Floating Kyle: stable bottom anchor ---------- */
+.kyle-floating-mount {
+  pointer-events: none;
+}
+
+.kyle-floating-mount .kyle-widget {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+/* The +/- control must not change widget height. It was participating in
+   layout and could push the orb upward when collapsing/restoring history. */
+.kyle-floating-mount .kyle-history-toggle {
+  position: absolute !important;
+  right: 48px;
+  bottom: 72px;
+  z-index: 5;
+  margin: 0 !important;
+  transform-origin: center;
+  transition:
+    opacity 180ms ease,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 160ms ease;
+}
+
+.kyle-floating-mount .kyle-widget.is-layout-animating .kyle-history-toggle {
+  transform: scale(0.92);
+}
+
+/* History opens above the bottom control surface. Never display:none here:
+   max-height + opacity are required for an actual transition. */
+.kyle-floating-mount .kyle-transcript {
+  display: block !important;
+  width: min(430px, calc(100vw - 54px));
+  max-height: 310px;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transform-origin: bottom right;
+  overflow-y: auto;
+  overflow-x: hidden;
+  pointer-events: auto;
+  transition:
+    max-height 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 210ms ease,
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 280ms ease,
+    padding 280ms ease;
+  will-change: max-height, opacity, transform;
+}
+
+.kyle-floating-mount .kyle-widget.is-conversation-minimized .kyle-transcript {
+  display: block !important;
+  max-height: 0 !important;
+  min-height: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  opacity: 0;
+  transform: translateY(14px) scale(0.985);
+  overflow: hidden !important;
+  pointer-events: none;
+}
+
+/* Caption follows the same visual direction instead of popping. */
+.kyle-floating-mount .kyle-caption-bubble {
+  transform-origin: bottom right;
+  transition:
+    opacity 200ms ease,
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-height 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.kyle-floating-mount .kyle-widget.is-conversation-minimized .kyle-caption-bubble {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(10px) scale(0.985);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Smoother compact bar/orb expansion. */
+.kyle-floating-mount .kyle-shell {
+  transform-origin: right center;
+  transition:
+    width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 220ms ease,
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.kyle-floating-mount .kyle-orb {
+  transition:
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+/* ---------- Hide scrollbar chrome while preserving wheel/touch scroll ---------- */
+.week-calendar,
+.week-calendar-shell,
+.calendar-all-day,
+.email-list,
+.email-detail,
+.work-history,
+.work-run,
+.kyle-transcript {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.week-calendar::-webkit-scrollbar,
+.week-calendar-shell::-webkit-scrollbar,
+.calendar-all-day::-webkit-scrollbar,
+.email-list::-webkit-scrollbar,
+.email-detail::-webkit-scrollbar,
+.work-history::-webkit-scrollbar,
+.work-run::-webkit-scrollbar,
+.kyle-transcript::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+/* ---------- Page geometry after removing redundant page titles ---------- */
+
+/* Keep a compact utility lane for the fixed profile. This is much smaller
+   than the deleted page heading, but prevents page controls from colliding. */
+.tab-panel:not(#tab-overview) {
+  padding-top: 50px !important;
+}
+
+/* Overview is a canvas and owns its own vertical rhythm. */
+#tab-overview {
+  padding-top: 0 !important;
+}
+
+/* Reclaim useful height now that the title block is gone. */
+#tab-inbox .inbox-workspace {
+  height: calc(100vh - 126px) !important;
+  min-height: 520px !important;
+}
+
+#tab-calendar .calendar-toolbar,
+#tab-inbox .inbox-toolbar,
+#tab-automations .page-action-row {
+  min-height: 42px;
+  margin-top: 0 !important;
+  margin-bottom: 12px !important;
+}
+
+#tab-calendar .calendar-toolbar {
+  align-items: center;
+}
+
+#tab-calendar .calendar-actions {
+  gap: 10px;
+}
+
+/* Let the calendar use the vertical room recovered from the title. */
+#tab-calendar .week-calendar-shell {
+  height: calc(100vh - 176px);
+  min-height: 540px;
+}
+
+/* Work/Status/Settings start on the same baseline as Inbox/Calendar. */
+#tab-work .work-layout,
+#tab-status .status-grid,
+#tab-integrations > .status-section:first-child,
+#tab-settings > .settings-list {
+  margin-top: 0 !important;
+}
+
+/* Profile sits in the utility lane rather than on top of page controls. */
+.topbar .profile {
+  top: 14px !important;
+  right: 24px !important;
+}
+
+/* The floating assistant should not sit directly over a right-edge scrollbar. */
+.kyle-floating-mount {
+  margin-right: 0;
+}
+
+@media (max-width: 980px) {
+  .tab-panel:not(#tab-overview) {
+    padding-top: 48px !important;
+  }
+
+  #tab-inbox .inbox-workspace {
+    height: calc(100vh - 122px) !important;
+  }
+
+  #tab-calendar .week-calendar-shell {
+    height: calc(100vh - 170px);
+  }
+}
+
+@media (max-width: 680px) {
+  .tab-panel:not(#tab-overview) {
+    padding-top: 46px !important;
+  }
+
+  #tab-inbox .inbox-workspace,
+  #tab-calendar .week-calendar-shell {
+    height: auto !important;
+    min-height: 520px !important;
+  }
+
+  .kyle-floating-mount .kyle-transcript {
+    width: min(390px, calc(100vw - 28px));
+    max-height: 42vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kyle-floating-mount .kyle-transcript,
+  .kyle-floating-mount .kyle-caption-bubble,
+  .kyle-floating-mount .kyle-shell,
+  .kyle-floating-mount .kyle-history-toggle {
+    transition-duration: 1ms !important;
+  }
+}
+
+
+/* MAILMATE_CANVAS_SCOPE_FORMAT_V2 */
+
+.kyle-canvas-sections {
+  margin-top: 52px !important;
+  gap: 50px !important;
+}
+
+.kyle-canvas-section {
+  width: min(850px, 100%);
+  max-width: 850px !important;
+}
+
+.kyle-canvas-section h3 {
+  margin: 0 0 22px !important;
+  font-size: clamp(1.15rem, 1.6vw, 1.45rem) !important;
+  letter-spacing: -0.025em;
+}
+
+.kyle-canvas-list {
+  gap: 30px !important;
+}
+
+.kyle-canvas-item {
+  position: relative;
+  max-width: 790px !important;
+  padding-left: 42px;
+  gap: 6px !important;
+}
+
+.kyle-canvas-item::before {
+  content: "â€¢";
+  position: absolute;
+  left: 2px;
+  top: -1px;
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.kyle-canvas-item > strong,
+.kyle-canvas-link {
+  color: var(--text) !important;
+  font-family: "Space Grotesk", sans-serif !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  line-height: 1.38;
+  letter-spacing: -0.012em;
+  text-decoration: none !important;
+}
+
+.kyle-canvas-link:hover {
+  text-decoration: underline !important;
+  text-underline-offset: 4px !important;
+}
+
+.kyle-canvas-item p {
+  max-width: 740px !important;
+  color: var(--soft) !important;
+  font-size: 0.9rem !important;
+  line-height: 1.66 !important;
+}
+
+.kyle-canvas-item small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted) !important;
+  font-size: 0.69rem !important;
+  line-height: 1.45;
+}
+
+@media (max-width: 680px) {
+  .kyle-canvas-item {
+    padding-left: 28px;
+  }
+}

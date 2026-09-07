@@ -273,7 +273,7 @@
 
     function setPresentationMode(mode, options = {}) {
       const next = mode === 'overview' ? 'overview' : 'floating';
-      const effective = activeDraft ? 'floating' : next;
+      const effective = next;
       const target = effective === 'overview' ? document.getElementById('kyleOverviewHome') : document.body;
       if (!target || (presentationMode === effective && mount.parentElement === target)) return;
       const canMeasure = typeof form.getBoundingClientRect === 'function';
@@ -291,6 +291,8 @@
         ], { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
       }
       mount.dataset.presentation = effective;
+      window.KyleCanvas?.onPresentationMode?.(effective);
+      window.KyleCanvas?.placeComposer?.();
     }
 
     function selectSurfaceView(mode) {
@@ -346,6 +348,7 @@
 
     function dockActionPanel() {
       if (!panel) return;
+      if (window.KyleCanvas?.isInlineComposer?.(panel)) return;
       scheduleFrame(() => {
         if (panel._dragController?.resnap) {
           panel._dragController.resnap(false);
@@ -360,6 +363,7 @@
 
     function ensureComposerVisible() {
       if (!panel) return false;
+      window.KyleCanvas?.placeComposer?.();
       panel.classList.add('is-open');
       panel.classList.remove('is-minimized');
       panel.setAttribute('aria-hidden', 'false');
@@ -394,6 +398,7 @@
       if (panel) {
         panel.classList.add('is-open');
         panel.setAttribute('aria-hidden', 'false');
+        window.KyleCanvas?.placeComposer?.();
         dockActionPanel();
       }
     }
@@ -410,6 +415,7 @@
       stateBeforeMinimize = 'idle';
       panel?.classList.remove('is-minimized');
       currentPanelMode = 'compact';
+      window.KyleCanvas?.onComposerClosed?.();
     }
 
     function setComposerState(next, message = '') {
@@ -424,7 +430,9 @@
 
     function openPreparingComposer(mode = 'compose') {
       activeDraft = { recipient: '', to: '', subject: '', body: '', thread_id: null, in_reply_to: null, operation_id: null, mode };
-      setPresentationMode('floating', { immediate: true });
+      const page = window.MailmateContext?.snapshot?.().page || presentationMode;
+      window.KyleCanvas?.beginComposer?.(mode);
+      setPresentationMode(page === 'overview' ? 'overview' : 'floating', { immediate: true });
       openSurface('email_review', mode === 'reply' ? 'Preparing reply' : 'Preparing email', 'Kyle is working');
       ensureComposerVisible();
       subjectInput.value = '';
@@ -626,7 +634,9 @@
         operation_id: draft.operation_id || null,
         mode: mode
       };
-      setPresentationMode('floating', { immediate: true });
+      const page = window.MailmateContext?.snapshot?.().page || presentationMode;
+      window.KyleCanvas?.beginComposer?.(mode);
+      setPresentationMode(page === 'overview' ? 'overview' : 'floating', { immediate: true });
       const displayName = (activeDraft.recipient || activeDraft.to || '').split('<')[0].trim() || activeDraft.to || 'Contact';
       openSurface('email_review', mode === 'reply' ? `Reply to ${displayName}` : `Email ${displayName}`, activeDraft.to || activeDraft.recipient || '');
       ensureComposerVisible();
@@ -840,6 +850,7 @@
     }
 
     function renderActivityHud(jobOrProgress) {
+      if (window.KyleCanvas?.consumeActivity?.(jobOrProgress)) return;
       if (activeDraft && currentPanelMode === 'email_review') {
         const status = jobOrProgress?.status || jobOrProgress?.state || jobOrProgress?.title || '';
         if (status) setSubtitle(status);
@@ -921,17 +932,25 @@
     panelMinimizeBtn?.addEventListener?.('click', () => panel.classList.contains('is-minimized') ? restoreComposer() : minimizeComposer());
     panel?.querySelector?.('.kyle-panel-header')?.addEventListener?.('dblclick', restoreComposer);
     historyToggle?.addEventListener?.('click', () => {
+      widget.classList.add('is-layout-animating');
       const minimized = widget.classList.toggle('is-conversation-minimized');
       historyToggle.innerHTML = minimized ? '<i class="fas fa-plus"></i>' : '<i class="fas fa-minus"></i>';
       historyToggle.setAttribute('aria-label', minimized ? 'Restore Kyle conversation' : 'Minimize Kyle conversation');
       historyToggle.title = minimized ? 'Restore conversation' : 'Minimize conversation';
 
+      // First pass follows the visual transition. The second pass is a precise
+      // final bottom-corner correction after max-height/opacity animation ends.
       scheduleFrame(() => {
-        window.dispatchEvent(new CustomEvent('kyle:layout-changed'));
+        window.dispatchEvent(new CustomEvent('kyle:layout-changed', {
+          detail: { animate: true, reason: 'conversation-toggle' }
+        }));
       });
       setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('kyle:layout-changed'));
-      }, 340);
+        window.dispatchEvent(new CustomEvent('kyle:layout-changed', {
+          detail: { animate: false, reason: 'conversation-toggle-settled' }
+        }));
+        widget.classList.remove('is-layout-animating');
+      }, 360);
     });
     panelMicBtn?.addEventListener?.('click', () => boundHandlers.onMute?.());
     subjectInput?.addEventListener?.('input', () => {
@@ -1289,4 +1308,3 @@
 
   window.KyleUi = { createKyleUi };
 })();
-

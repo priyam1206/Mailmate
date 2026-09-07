@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=39">
+  <link rel="stylesheet" href="./dashboard.css?v=45">
   <link rel="stylesheet" href="/remote-worker-ui.css?v=8">
   <link rel="stylesheet" href="/compute-ui-fix.css?v=1">
   <link rel="stylesheet" href="./mailmate-master-polish.css?v=2">
@@ -39,7 +39,7 @@
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main is-overview-page">
       <header class="topbar">
         <div>
           <p class="eyebrow">Gmail intelligence</p>
@@ -62,6 +62,27 @@
             <div id="kyleOverviewHome"></div>
             <div class="kyle-suggestions" id="kyleSuggestions" aria-label="Suggested questions"></div>
           </section>
+          <section class="kyle-canvas" id="kyleCanvas" hidden aria-live="polite">
+            <div class="kyle-canvas-stage" id="kyleCanvasStage">
+              <div class="kyle-canvas-topline">
+                <span class="kyle-canvas-kicker">KYLE</span>
+                <button class="kyle-canvas-back" id="kyleCanvasBack" type="button">Back to overview</button>
+              </div>
+              <p class="kyle-canvas-query" id="kyleCanvasQuery"></p>
+              <div class="kyle-canvas-thinking" id="kyleCanvasThinking" hidden>
+                <span></span><span></span><span></span>
+                <small id="kyleCanvasStatus">Thinking through your inbox...</small>
+              </div>
+              <div class="kyle-canvas-answer" id="kyleCanvasAnswer" hidden>
+                <h2 id="kyleCanvasTitle"></h2>
+                <p class="kyle-canvas-lede" id="kyleCanvasLede"></p>
+                <div class="kyle-canvas-highlights" id="kyleCanvasHighlights"></div>
+                <div class="kyle-canvas-sections" id="kyleCanvasSections"></div>
+              </div>
+              <div class="kyle-canvas-composer-host" id="kyleCanvasComposerHost"></div>
+            </div>
+          </section>
+          <div class="overview-data-surface" id="overviewDataSurface">
           <div class="metric-strip" aria-label="Inbox summary">
             <button type="button" data-overview-target="attention"><strong id="importantCount">--</strong><span>Needs attention</span></button>
             <button type="button" data-overview-target="work"><strong id="actionCount">--</strong><span>Active work</span></button>
@@ -86,6 +107,7 @@
             <div class="section-heading"><p class="section-label">Waiting on others</p><span id="waitingBadge">--</span></div>
             <ul class="attention-list" id="waitingList"><li><strong>Nothing you're waiting on.</strong></li></ul>
           </section>
+          </div><!-- /overviewDataSurface -->
         </div>
       </section>
 
@@ -183,7 +205,7 @@
                 <div class="work-reply-box" id="workReplyBox">
                   <label class="reply-label" for="workReplyText">Reply Draft</label>
                   <textarea class="work-reply-preview" id="workReplyText" rows="6" placeholder="Prepared reply will appear here..."></textarea>
-                  
+
                   <!-- Primary Action Bar directly below reply -->
                   <div class="work-action-row">
                     <div class="left-actions">
@@ -366,7 +388,7 @@
                 </div>
                 <span class="badge-tag" id="autopilotStatusTag" style="padding:4px 8px;font-size:0.75rem;background:rgba(255,255,255,0.08);border-radius:6px;">Safe replies only</span>
               </div>
-              
+
               <div class="settings-autopilot-grid" style="display:flex;flex-direction:column;gap:12px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
                   <div>
@@ -503,12 +525,12 @@
   <script src="./kyle-executor.js?v=23"></script>
   <script src="./kyle-planner.js?v=21"></script>
   <script src="./kyle-audio.js?v=30"></script>
-  <script src="./kyle-ui.js?v=40"></script>
-  <script src="/kyle-drag.js?v=5"></script>
-  <script src="./kyle.js?v=37"></script>
+  <script src="./kyle-canvas.js?v=4"></script>
+  <script src="./kyle-ui.js?v=43"></script>
+  <script src="/kyle-drag.js?v=6"></script>
+  <script src="./kyle.js?v=38"></script>
   <script src="./calendar-conflicts.js?v=21"></script>
-  <script src="./dashboard.js?v=38"></script>
+  <script src="./dashboard.js?v=40"></script>
   <script src="/remote-worker-ui.js?v=5"></script>
 </body>
 </html>
-

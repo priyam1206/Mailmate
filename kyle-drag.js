@@ -8,7 +8,7 @@
  * are made draggable.
  */
 (function () {
-  const SNAP_MARGIN = 24;
+  const SNAP_MARGIN = 30;
   const SNAP_THRESHOLD = 80;
   const SPRING_DURATION = 380;
 
@@ -198,18 +198,19 @@
     // Re-anchor floating surfaces after transcript/composer size changes.
     if (!window._kyleLayoutResnapBound) {
       window._kyleLayoutResnapBound = true;
-      window.addEventListener('kyle:layout-changed', function () {
+      window.addEventListener('kyle:layout-changed', function (event) {
         requestAnimationFrame(function () {
+          var animate = event?.detail?.animate !== false;
           var mount = document.getElementById('kyleMount');
           if (mount && !isInOverviewMount(mount) && mount._dragController) {
             mount.style.transform = '';
             mount.classList.remove('kyle-traveling');
-            mount._dragController.resnap(false);
+            mount._dragController.resnap(animate);
           }
 
           var panel = document.querySelector('.kyle-action-panel.is-open');
           if (panel && panel._dragController) {
-            panel._dragController.resnap(false);
+            panel._dragController.resnap(animate);
           }
         });
       });
@@ -232,4 +233,3 @@
 
   window.KyleDrag = { init: init, makeDraggable: makeDraggable };
 })();
-
