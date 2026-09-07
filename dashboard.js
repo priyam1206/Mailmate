@@ -2900,6 +2900,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return [...contacts.values()].filter(c => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q));
     },
     openEmail: openEmail,
-    refresh: () => loadDashboard(true)
+    refresh: () => loadInbox(true)
   };
 });

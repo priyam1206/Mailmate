@@ -19,15 +19,15 @@ def test_automation_modal_has_backdrop_and_complete_form():
 def test_kyle_composer_assets_are_cache_bumped():
     html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
-    assert 'dashboard.css?v=45' in html
+    assert 'dashboard.css?v=46' in html
     assert 'mailmate-master-polish.css?v=2' in html
-    assert 'kyle-ui.js?v=43' in html
+    assert 'kyle-ui.js?v=44' in html
     assert 'kyle.js?v=38' in html
 
 
 def test_inbox_hides_unattached_work_and_display_only_noise():
     js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
-    assert 'dashboard.js?v=40' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    assert 'dashboard.js?v=41' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
     assert 'Safe for local AI overview' not in js
     assert 'Kyle will prepare a Work item for this email on the next sync' not in js
     assert "if (work.state === 'eligible') return '';" in js
@@ -90,7 +90,7 @@ def test_overview_is_kyle_canvas_surface():
     assert 'id="kyleCanvas"' in html
     assert 'id="overviewDataSurface"' in html
     assert 'id="kyleCanvasComposerHost"' in html
-    assert 'kyle-canvas.js?v=4' in html
+    assert 'kyle-canvas.js?v=5' in html
     assert 'MAILMATE_OVERVIEW_CANVAS_V1' in css
     assert 'kyle-overview-inline-composer' in css
     assert 'window.KyleCanvas?.beginComposer?.(mode)' in ui
@@ -149,20 +149,21 @@ def test_sidebar_replaces_redundant_page_headings():
     assert '.tab-panel' in css
 
 
-def test_floating_kyle_stays_bottom_anchored_and_pages_have_utility_lane():
+
+def test_floating_kyle_is_fixed_persistent_and_not_draggable():
     css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
     ui = (ROOT / 'kyle-ui.js').read_text(encoding='utf-8')
     drag = (ROOT / 'kyle-drag.js').read_text(encoding='utf-8')
 
-    assert 'MAILMATE_FLOATING_KYLE_GEOMETRY_V1' in css
-    assert '.kyle-floating-mount .kyle-history-toggle' in css
-    assert 'position: absolute !important' in css
-    assert '.kyle-widget.is-conversation-minimized .kyle-transcript' in css
-    assert 'max-height: 0 !important' in css
-    assert '.tab-panel:not(#tab-overview)' in css
-    assert "detail: { animate: true, reason: 'conversation-toggle' }" in ui
-    assert "event?.detail?.animate !== false" in drag
-    assert '.resnap(animate)' in drag
+    assert 'MAILMATE_KYLE_STABLE_SURFACES_V2' in css
+    assert 'body > #kyleMount.kyle-floating-mount' in css
+    assert 'bottom: 22px !important' in css
+    assert 'width: 420px !important' in css
+    assert 'Kyle is a fixed dock outside Overview' in ui
+    assert "addEventListener('pointerdown'" not in drag
+    assert 'NO pointerdown' in drag
+    assert 'dockMount' in drag
+    assert 'dockPanel' in drag
 
 
 def test_kyle_canvas_has_runtime_safe_frame_scheduler():
@@ -195,3 +196,39 @@ def test_specific_canvas_requests_stay_scoped():
     assert "return 'important_mail'" in canvas
     assert 'STRICT CANVAS SCOPE:' in planner
     assert 'exactly ONE email' in planner
+
+
+def test_confirmed_email_send_cannot_fail_on_inbox_refresh():
+    dashboard = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
+    ui = (ROOT / 'kyle-ui.js').read_text(encoding='utf-8')
+
+    assert 'refresh: () => loadInbox(true)' in dashboard
+    assert 'refresh: () => loadDashboard(true)' not in dashboard
+    assert 'Post-send inbox refresh failed' in ui
+    assert 'Promise.resolve(refreshResult).catch' in ui
+
+
+def test_canvas_has_user_prompt_bubble_and_text_cleanup():
+    canvas = (ROOT / 'kyle-canvas.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+
+    assert 'function cleanCanvasText' in canvas
+    assert 'normalized.title = cleanCanvasText' in canvas
+    assert '.kyle-canvas-query' in css
+    assert 'align-self: flex-end !important' in css
+    assert 'border-radius: 18px 18px 6px 18px !important' in css
+
+
+def test_kyle_prompt_has_microphone_button():
+    ui = (ROOT / 'kyle-ui.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+
+    assert 'class="kyle-prompt-mic"' in ui
+    assert "const promptMic = mount.querySelector('.kyle-prompt-mic')" in ui
+    assert "promptMic?.addEventListener('click'" in ui
+    assert '.kyle-prompt-mic' in css
+
+
+def test_open_action_panel_hides_transcript_overlap():
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+    assert 'body:has(> .kyle-action-panel.is-open)' in css

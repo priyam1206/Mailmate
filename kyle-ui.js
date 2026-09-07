@@ -83,6 +83,9 @@
 
           <form class="kyle-shell">
             <input class="prompt-input" type="text" autocomplete="off" placeholder="Ask Kyle anything..." aria-label="Ask Kyle">
+            <button class="kyle-prompt-mic" type="button" aria-label="Speak to Kyle" title="Speak to Kyle">
+              <i class="fas fa-microphone"></i>
+            </button>
             <button class="send-icon" type="submit" aria-label="Send to Kyle"><i class="fas fa-arrow-up"></i></button>
             <button class="kyle-orb" type="button" aria-label="Talk to Kyle">
               <span class="orb-visual" aria-hidden="true"><canvas class="orb-canvas" width="192" height="192"></canvas></span>
@@ -102,6 +105,7 @@
     const orb = mount.querySelector('.kyle-orb');
     const form = mount.querySelector('.kyle-shell');
     const input = mount.querySelector('.prompt-input');
+    const promptMic = mount.querySelector('.kyle-prompt-mic');
     const caption = mount.querySelector('.kyle-caption-bubble');
     const transcript = mount.querySelector('#kyleTranscript');
     const historyToggle = mount.querySelector('.kyle-history-toggle');
@@ -282,9 +286,24 @@
       mount.classList.toggle('kyle-overview-mount', effective === 'overview');
       mount.classList.toggle('kyle-floating-mount', effective === 'floating');
       target.appendChild(mount);
+
+      // Kyle is a fixed dock outside Overview. Never preserve magnetic-drag
+      // coordinates when moving between Overview and another section.
+      mount.style.left = '';
+      mount.style.top = '';
+      mount.style.right = '';
+      mount.style.bottom = '';
       mount.style.transform = '';
+      mount.style.transition = '';
+      mount.style.cursor = '';
+      mount.style.visibility = 'visible';
+      mount.style.opacity = '1';
+      if (typeof mount.removeAttribute === 'function') mount.removeAttribute('hidden');
+      else mount.hidden = false;
+
       const after = canMeasure ? form.getBoundingClientRect() : { left: 0, top: 0, width: 0 };
-      if (!options.immediate && typeof form.animate === 'function' && before.width && after.width) {
+      const animatePresentation = options.animate === true;
+      if (animatePresentation && !options.immediate && typeof form.animate === 'function' && before.width && after.width) {
         form.animate([
           { transform: `translate(${before.left - after.left}px, ${before.top - after.top}px) scaleX(${before.width / after.width})`, transformOrigin: 'right center', opacity: 0.9 },
           { transform: 'translate(0, 0) scaleX(1)', transformOrigin: 'right center', opacity: 1 }
@@ -824,7 +843,16 @@
 
         // Keep the sent composer visible until the user closes/minimizes it.
         panel.classList.remove('is-minimized');
-        window.AgentMail?.refresh?.();
+        // Refreshing the Inbox is post-send housekeeping. A refresh failure
+        // must NEVER turn a confirmed Gmail send into a failed-send UI state.
+        try {
+          const refreshResult = window.AgentMail?.refresh?.();
+          Promise.resolve(refreshResult).catch(refreshError => {
+            console.warn('[Kyle Composer] Post-send inbox refresh failed:', refreshError);
+          });
+        } catch (refreshError) {
+          console.warn('[Kyle Composer] Post-send inbox refresh failed:', refreshError);
+        }
 
         setTimeout(() => {
           sendBtn.innerHTML = '<i class="fas fa-check"></i> Sent';
@@ -993,6 +1021,11 @@
     function bind(handlers) {
       boundHandlers = handlers || {};
       orb.addEventListener('click', handlers.onOrb);
+      promptMic?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.onOrb?.(event);
+      });
       input.addEventListener('focus', () => handlers.onTextFocus?.());
       input.addEventListener('input', () => handlers.onTextFocus?.());
       form.addEventListener('submit', event => {

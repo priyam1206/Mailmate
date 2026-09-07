@@ -25,6 +25,19 @@
 
   const $ = id => document.getElementById(id);
 
+  function cleanCanvasText(value) {
+    return String(value ?? '')
+      .replace(/\u00c2\u00b7/g, '·')
+      .replace(/\u00e2\u20ac\u00a2/g, '•')
+      .replace(/\u00e2\u2020\u2019/g, '→')
+      .replace(/\u00e2\u20ac\u201c/g, '–')
+      .replace(/\u00e2\u20ac\u201d/g, '—')
+      .replace(/\u00c2(?=\s)/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+
   function els() {
     return {
       tab: $('tab-overview'),
@@ -252,7 +265,7 @@
             meta: [
               String(item.sender || email.sender || '').trim(),
               String(item.timestamp || item.date || email.timestamp || email.date || '').trim()
-            ].filter(Boolean).join(' Â· '),
+            ].filter(Boolean).join(' · '),
             reference: id
               ? { type: 'email', id, label: subject }
               : null
@@ -280,7 +293,7 @@
             meta: [
               String(email.sender || '').trim(),
               String(email.timestamp || email.date || '').trim()
-            ].filter(Boolean).join(' Â· '),
+            ].filter(Boolean).join(' · '),
             reference: id
               ? { type: 'email', id, label: subject }
               : null
@@ -322,7 +335,7 @@
           meta: [
             String(event.start || '').trim(),
             String(event.end || '').trim()
-          ].filter(Boolean).join(' â†’ '),
+          ].filter(Boolean).join(' → '),
           reference: event.id
             ? {
                 type: 'calendar-event',
@@ -561,12 +574,29 @@ function normalizeCanvasBase(canvas, reply, prompt) {
       // Preserve only what the model explicitly returned.
     }
 
-    normalized.sections = sections;
+    normalized.title = cleanCanvasText(normalized.title || '');
+    normalized.lede = cleanCanvasText(
+      String(normalized.lede || '')
+        .replace(/\s*I found \d+ useful items across \d+ sections below\.\s*$/i, '')
+    );
 
-    // Remove generic filler left by the old enrichment wrapper.
-    normalized.lede = String(normalized.lede || '')
-      .replace(/\s*I found \d+ useful items across \d+ sections below\.\s*$/i, '')
-      .trim();
+    normalized.highlights = (Array.isArray(normalized.highlights) ? normalized.highlights : [])
+      .map(item => ({
+        ...item,
+        value: cleanCanvasText(item?.value || ''),
+        label: cleanCanvasText(item?.label || '')
+      }));
+
+    normalized.sections = sections.map(section => ({
+      ...section,
+      heading: cleanCanvasText(section?.heading || ''),
+      items: (Array.isArray(section?.items) ? section.items : []).map(item => ({
+        ...item,
+        title: cleanCanvasText(item?.title || '').replace(/^[•·]\s*/, ''),
+        detail: cleanCanvasText(item?.detail || ''),
+        meta: cleanCanvasText(item?.meta || '')
+      }))
+    }));
 
     return normalized;
   }
