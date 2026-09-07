@@ -39,7 +39,6 @@ class WorkStateStore:
         url, secret, _ = self._config()
         headers = {
             'apikey': secret,
-            'Authorization': f'Bearer {secret}',
             'Content-Type': 'application/json',
         }
         prefer = kwargs.pop('prefer', None)
