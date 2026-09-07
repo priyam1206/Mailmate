@@ -912,18 +912,18 @@ document.addEventListener('DOMContentLoaded', () => {
   function getJobStatusInfo(status) {
     switch (status) {
       case 'waiting_approval':
-        return { label: 'Ready for review', cls: 'badge-waiting_approval' };
+        return { label: 'Review', cls: 'badge-waiting_approval' };
       case 'auto_send_countdown':
-        return { label: 'Auto-sending in 20s', cls: 'badge-auto_send_countdown' };
+        return { label: 'Auto-send', cls: 'badge-auto_send_countdown' };
       case 'needs_input':
         return { label: 'Needs input', cls: 'badge-needs_input' };
       case 'resolved_external':
-        return { label: 'Replied manually in Gmail', cls: 'badge-resolved_external' };
+        return { label: 'Replied', cls: 'badge-resolved_external' };
       case 'ignored_outbound':
-        return { label: 'Ignored sent mail', cls: 'badge-cancelled' };
+        return { label: 'Ignored', cls: 'badge-cancelled' };
       case 'sent':
       case 'approved_sent':
-        return { label: 'Sent via Gmail', cls: 'badge-sent' };
+        return { label: 'Sent', cls: 'badge-sent' };
       case 'completed':
         return { label: 'Complete', cls: 'badge-completed' };
       case 'cancelled':
@@ -940,9 +940,119 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'drafting_reply':
       case 'creating_files':
       case 'verifying':
-        return { label: 'Working...', cls: 'badge-working' };
+        return { label: 'Working', cls: 'badge-working' };
       default:
         return { label: 'Queued', cls: 'badge-queued' };
+    }
+  }
+
+
+  const WORK_TERMINAL_STATUSES = new Set([
+    'sent','approved_sent','resolved_external','ignored_outbound','completed','cancelled'
+  ]);
+  const WORK_ACTIVE_STATUSES = new Set([
+    'queued','reading_context','planning','researching','generating',
+    'drafting_reply','creating_files','verifying','preparing','working','analyzing'
+  ]);
+
+  function humanizeWorkStep(value) {
+    const raw=String(value||'').trim();
+    const key=raw.toLowerCase().replace(/\s+/g,'_');
+    const exact={
+      read_thread:'Reading email',reading_context:'Reading email',
+      extract_requirements:'Understanding request',planning:'Planning next steps',
+      research:'Researching',researching:'Researching',
+      prepare_reply:'Preparing response',drafting_reply:'Preparing response',
+      generating:'Preparing response',create_files:'Creating file',
+      creating_files:'Creating file',verify:'Checking result',verifying:'Checking result',
+      human_approval:'Ready for review',waiting_approval:'Ready for review'
+    };
+    if(exact[key]) return exact[key];
+    if(/read|context/.test(key)) return 'Reading email';
+    if(/require|understand|extract/.test(key)) return 'Understanding request';
+    if(/research|search/.test(key)) return 'Researching';
+    if(/draft|reply|generat|response/.test(key)) return 'Preparing response';
+    if(/file|artifact|document|pdf/.test(key)) return 'Creating file';
+    if(/verify|check/.test(key)) return 'Checking result';
+    const clean=raw.replace(/\[[^\]]+\]\s*/g,'').replace(/[._:/-]+/g,' ').replace(/\s+/g,' ').trim();
+    return clean ? clean[0].toUpperCase()+clean.slice(1) : 'Working';
+  }
+
+  function applyWorkInspectorState(job) {
+    const status=String(job?.status||'');
+    const automation=job?.type==='automation_run';
+    const terminal=WORK_TERMINAL_STATUSES.has(status);
+    const active=WORK_ACTIVE_STATUSES.has(status);
+    const ready=status==='waiting_approval'||status==='auto_send_countdown';
+    const needs=status==='needs_input', failed=status==='failed';
+    const stateName=terminal?'terminal':active?'working':ready?'review':needs?'needs-input':failed?'failed':'neutral';
+
+    const inspector=$('workRunInspector'), card=$('workPreparedCard'), tag=$('workPreparedTag');
+    const summary=$('workPreparedSummary'), policy=$('workPolicyBanner'), reply=$('workReplyBox');
+    const review=$('workReviewEmailBtn'), stepsBadge=$('workStepsStatusBadge');
+    if(inspector) inspector.dataset.workState=stateName;
+    if(card) card.dataset.workState=stateName;
+    if(review&&!automation){review.hidden=false;review.innerHTML='<i class="fas fa-envelope-open-text"></i> Open source email';}
+    if(stepsBadge) stepsBadge.textContent=terminal?'Complete':failed?'Failed':needs?'Needs input':active?'Working':ready?'Ready':'Current';
+
+    let retry=$('workRetryJobBtn');
+    if(!retry&&review?.parentElement){
+      retry=document.createElement('button'); retry.id='workRetryJobBtn'; retry.type='button';
+      retry.className='secondary-btn compact-btn work-retry-btn';
+      retry.innerHTML='<i class="fas fa-rotate-right"></i> Retry';
+      review.insertAdjacentElement('afterend',retry);
+    }
+    if(retry){
+      retry.hidden=!failed||automation;
+      retry.onclick=async()=>{retry.disabled=true;retry.innerHTML='<i class="fas fa-spinner fa-spin"></i> Retrying';
+        try{await fetch(`${API_BASE}/api/work/jobs/${encodeURIComponent(job.id)}/run`,{method:'POST'});await renderWork(state.data);}
+        catch(e){retry.disabled=false;retry.innerHTML='<i class="fas fa-rotate-right"></i> Retry';console.warn(e);}
+      };
+    }
+    if(automation) return;
+
+    if(terminal){
+      if(tag) tag.hidden=true;
+      if(reply) reply.style.display='none';
+      if(policy) policy.style.display='none';
+      if(summary){
+        if(status==='resolved_external') summary.textContent='✓ Replied manually in Gmail. Mailmate verified a newer outbound message in this thread.';
+        else if(status==='sent'||status==='approved_sent') summary.textContent='✓ Sent via Gmail. This Work item is resolved.';
+        else if(status==='ignored_outbound') summary.textContent='This sent message was ignored because Kyle Work only acts on inbound requests.';
+        else if(status==='cancelled') summary.textContent='This Work run was cancelled.';
+        else summary.textContent='✓ Work completed.';
+      }
+      return;
+    }
+    if(active){
+      const steps=Array.isArray(job.steps)?job.steps:[];
+      const cur=[...steps].reverse().find(x=>!['done','completed'].includes(String(x?.status||'').toLowerCase()))||steps[steps.length-1];
+      if(tag){tag.hidden=false;tag.innerHTML='<i class="fas fa-circle-notch fa-spin"></i> KYLE IS WORKING';}
+      if(summary) summary.textContent=humanizeWorkStep(cur?.label||cur?.type||cur?.action||job.current_step||'Working');
+      if(reply) reply.style.display='none';
+      if(policy) policy.style.display='none';
+      return;
+    }
+    if(ready){
+      if(tag){tag.hidden=false;tag.innerHTML='<i class="fas fa-sparkles"></i> READY FOR REVIEW';}
+      if(reply) reply.style.display='flex';
+      if(policy) policy.style.display=status==='auto_send_countdown'?'':'none';
+      return;
+    }
+    if(needs){
+      if(tag){tag.hidden=false;tag.innerHTML='<i class="fas fa-circle-exclamation"></i> NEEDS INPUT';}
+      if(reply) reply.style.display='none';
+      if(policy) policy.style.display='';
+      return;
+    }
+    if(failed){
+      if(tag){tag.hidden=false;tag.innerHTML='<i class="fas fa-triangle-exclamation"></i> FAILED';}
+      if(reply) reply.style.display='none';
+      if(summary) summary.textContent='Kyle could not finish this Work item. Existing progress is preserved.';
+      if(policy) policy.style.display='';
+      const pb=$('workPolicyBadge'),pc=$('workPolicyCategory'),pe=$('workPolicyExplanation');
+      if(pb) pb.textContent='ERROR'; if(pc) pc.textContent='Work could not finish';
+      if(pe) pe.textContent=job.output?.error||job.error||job.current_step||'Retry or open the source email.';
     }
   }
 
@@ -1006,15 +1116,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const { label: statusLabel, cls: statusClass } = getJobStatusInfo(job.status);
         const senderDisplay = (job.source?.sender || '').split('<')[0].trim();
         const latestStep = (job.steps && job.steps.length > 0) ? job.steps[job.steps.length - 1] : null;
-        const stepProgress = activeStatuses.has(job.status) && latestStep ? (latestStep.label || latestStep.thought || latestStep.action || '') : '';
-        const subtitle = stepProgress || ((senderDisplay ? senderDisplay + ' · ' : '') + (decodeHtml(job.source?.snippet) || decodeHtml(job.source?.subject) || 'Preparation work'));
+        const isHistory = historyStatuses.has(job.status);
+        const stepProgress = activeStatuses.has(job.status) && latestStep ? humanizeWorkStep(latestStep.label || latestStep.type || latestStep.action || '') : '';
+        const subtitle = isHistory ? [senderDisplay,'Gmail'].filter(Boolean).join(' · ') : (stepProgress || ((senderDisplay ? senderDisplay + ' · ' : '') + (decodeHtml(job.source?.subject) || 'Preparation work')));
+        const successHistory=['sent','approved_sent','resolved_external','completed'].includes(job.status);
+        const railIcon=successHistory?'<i class="fas fa-check"></i>':job.status==='failed'?'<i class="fas fa-triangle-exclamation"></i>':activeStatuses.has(job.status)?'<i class="fas fa-circle"></i>':'';
         return `
-          <article class="work-item work-state-${escapeHtml(statusClass.replace('badge-', ''))} ${activeStatuses.has(job.status) ? 'is-buffering' : ''} ${isSel ? 'active' : ''}" role="button" tabindex="0" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <article class="work-item work-state-${escapeHtml(statusClass.replace('badge-', ''))} ${activeStatuses.has(job.status) ? 'is-buffering' : ''} ${isHistory ? 'is-history' : ''} ${isSel ? 'active' : ''}" role="button" tabindex="0" data-job-id="${escapeHtml(job.id)}" data-kyle-type="work-item" data-kyle-id="${escapeHtml(job.id)}" data-kyle-label="${escapeHtml(displayTitle)}">
+            <div class="work-item-topline">
               <strong>${escapeHtml(displayTitle)}</strong>
-              <span class="run-status ${statusClass}" style="font-size:0.68rem;padding:2px 6px;">${escapeHtml(statusLabel)}</span>
+              <span class="work-rail-status ${statusClass}">${railIcon}<span>${escapeHtml(statusLabel)}</span></span>
             </div>
-            <p>${escapeHtml(subtitle)}</p>
+            <p class="work-item-meta">${escapeHtml(subtitle)}</p>
           </article>
         `;
       }).join('');
@@ -1429,7 +1542,7 @@ document.addEventListener('DOMContentLoaded', () => {
                        isMd ? '<i class="fas fa-file-lines" style="color:#0ea5e9;"></i>' :
                        isFile ? '<i class="fas fa-file"></i>' : '<i class="fas fa-envelope"></i>';
           const action = isFile
-            ? `<a href="/api/work/jobs/${encodeURIComponent(job.id)}/artifacts/${encodeURIComponent(art.name)}" target="_blank" class="secondary-btn" style="padding:4px 8px;font-size:0.75rem;"><i class="fas fa-download"></i> View / Download</a>`
+            ? `<a href="/api/work/jobs/${encodeURIComponent(job.id)}/artifacts/${encodeURIComponent(art.name)}" target="_blank" class="secondary-btn work-artifact-open"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>`
             : `<span style="color:var(--muted);font-size:0.75rem;">Synced with Gmail</span>`;
           return `
             <div class="work-artifact-item">
@@ -1466,7 +1579,7 @@ document.addEventListener('DOMContentLoaded', () => {
                      isErr ? '<i class="fas fa-triangle-exclamation" style="color:#ef4444;"></i>' :
                      '<i class="fas fa-circle-notch fa-spin"></i>';
 
-        const stepLabel = s.action ? `[${s.action}] ${s.thought || s.label || ''}` : (s.label || s.type);
+        const stepLabel = humanizeWorkStep(s.label || s.type || s.action || 'Working');
         let stepDetail = isDone ? 'Completed successfully' : isCountdown ? 'Auto-send countdown running' : isWaiting ? 'Awaiting human review' : 'In progress';
         if (s.observation) {
           if (s.observation.ok) {
@@ -1501,6 +1614,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sourceMeta) {
       sourceMeta.textContent = job.source?.deadline ? `Deadline: ${job.source.deadline}` : 'Inbound Gmail thread';
     }
+    applyWorkInspectorState(job);
   }
 
   // Autopilot Settings Management
