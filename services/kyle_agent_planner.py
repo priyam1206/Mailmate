@@ -33,19 +33,24 @@ def _minimize_context(context: Dict[str, Any]) -> Dict[str, Any]:
     mail = context.get("mail") or {}
     work = context.get("work") or {}
     calendar = context.get("calendar") or {}
+    def compact(items, fields, limit):
+        return [{key: str(item.get(key) or '')[:500] for key in fields if item.get(key) is not None}
+                for item in (items or [])[:limit] if isinstance(item, dict)]
+
     return {
         "mail": {
-            "recent": (mail.get("recent") or context.get("emails") or [])[:20],
-            "needs_attention": (mail.get("needs_attention") or context.get("needs_attention") or [])[:12],
+            "recent": compact(mail.get("recent") or context.get("emails"), ("id", "sender", "subject", "snippet", "timestamp"), 12),
+            "needs_attention": compact(mail.get("needs_attention") or context.get("needs_attention"), ("id", "sender", "subject", "summary", "deadline"), 8),
             "counts": mail.get("counts") or {},
         },
-        "work": {"active": (work.get("active") or [])[:12], "waiting_approval": (work.get("waiting_approval") or [])[:12]},
-        "calendar": {"events": (calendar.get("events") or context.get("calendarEvents") or [])[:20], "conflicts": (calendar.get("conflicts") or [])[:10]},
-        "automations": (context.get("automations") or [])[:12],
+        "work": {"active": compact(work.get("active"), ("id", "title", "status", "current_step"), 8), "waiting_approval": compact(work.get("waiting_approval"), ("id", "title", "status"), 8)},
+        "calendar": {"events": compact(calendar.get("events") or context.get("calendarEvents"), ("id", "title", "start", "end", "source"), 12), "conflicts": compact(calendar.get("conflicts"), ("a", "b", "overlapMinutes"), 8)},
+        "automations": compact(context.get("automations"), ("id", "name", "enabled", "next_run"), 8),
         "runtime": context.get("runtime") or context.get("integrations") or {},
         "ui": context.get("ui") or {},
         "resolved": (context.get("resolved") or [])[:4],
         "active_draft": context.get("active_draft") or None,
+        "conversation": compact((context.get("conversation") or [])[-12:], ("role", "text", "at"), 12),
     }
 
 
@@ -83,8 +88,9 @@ def plan_kyle_turn(
     prompt_context = _minimize_context(context)
     transient_message = None
     planner_route = 'CLOUD_ALLOWED'
+    contextual_mail = bool(re.search(r"\b(this|that|it|selected|current|reply|summari[sz]e)\b", message, re.I))
     selected_id = str((selected_email or {}).get("id") or (selected_email or {}).get("gmail_id") or "")
-    if selected_id and fetch_message:
+    if contextual_mail and selected_id and fetch_message:
         try:
             candidate = fetch_message(selected_id)
             gate = PrivacyGate.evaluate(candidate)

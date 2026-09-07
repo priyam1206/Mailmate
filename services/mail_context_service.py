@@ -52,7 +52,7 @@ def _fallback_classify_message(message, gate=None):
     suspicious_link = _contains(r'https?://(?:\d{1,3}\.){3}\d{1,3}|\b(bit\.ly|tinyurl\.com|t\.co)/', text)
     action_signal = _contains(r'\b(action required|please|can you|could you|reply|respond|review|approve|submit|submission|assignment|send|provide|meeting|schedule|note that|inform you|writing to inform)\b', text)
     deadline_signal = _contains(r'\b(due|deadline|today|tonight|tomorrow|within \d+ (?:hours?|days?)|next month|take place|scheduled for|will be held|before (?:january|february|march|april|may|june|july|august|september|october|november|december) \d{1,2})\b', text)
-    work_object = _contains(r'\b(assignment|submission|deliverable|project|report|document|spreadsheet|presentation|proposal|code|repository)\b', text)
+    work_object = _contains(r'\b(assignment|submission|deliverable|project|report|document|spreadsheet|presentation|proposal|code|repository|email|reply|response)\b', text)
     direct_work_request = _contains(r'\b(prepare|create|complete|finish|write|submit|send|provide|implement|review and (?:approve|comment|submit))\b', text)
     work_signal = work_object and direct_work_request
     calendar_signal = _contains(r'\b(meeting|appointment|call|schedule|calendar|due|deadline|exam|scheduled|take place|will be held|before (?:january|february|march|april|may|june|july|august|september|october|november|december) \d{1,2})\b', text)
@@ -199,9 +199,10 @@ def _semantic_batch(messages, routing):
 
 
 def _apply_semantic(message, baseline, semantic):
-    work = bool(semantic.get('work_required')) and str(message.get('direction') or '').lower() != 'outbound'
-    attention = bool(semantic.get('needs_attention'))
-    calendar = bool(semantic.get('calendar_required'))
+    inbound = str(message.get('direction') or '').lower() != 'outbound'
+    work = bool(baseline.get('work_allowed') or semantic.get('work_required')) and inbound
+    attention = bool(baseline.get('attention_allowed') or semantic.get('needs_attention'))
+    calendar = bool(baseline.get('calendar_allowed') or semantic.get('calendar_required'))
     baseline.update({
         'category': str(semantic.get('category') or ('actionable_work' if work else 'informational'))[:80],
         'importance_score': _clamp(semantic.get('priority', baseline['importance_score'])),

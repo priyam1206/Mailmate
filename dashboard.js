@@ -434,19 +434,6 @@ document.addEventListener('DOMContentLoaded', () => {
       saveSessionSnapshot(data);
       if (data.user) setProfile(data.user);
 
-      // Persist cached/new email deadlines into the currently connected
-      // Google Calendar, then refetch so AI-created events are visible.
-      try {
-        const aiSync = await fetch(`${API_BASE}/api/calendar/ai-sync`, { method: 'POST' });
-        if (aiSync.ok) {
-          const aiSyncData = await aiSync.json();
-          if ((aiSyncData.created_or_updated || 0) > 0) {
-            console.log('[Calendar] AI deadline sync', aiSyncData);
-          }
-        }
-      } catch (syncError) {
-        console.warn('[Calendar] AI deadline sync failed:', syncError);
-      }
       await refreshCalendar(false);
       els.processState.textContent = data.cached ? (data.background_refresh_started ? 'Cache ready · checking updates' : 'Cache reused') : 'Complete';
       window.Kyle?.setContext({
@@ -1185,7 +1172,7 @@ document.addEventListener('DOMContentLoaded', () => {
       workLivePollTimer = setInterval(async () => {
         if (document.hidden) return;
         try {
-          const res = await fetch(`${API_BASE}/api/work/jobs?ensure=1`, { cache: 'no-store' });
+          const res = await fetch(`${API_BASE}/api/work/jobs`, { cache: 'no-store' });
           if (res.ok) {
             workJobs = await res.json();
             renderOverviewWorkingNow();
@@ -1200,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
           console.debug('Work live poll notice:', e);
         }
-      }, 4000);
+      }, 8000);
     } else if (!shouldPoll && workLivePollTimer) {
       clearInterval(workLivePollTimer);
       workLivePollTimer = null;
@@ -2292,15 +2279,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (document.hidden) return;
       if (!['overview', 'inbox'].includes(state.currentPage)) return;
       loadInbox(false);
-    }, 10000);
+    }, 60000);
   }
 
   function startCalendarAutoSync() {
     if (state.calendarSyncTimer) clearInterval(state.calendarSyncTimer);
-    // Google Calendar is authoritative; refresh often enough to remove externally deleted events quickly.
+    // Google Calendar is authoritative. Focus/visibility refreshes handle active returns.
     state.calendarSyncTimer = setInterval(() => {
       if (!document.hidden) refreshCalendar(false);
-    }, 10000);
+    }, 60000);
 
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) refreshCalendar(false);

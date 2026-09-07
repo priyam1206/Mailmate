@@ -2,7 +2,7 @@
 
 Mailmate is a proactive Gmail intelligence & autonomous work preparation workspace built for Code2Create 7.0.
 
-> **â€œMailmate displays user-authorized Gmail data transiently, but does not centrally retain mailbox content. Before any AI or autonomous processing, a local privacy gate blocks sensitive and irrelevant messages and passes only the minimum required context.â€**
+> **Mailmate displays user-authorized Gmail data transiently, but does not centrally retain mailbox content. Before any AI or autonomous processing, a local privacy gate blocks sensitive and irrelevant messages and passes only the minimum required context.**
 
 ---
 
@@ -11,39 +11,24 @@ Mailmate is a proactive Gmail intelligence & autonomous work preparation workspa
 Mailmate enforces a strict boundary between user email viewing and machine intelligence:
 
 ```text
-                         Gmail
-                           â”‚
-                           â–¼
-                 â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                 â”‚ DISPLAY PLANE    â”‚
-                 â”‚                  â”‚
-                 â”‚ All authorized   â”‚
-                 â”‚ Gmail content    â”‚
-                 â”‚ can be shown     â”‚
-                 â”‚ in browser RAM   â”‚
-                 â””â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                          â”‚
-                    Privacy Gate
-                          â”‚
-                only required + safe
-                          â–¼
-                 â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                 â”‚ AI / WORK PLANE  â”‚
-                 â”‚                  â”‚
-                 â”‚ Kyle             â”‚
-                 â”‚ LM Studio        â”‚
-                 â”‚ Gemini fallback  â”‚
-                 â”‚ Work Agent       â”‚
-                 â”‚ Auto-drafts      â”‚
-                 â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+Gmail
+  |
+  +-- Display plane: authorized mail in transient browser RAM
+  |
+  +-- Privacy gate: minimum required, policy-approved context
+        |
+        +-- Kyle and Inbox intelligence: Gemini
+        +-- Deterministic Kyle actions: no LLM
+        +-- Work Agent: LM Studio local-first
+        +-- LOCAL_ONLY Work: local model only
 ```
 
 ### Boundary Enforcement Rules
-- `Gmail â†’ browser`: Allowed display (transient in browser RAM only; no emails hidden from user).
-- `Gmail â†’ disk/database`: **Prohibited** (zero central mailbox retention; only minimal derived task state is stored).
-- `Gmail â†’ AI / Gemini / LM Studio`: **Gate required** (sensitive, financial, and security emails blocked).
-- `Gmail â†’ Work Agent`: **Gate required** (only actionable academic/work tasks qualify).
-- `Gmail â†’ auto-send`: **Gate + AutoSendPolicy required** (routine acknowledgements only, 20s cancelable countdown).
+- `Gmail -> browser`: Allowed display (transient in browser RAM only; no emails hidden from user).
+- `Gmail -> disk/database`: **Prohibited** (zero central mailbox retention; only minimal derived task state is stored).
+- `Gmail -> Gemini`: **Gate required** for interactive Kyle, drafting, and Inbox intelligence.
+- `Gmail -> Work Agent`: **Gate required**; Work uses LM Studio local-first, and `LOCAL_ONLY` data never leaves the local model.
+- `Gmail -> auto-send`: **Gate + AutoSendPolicy required** (routine acknowledgements only, 20s cancelable countdown).
 
 ---
 

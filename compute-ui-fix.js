@@ -81,7 +81,7 @@
       setText(meta, 'Expected: 127.0.0.1:2806. You do not need to connect this laptop to its own hotspot.');
     } else {
       setText(message, `Connect this laptop to ${compute.connect_label || "Priyam's hotspot"}.`);
-      setText(meta, 'Mailmate will use Priyamâ€™s workstation over the private LAN automatically.');
+      setText(meta, "Mailmate will use Priyam's workstation over the private LAN automatically.");
     }
 
     if (retry) {

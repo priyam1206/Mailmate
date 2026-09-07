@@ -1,11 +1,14 @@
 import os
 import threading
+import tempfile
+import wave
 from faster_whisper import WhisperModel
 
 class WhisperService:
     def __init__(self, model_name="small", model_dir="models/whisper-small"):
         self.model_name = model_name
-        self.model_dir = model_dir
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.model_dir = model_dir if os.path.isabs(model_dir) else os.path.join(root, model_dir)
         self.model = None
         self.is_downloading = False
         self.is_ready = False
@@ -13,6 +16,8 @@ class WhisperService:
         self.compute_type = "int8"
         self.error = None
         self.lock = threading.Lock()
+        self.ready_event = threading.Event()
+        self.warmed = False
 
     def initialize(self):
         with self.lock:
@@ -39,17 +44,21 @@ class WhisperService:
             print(f"[Whisper] loading...")
 
             os.makedirs(self.model_dir, exist_ok=True)
-            self.model = WhisperModel(
-                self.model_name,
-                device=self.device,
-                compute_type=self.compute_type,
-                download_root=self.model_dir
-            )
+            try:
+                self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type, download_root=self.model_dir)
+            except Exception:
+                if self.device != 'cuda':
+                    raise
+                self.device, self.compute_type = 'cpu', 'int8'
+                self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type, download_root=self.model_dir)
+            self._warm_model()
             self.is_ready = True
+            self.ready_event.set()
             print("[Whisper] ready")
         except Exception as e:
             print(f"[Whisper] Error loading model: {e}")
             self.error = str(e)
+            self.ready_event.set()
         finally:
             self.is_downloading = False
 
@@ -60,10 +69,13 @@ class WhisperService:
             "device": self.device,
             "loaded": self.is_ready,
             "downloading": self.is_downloading,
+            "warmed": self.warmed,
             "error": self.error
         }
 
     def transcribe(self, audio_path):
+        if not self.is_ready and self.is_downloading:
+            self.ready_event.wait(timeout=20)
         if not self.is_ready:
             raise Exception("whisper_model_loading")
 
@@ -81,5 +93,24 @@ class WhisperService:
             "language": info.language,
             "duration": info.duration
         }
+
+    def _warm_model(self):
+        path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as handle:
+                path = handle.name
+            with wave.open(path, 'wb') as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(16000)
+                output.writeframes(b'\x00\x00' * 3200)
+            segments, _info = self.model.transcribe(path, beam_size=1, condition_on_previous_text=False)
+            list(segments)
+            self.warmed = True
+        except Exception as exc:
+            print(f"[Whisper] warm-up skipped: {exc}")
+        finally:
+            if path and os.path.exists(path):
+                os.remove(path)
 
 whisper_service = WhisperService()

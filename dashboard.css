@@ -934,7 +934,7 @@ h2 { font-size: 1rem; }
 
 .kyle-widget { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; pointer-events: auto; }
 .kyle-caption-bubble {
-  display: none;
+  display: block;
   max-width: 380px;
   padding: 12px 15px;
   border: 1px solid var(--dark-line);
@@ -951,6 +951,25 @@ h2 { font-size: 1rem; }
   transition: opacity 180ms ease, transform 220ms ease;
 }
 .kyle-widget.has-caption .kyle-caption-bubble.is-visible { opacity: 1; transform: translateY(0); }
+.kyle-transcript {
+  display: none;
+  width: min(390px, calc(100vw - 32px));
+  max-height: 230px;
+  overflow: auto;
+  border: 1px solid var(--dark-line);
+  border-radius: 8px;
+  background: var(--sidebar);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+}
+.kyle-transcript:not(:empty) { display: block; animation: kyleTranscriptIn 180ms ease-out; }
+.kyle-transcript-line { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--dark-line); color: var(--dark-text); }
+.kyle-transcript-line:last-child { border-bottom: 0; }
+.kyle-transcript-line p { margin: 0; font-size: 0.8rem; line-height: 1.45; overflow-wrap: anywhere; }
+.kyle-transcript-line.user { color: var(--dark-muted); }
+.kyle-transcript-speaker { padding-top: 2px; font-size: 0.72rem; text-align: center; }
+@keyframes kyleTranscriptIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+.kyle-overview-mount .kyle-caption-bubble,
+.kyle-overview-mount .kyle-transcript { width: 100%; max-width: none; box-sizing: border-box; }
 
 .kyle-shell {
   position: relative;

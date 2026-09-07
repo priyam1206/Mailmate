@@ -57,6 +57,16 @@ def test_assignment_submission_is_work(monkeypatch):
     assert row['work_allowed'] is True
 
 
+def test_concrete_email_request_is_work(monkeypatch):
+    monkeypatch.setenv('MAILMATE_SEMANTIC_CLASSIFIER_ENABLED', '0')
+    row = classify_message(message(
+        subject='Quick favor',
+        snippet='Could you write and send an email response to my professor?',
+    ), {'routing': 'CLOUD_ALLOWED'})
+    assert row['attention_allowed'] is True
+    assert row['work_allowed'] is True
+
+
 def test_context_rows_never_contain_mail_content(monkeypatch):
     monkeypatch.setenv('SUPABASE_CONTEXT_ENABLED', '0')
     service = MailContextService()

@@ -36,6 +36,7 @@
       addMessage(role, text) {
         const message = { role, text, at: new Date().toISOString() };
         this.conversation.push(message);
+        if (this.conversation.length > 40) this.conversation.splice(0, this.conversation.length - 40);
         window.dispatchEvent(new CustomEvent('kyle:message', { detail: message }));
       }
     };

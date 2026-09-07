@@ -17,6 +17,8 @@
 
   let currentRecorder = null;
   let activeInputMode = 'text';
+  let voiceDetectedAt = 0;
+  let lastVoiceAt = 0;
 
   function saveMutePreference() {
     try {
@@ -84,14 +86,15 @@
 
   async function whisperReady() {
     const now = Date.now();
-    if (whisperStatusCache.ready !== null && now - whisperStatusCache.checkedAt < 30000) {
+    const cacheMs = whisperStatusCache.ready ? 30000 : 1000;
+    if (whisperStatusCache.ready !== null && now - whisperStatusCache.checkedAt < cacheMs) {
       return whisperStatusCache.ready;
     }
     try {
       const response = await fetch(`${API_BASE}/api/stt/status`, { cache: 'no-store' });
       if (!response.ok) return false;
       const status = await response.json();
-      whisperStatusCache.ready = Boolean(status.loaded || status.available);
+      whisperStatusCache.ready = Boolean(status.loaded || status.available || status.downloading);
       whisperStatusCache.checkedAt = now;
       return whisperStatusCache.ready;
     } catch (_) {
@@ -112,6 +115,8 @@
     activeRun += 1;
     const run = activeRun;
     recognitionTranscript = '';
+    voiceDetectedAt = 0;
+    lastVoiceAt = 0;
     const startedAt = performance.now();
 
     store.set(store.states.LISTENING);
@@ -305,6 +310,13 @@
     if (store.muted) return;
     if (store.current === store.states.LISTENING) {
       ui.setAmplitude(value, 0.016);
+      const now = performance.now();
+      if (value > 0.035) {
+        if (!voiceDetectedAt) voiceDetectedAt = now;
+        lastVoiceAt = now;
+      } else if (currentRecorder && voiceDetectedAt && now - voiceDetectedAt > 650 && now - lastVoiceAt > 900) {
+        stopListening();
+      }
     }
   }
 
@@ -376,7 +388,9 @@
       unresolved: false
     };
 
-    if (resolution.unresolved) {
+    const hasExplicitMailRecipient = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(cleanPrompt)
+      && /\b(send|email|mail|compose|write)\b/i.test(cleanPrompt);
+    if (resolution.unresolved && !hasExplicitMailRecipient) {
       const clarification = resolution.clarification || 'Which item do you mean? Select it and ask me again.';
       store.addMessage('kyle', clarification);
       ui.setLiveText(clarification, 5200);
@@ -406,7 +420,8 @@
           resolvedReferences: resolution.references,
           selectedCalendarEventId: window.AgentCalendar?.getSelectedEventId?.() || null,
           activeDraft: activeDraft,
-          selectedEmail: selectedEmail
+          selectedEmail: selectedEmail,
+          conversation: (store.conversation || []).slice(-12)
         })
       });
       if (!response.ok) throw new Error(`Kyle returned ${response.status}`);

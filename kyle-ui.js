@@ -81,7 +81,6 @@
             </footer>
           </div>
 
-          <p class="kyle-caption-bubble" aria-live="polite"></p>
           <form class="kyle-shell">
             <input class="prompt-input" type="text" autocomplete="off" placeholder="Ask Kyle anything..." aria-label="Ask Kyle">
             <button class="send-icon" type="submit" aria-label="Send to Kyle"><i class="fas fa-arrow-up"></i></button>
@@ -90,6 +89,8 @@
             </button>
             <span class="kyle-state-label" aria-live="polite">Kyle is idle</span>
           </form>
+          <p class="kyle-caption-bubble" aria-live="polite"></p>
+          <div class="kyle-transcript" id="kyleTranscript" aria-live="polite" aria-label="Kyle conversation"></div>
           <div class="kyle-result-panel"></div>
         </div>
       </section>
@@ -101,6 +102,7 @@
     const form = mount.querySelector('.kyle-shell');
     const input = mount.querySelector('.prompt-input');
     const caption = mount.querySelector('.kyle-caption-bubble');
+    const transcript = mount.querySelector('#kyleTranscript');
     const stateLabel = mount.querySelector('.kyle-state-label');
     const resultPanel = mount.querySelector('.kyle-result-panel');
     const canvas = mount.querySelector('.orb-canvas');
@@ -371,9 +373,6 @@
     function setLiveText(text, autoHideMs = 0) {
       clearTimeout(captionTimer);
       const value = String(text || '').trim();
-      caption.textContent = '';
-      caption.classList.remove('is-visible');
-      widget.classList.remove('has-caption');
       if (!value) return;
       if (['email_review', 'calendar_confirmation'].includes(currentPanelMode)) {
         panelStatus.textContent = value;
@@ -383,7 +382,7 @@
         hudStatus.textContent = value;
         return;
       }
-      showSurfaceResult('Kyle', value, { autoHideMs });
+      setSubtitle(value);
     }
 
     function setSubtitle(text, options = {}) {
@@ -392,9 +391,8 @@
       caption.textContent = value;
       caption.classList.toggle('is-visible', Boolean(value));
       widget.classList.toggle('has-caption', Boolean(value));
-      if (value && options.autoHideMs) {
-        captionTimer = setTimeout(() => setSubtitle(''), Number(options.autoHideMs));
-      }
+      // Conversation subtitles remain visible for this page session. A refresh
+      // starts a new visual transcript while the server still gets recent turns.
     }
 
     function showResponse(text, options = {}) {
@@ -414,12 +412,13 @@
     }
 
     function appendMessage(role, text) {
-      const messages = document.getElementById('messages');
-      if (!messages) return;
+      const messages = transcript;
+      if (!messages || !String(text || '').trim()) return;
       const article = document.createElement('article');
-      article.className = `message ${role}`;
-      article.innerHTML = `<strong>${role === 'user' ? 'You' : 'Kyle'}</strong><p>${escapeHtml(text)}</p>`;
+      article.className = `kyle-transcript-line ${role}`;
+      article.innerHTML = `<span class="kyle-transcript-speaker" aria-hidden="true">${role === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-sparkles"></i>'}</span><p>${escapeHtml(text)}</p>`;
       messages.appendChild(article);
+      while (messages.children.length > 8) messages.firstElementChild.remove();
       messages.scrollTop = messages.scrollHeight;
     }
 

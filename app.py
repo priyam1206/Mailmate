@@ -914,6 +914,10 @@ def _mailbox_snapshot(profile, force=False):
         if not force and cached and history_id and cached.get('history_id') == history_id:
             return deepcopy(cached['threads']), deepcopy(cached['emails']), True, False, history_id
 
+    # A temporary history/quota failure must not blank an already loaded inbox.
+    if not force and cached and not history_id:
+        return deepcopy(cached['threads']), deepcopy(cached['emails']), True, False, cached.get('history_id')
+
     if not force and cached and cached.get('history_id') and history_id:
         try:
             delta = get_gmail_thread_changes(
@@ -936,7 +940,13 @@ def _mailbox_snapshot(profile, force=False):
         except Exception as exc:
             app.logger.info('Gmail incremental sync fell back to a bounded full scan: %s', exc)
 
-    threads, emails = get_gmail_threads()
+    try:
+        threads, emails = get_gmail_threads()
+    except Exception:
+        if cached:
+            app.logger.warning('Gmail full scan failed; serving the last in-memory mailbox snapshot')
+            return deepcopy(cached['threads']), deepcopy(cached['emails']), True, False, cached.get('history_id')
+        raise
     with _mailbox_snapshot_lock:
         _mailbox_snapshots[account_key] = {
             'history_id': history_id,
@@ -1000,7 +1010,7 @@ def _build_live_dashboard(profile, force_ai=False):
         'storage': context_result['persistence'],
     }
     overview['calendar_dismissed_markers'] = sorted(_calendar_dismissed_markers(profile))
-    overview['ai_calendar_sync'] = _reconcile_ai_calendar(overview, profile=profile, force=True)
+    overview['ai_calendar_sync'] = _reconcile_ai_calendar(overview, profile=profile, force=False)
 
     return overview
 
@@ -1028,6 +1038,10 @@ def dashboard_overview():
                 # Manual refresh is reconciliation-only: fetch current Gmail state
                 # and resolve/delete existing work without starting new AI work.
                 work_agent_service.reconcile_jobs_with_gmail(user_id)
+            else:
+                # Job IDs are deterministic, so this safely fills an empty Work
+                # queue without duplicating work on subsequent dashboard reads.
+                work_agent_service.sync_and_enqueue(user_id, live_payload)
         except Exception as sync_exc:
             app.logger.debug('Work sync notice: %s', sync_exc)
         return jsonify(live_payload)
@@ -1042,7 +1056,8 @@ def list_work_jobs():
     if not profile:
         return jsonify({"error": "Not authenticated"}), 401
     user_id = profile.get('email') or profile.get('id')
-    jobs = work_agent_service.list_jobs(user_id)
+    reconcile = str(request.args.get('reconcile', '')).lower() in {'1', 'true', 'yes'}
+    jobs = work_agent_service.list_jobs(user_id, reconcile=reconcile)
 
     ensure = str(request.args.get('ensure', '')).lower() in {'1', 'true', 'yes'}
     if ensure and not jobs:
@@ -1510,13 +1525,17 @@ def calendar_ai_sync():
     if not profile:
         return jsonify({"error": "Not authenticated"}), 401
 
-    threads, emails = get_gmail_threads()
-    if not threads:
-        return jsonify({"ok": True, "created_or_updated": 0, "reason": "No Gmail threads"})
-
-    overview = get_dashboard_overview(threads)
-    result = _reconcile_ai_calendar(overview, profile=profile, force=True)
-    return jsonify({"ok": True, **result})
+    try:
+        threads, _emails, _cached, _changed, _history_id = _mailbox_snapshot(profile, force=False)
+        if not threads:
+            return jsonify({"ok": True, "created_or_updated": 0, "reason": "No Gmail threads"})
+        overview = get_dashboard_overview(threads)
+        force = str(request.args.get('refresh', '')).lower() in {'1', 'true', 'yes'}
+        result = _reconcile_ai_calendar(overview, profile=profile, force=force)
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        app.logger.warning('Calendar AI sync deferred: %s', exc)
+        return jsonify({"ok": False, "created_or_updated": 0, "reason": str(exc)}), 503
 
 
 @app.route('/api/calendar/events', methods=['GET', 'POST'])
@@ -1707,10 +1726,10 @@ def _event_brief_item(event):
     try:
         if 'T' in start:
             dt = datetime.fromisoformat(start.replace('Z', '+00:00')).astimezone(APP_TZ)
-            label = dt.strftime('%a %d %b Â· %-I:%M %p') if os.name != 'nt' else dt.strftime('%a %d %b Â· %#I:%M %p')
+            label = dt.strftime('%a %d %b - %-I:%M %p') if os.name != 'nt' else dt.strftime('%a %d %b - %#I:%M %p')
         elif start:
             dt = datetime.fromisoformat(start[:10])
-            label = dt.strftime('%a %d %b Â· all day')
+            label = dt.strftime('%a %d %b - all day')
     except Exception:
         pass
     return {
@@ -2347,7 +2366,7 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
         if re.search(r'\b(send\s*(?:it|draft|email|now)?|looks\s+good,?\s+send)\b', lower):
             return {
                 'reply': 'Sending the email now.',
-                'actions': [{'tool': 'mail.send_draft', 'args': {}}],
+                'actions': [{'tool': 'mail.send_draft', 'args': {'explicit_send': True}}],
                 'mode': 'mail_composer'
             }
 
@@ -2383,7 +2402,7 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
 
     # Case 2: Reply intent
     # Matches: "reply to Rupayan saying I'll send it tonight", "reply saying ...", "reply to this"
-    if re.search(r'\breply\b', lower):
+    if re.search(r'^\s*(?:please\s+)?reply\b|\breply\s+to\b', lower):
         target_name = None
         explicit_address = _explicit_email_address(message)
         name_match = re.search(r'\breply\s+to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z]+(?:\s+[A-Za-z]+)*?)(?:\s+(?:saying|that|to\s+say|\.|$))', lower)
@@ -2523,9 +2542,8 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
             except Exception:
                 pass
 
-            return {
-                'reply': f"I prepared a draft for {first_name}. Review it above, edit if needed, and send whenever you're ready.",
-                'actions': [{
+            explicit_send = bool(re.search(r'\bsend\s+(?:an?\s+)?(?:email|mail)\s+to\b', lower))
+            actions = [{
                     'tool': 'mail.compose',
                     'args': {
                         'recipient': target_contact.get('full') or target_contact['name'],
@@ -2533,7 +2551,13 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                         'subject': subject,
                         'body': body
                     }
-                }],
+                }]
+            if explicit_send:
+                actions.append({'tool': 'mail.send_draft', 'args': {'explicit_send': True}})
+            return {
+                'reply': (f"I'm sending that email to {first_name}." if explicit_send else
+                          f"I prepared a draft for {first_name}. Review it above, edit if needed, and send whenever you're ready."),
+                'actions': actions,
                 'mode': 'mail_composer'
             }
 
@@ -2626,7 +2650,32 @@ def kyle_agent_endpoint():
         'ui': ui_context,
         'resolved': resolved,
         'active_draft': active_draft,
+        'conversation': (data.get('conversation') or [])[-12:],
     })
+
+    # Mail commands have a deterministic recipient/action path. Resolve them
+    # before any semantic planning so explicit sends never depend on LM Studio.
+    if active_draft or re.search(r'\b(email|mail|reply|draft|compose|send)\b', message, re.I):
+        mail_intent_res = _handle_mail_intent(
+            message=message,
+            active_draft=active_draft,
+            selected_email=selected_email,
+            context_emails=merged_context.get('emails') or [],
+            user_profile=profile,
+        )
+        if mail_intent_res:
+            direct_actions = []
+            for candidate in mail_intent_res.get('actions') or []:
+                sanitized = _sanitize_agent_action(candidate, known)
+                if sanitized:
+                    direct_actions.append(sanitized)
+            reply = mail_intent_res.get('reply') or ''
+            return jsonify({
+                'reply': reply, 'text': reply, 'voice': _compact_voice(reply),
+                'actions': direct_actions, 'mode': mail_intent_res.get('mode', 'mail_composer'),
+                'contacts': mail_intent_res.get('contacts'),
+                'context_version': system_ctx.get('context_version', 1),
+            })
     try:
         planned = plan_kyle_turn(
             message,
