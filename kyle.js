@@ -10,6 +10,9 @@
   let recognitionTimer = null;
   let activeRun = 0;
   let utterance = null;
+  let elevenAudio = null;
+  let elevenAudioUrl = '';
+  let speechRequest = null;
   let speakingRaf = null;
   let speakingStartedAt = 0;
   let smoothedSpeechEnergy = 0;
@@ -512,12 +515,59 @@
 
   function speak(text, run) {
     stopSpeech(false);
-    if (store.muted || !('speechSynthesis' in window) || !text) {
+    if (store.muted || !text) {
       store.set(window.KyleExecutor?.pending?.() ? store.states.WAITING_APPROVAL : store.states.IDLE);
       return;
     }
 
     store.set(store.states.SPEAKING);
+    speakingStartedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+    smoothedSpeechEnergy = 0;
+    startSpeechAnimation(text, run);
+    if (typeof window.Audio === 'function' && window.URL?.createObjectURL) {
+      speakWithElevenLabs(text, run).then(played => {
+        if (!played && run === activeRun) speakWithBrowser(text, run);
+      });
+      return;
+    }
+    speakWithBrowser(text, run);
+  }
+
+  async function speakWithElevenLabs(text, run) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    speechRequest = controller;
+    try {
+      const response = await fetch(`${API_BASE}/api/voice/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal: controller?.signal
+      });
+      if (!response.ok || run !== activeRun) return false;
+      const blob = await response.blob();
+      if (run !== activeRun) return false;
+      elevenAudioUrl = window.URL.createObjectURL(blob);
+      elevenAudio = new window.Audio(elevenAudioUrl);
+      elevenAudio.onended = () => finishSpeech(run);
+      elevenAudio.onerror = () => {
+        stopElevenAudio();
+        if (run === activeRun) speakWithBrowser(text, run);
+      };
+      await elevenAudio.play();
+      return true;
+    } catch (error) {
+      if (error?.name !== 'AbortError') console.info('[Kyle Voice] ElevenLabs unavailable; using browser voice.');
+      return false;
+    } finally {
+      if (speechRequest === controller) speechRequest = null;
+    }
+  }
+
+  function speakWithBrowser(text, run) {
+    if (!('speechSynthesis' in window)) {
+      finishSpeech(run);
+      return;
+    }
     const UtteranceClass = window.SpeechSynthesisUtterance || (typeof SpeechSynthesisUtterance !== 'undefined' ? SpeechSynthesisUtterance : null);
     if (!UtteranceClass) {
       finishSpeech(run);
@@ -529,12 +579,7 @@
     utterance.volume = 1;
     chooseVoice(utterance);
 
-    utterance.onstart = () => {
-      if (run !== activeRun) return;
-      speakingStartedAt = performance.now();
-      smoothedSpeechEnergy = 0;
-      startSpeechAnimation(text, run);
-    };
+    utterance.onstart = () => {};
 
     utterance.onend = () => finishSpeech(run);
     utterance.onerror = event => {
@@ -554,7 +599,8 @@
   }
 
   function startSpeechAnimation(text, run) {
-    cancelAnimationFrame(speakingRaf);
+    if (speakingRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(speakingRaf);
+    if (typeof requestAnimationFrame !== 'function') return;
     const estimatedDuration = Math.max(1200, text.length * 44);
 
     const tick = now => {
@@ -585,13 +631,29 @@
   }
 
   function stopSpeech(cancelVoice = true) {
-    if (speakingRaf) cancelAnimationFrame(speakingRaf);
+    if (speakingRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(speakingRaf);
     speakingRaf = null;
     if (cancelVoice && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (speechRequest) speechRequest.abort();
+    speechRequest = null;
+    stopElevenAudio();
     utterance = null;
     audio.cleanupMic();
     ui.setAmplitude(0, 0);
     smoothedSpeechEnergy = 0;
+  }
+
+  function stopElevenAudio() {
+    if (elevenAudio) {
+      elevenAudio.onended = null;
+      elevenAudio.onerror = null;
+      try { elevenAudio.pause(); } catch (_) {}
+      elevenAudio = null;
+    }
+    if (elevenAudioUrl) {
+      try { window.URL.revokeObjectURL(elevenAudioUrl); } catch (_) {}
+      elevenAudioUrl = '';
+    }
   }
 
   function interrupt(thenListen) {

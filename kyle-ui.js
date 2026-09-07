@@ -89,6 +89,7 @@
             </button>
             <span class="kyle-state-label" aria-live="polite">Kyle is idle</span>
           </form>
+          <button class="kyle-history-toggle" type="button" aria-label="Minimize Kyle conversation" title="Minimize conversation" hidden><i class="fas fa-minus"></i></button>
           <p class="kyle-caption-bubble" aria-live="polite"></p>
           <div class="kyle-transcript" id="kyleTranscript" aria-live="polite" aria-label="Kyle conversation"></div>
           <div class="kyle-result-panel"></div>
@@ -103,6 +104,7 @@
     const input = mount.querySelector('.prompt-input');
     const caption = mount.querySelector('.kyle-caption-bubble');
     const transcript = mount.querySelector('#kyleTranscript');
+    const historyToggle = mount.querySelector('.kyle-history-toggle');
     const stateLabel = mount.querySelector('.kyle-state-label');
     const resultPanel = mount.querySelector('.kyle-result-panel');
     const canvas = mount.querySelector('.orb-canvas');
@@ -420,6 +422,7 @@
       messages.appendChild(article);
       while (messages.children.length > 8) messages.firstElementChild.remove();
       messages.scrollTop = messages.scrollHeight;
+      if (historyToggle) historyToggle.hidden = false;
     }
 
     (store.conversation || []).slice(-8).forEach(message => appendMessage(message.role, message.text));
@@ -501,21 +504,28 @@
     }
 
     function minimizeComposer() {
-      if (!activeDraft) return;
+      if (!panel) return;
       stateBeforeMinimize = composerState;
       composerState = 'minimized';
       panel.dataset.composerState = composerState;
       panel.classList.add('is-minimized');
       panel.setAttribute('aria-hidden', 'false');
+      panelMinimizeBtn.innerHTML = '<i class="fas fa-plus"></i>';
+      panelMinimizeBtn.setAttribute('aria-label', 'Restore Kyle window');
+      panelMinimizeBtn.title = 'Restore';
     }
 
     function restoreComposer() {
-      if (!activeDraft) return;
       panel.classList.remove('is-minimized');
-      const restoredState = stateBeforeMinimize === 'minimized' ? 'draft_ready' : stateBeforeMinimize;
-      setComposerState(restoredState || 'draft_ready', restoredState === 'preparing' || restoredState === 'generating'
-        ? 'Preparing your draft...'
-        : 'Draft ready · Edit anytime or click Send');
+      panelMinimizeBtn.innerHTML = '<i class="fas fa-minus"></i>';
+      panelMinimizeBtn.setAttribute('aria-label', 'Minimize Kyle window');
+      panelMinimizeBtn.title = 'Minimize';
+      if (activeDraft) {
+        const restoredState = stateBeforeMinimize === 'minimized' ? 'draft_ready' : stateBeforeMinimize;
+        setComposerState(restoredState || 'draft_ready', restoredState === 'preparing' || restoredState === 'generating'
+          ? 'Preparing your draft...'
+          : 'Draft ready · Edit anytime or click Send');
+      }
     }
 
     function setComposerDraft(draft = {}) {
@@ -740,6 +750,12 @@
     });
     panelMinimizeBtn?.addEventListener?.('click', () => panel.classList.contains('is-minimized') ? restoreComposer() : minimizeComposer());
     panel?.querySelector?.('.kyle-panel-header')?.addEventListener?.('dblclick', restoreComposer);
+    historyToggle?.addEventListener?.('click', () => {
+      const minimized = widget.classList.toggle('is-conversation-minimized');
+      historyToggle.innerHTML = minimized ? '<i class="fas fa-plus"></i>' : '<i class="fas fa-minus"></i>';
+      historyToggle.setAttribute('aria-label', minimized ? 'Restore Kyle conversation' : 'Minimize Kyle conversation');
+      historyToggle.title = minimized ? 'Restore conversation' : 'Minimize conversation';
+    });
     panelMicBtn?.addEventListener?.('click', () => boundHandlers.onMute?.());
     subjectInput?.addEventListener?.('input', () => {
       if (activeDraft) activeDraft.operation_id = null;

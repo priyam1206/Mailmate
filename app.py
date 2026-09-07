@@ -15,7 +15,7 @@ import uuid
 from copy import deepcopy
 from dateutil import parser as date_parser
 
-from flask import Flask, request, jsonify, redirect, send_from_directory, session, abort
+from flask import Flask, request, jsonify, redirect, send_from_directory, session, abort, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -46,6 +46,7 @@ from services.agent.token_budget import approximate_tokens, bounded_payload
 from services.mail_context_service import mail_context_service
 from services.kyle_agent_planner import plan_kyle_turn
 from services.mail_sync_service import MailSyncService
+from services.elevenlabs_service import ElevenLabsError, signed_agent_url, status as elevenlabs_status, synthesize as elevenlabs_synthesize
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-secret-key-123')
@@ -267,6 +268,7 @@ def serve_project_file(filename):
 @app.route('/api/health')
 def health():
     supabase = mail_context_service.status()
+    elevenlabs = elevenlabs_status()
     return jsonify({
         "ok": True,
         "googleClientConfigured": bool(os.getenv('GOOGLE_CLIENT_ID')),
@@ -278,7 +280,8 @@ def health():
         "supabase": supabase,
         "privacyGate": {"enabled": True, "mode": "deterministic-local", "centralRetention": "derived-only-when-user-scoped"},
         "cachePolicy": {"syncCheckSeconds": CACHE_SYNC_SECONDS, "reprocessSeconds": CACHE_REPROCESS_SECONDS},
-        "elevenLabsConfigured": bool(os.getenv('ELEVENLABS_API_KEY')),
+        "elevenLabsConfigured": elevenlabs["configured"],
+        "elevenLabs": elevenlabs,
         "calendar": calendar_access_status(),
         "calendarReadWrite": calendar_access_status().get("writable", False),
         "gmailWrite": get_gmail_permissions().get("can_write", False),
@@ -2677,6 +2680,28 @@ def kyle_agent_endpoint():
         'active_draft': active_draft,
         'conversation': (data.get('conversation') or [])[-12:],
     })
+
+
+@app.route('/api/voice/speak', methods=['POST'])
+def elevenlabs_speak():
+    if not get_user_profile():
+        return jsonify({'error': 'Not authenticated'}), 401
+    text = str((request.get_json(silent=True) or {}).get('text') or '').strip()
+    try:
+        content, content_type = elevenlabs_synthesize(text)
+        return Response(content, status=200, content_type=content_type, headers={'Cache-Control': 'no-store'})
+    except ElevenLabsError as exc:
+        return jsonify({'error': str(exc), 'fallback': 'browser'}), 503
+
+
+@app.route('/api/voice/agent/signed-url')
+def elevenlabs_agent_signed_url():
+    if not get_user_profile():
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        return jsonify({'signed_url': signed_agent_url()})
+    except ElevenLabsError as exc:
+        return jsonify({'error': str(exc)}), 503
 
     # Mail commands have a deterministic recipient/action path. Resolve them
     # before any semantic planning so explicit sends never depend on LM Studio.

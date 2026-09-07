@@ -128,7 +128,8 @@ Flask maps the stable Google account ID to a namespaced UUID and signs a five-mi
 ## Kyle Voice Assistant
 
 - Speech-to-text uses the browser's built-in `SpeechRecognition` / `webkitSpeechRecognition` support.
-- Kyle's voice responses use browser speech synthesis, so ElevenLabs is not required for local testing.
+- Kyle uses ElevenLabs Flash TTS with the George voice when `ELEVENLABS_API_KEY` is a valid `sk_...` secret; browser speech synthesis remains the automatic fallback.
+- Private ElevenLabs Agents use the server-only `ELEVENLABS_AGENT_ID` signed-URL endpoint, so the API key is never exposed to the browser.
 - Calendar deletions always show the exact event or grouped event list before Kyle makes the change.
 
 ---
