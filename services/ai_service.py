@@ -1,9 +1,10 @@
-import datetime
+﻿import datetime
 import hashlib
 import json
 import os
 import re
 import threading
+import time as _time
 from copy import deepcopy
 from typing import Any, Dict, List
 
@@ -22,18 +23,43 @@ def _json_object(text: str) -> Dict[str, Any]:
     return json.loads(match.group(0))
 
 
+# ---------------------------------------------------------------------------
+# Gemini quota circuit breaker
+# After any 429 we stop calling Gemini for _QUOTA_BACKOFF_SECS seconds so we
+# don't keep hammering the API and burning per-minute / per-day quota.
+# ---------------------------------------------------------------------------
+_QUOTA_BACKOFF_SECS = 60        # wait 60 s before retrying after a 429
+_quota_blocked_until: float = 0.0
+_quota_lock = threading.Lock()
+
 _overview_lock = threading.Lock()
-_overview_cache = {}
-_overview_inflight = {}
+_overview_cache: Dict[str, Any] = {}
+_overview_inflight: Dict[str, threading.Event] = {}
 
 
-def _gemini_completion(prompt: str, json_mode: bool = False, max_input_tokens: int = 3500, max_output_tokens: int = 300) -> str:
-    enabled = str(os.getenv('MAILMATE_GEMINI_ENABLED', '1')).lower() in {'1', 'true', 'yes', 'on'}
+def _gemini_completion(
+    prompt: str,
+    json_mode: bool = False,
+    max_input_tokens: int = 3500,
+    max_output_tokens: int = 300,
+) -> str:
+    global _quota_blocked_until
+
+    enabled = str(os.getenv("MAILMATE_GEMINI_ENABLED", "1")).lower() in {"1", "true", "yes", "on"}
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not enabled or not key:
         raise RuntimeError("Gemini is not configured")
 
-    bounded_prompt = bound_messages([{'role': 'user', 'content': prompt}], max_input_tokens)[0]['content']
+    # Circuit breaker: fail fast while quota is cooling down
+    with _quota_lock:
+        blocked_until = _quota_blocked_until
+    if _time.monotonic() < blocked_until:
+        remaining = int(blocked_until - _time.monotonic())
+        raise RuntimeError(f"Gemini quota exceeded — retry in ~{remaining}s")
+
+    bounded_prompt = bound_messages(
+        [{"role": "user", "content": prompt}], max_input_tokens
+    )[0]["content"]
 
     model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -42,11 +68,24 @@ def _gemini_completion(prompt: str, json_mode: bool = False, max_input_tokens: i
         "generationConfig": {
             "temperature": 0.1,
             "maxOutputTokens": max_output_tokens,
-            **({"responseMimeType": "application/json"} if json_mode else {}),
+            **({**{"responseMimeType": "application/json"}} if json_mode else {}),
         },
     }
-    response = requests.post(url, params={"key": key}, json=payload, timeout=18)
-    response.raise_for_status()
+
+    # One retry: wait 5 s on first 429, then give up and arm circuit breaker.
+    response = None
+    for attempt in range(2):
+        response = requests.post(url, params={"key": key}, json=payload, timeout=18)
+        if response.status_code == 429:
+            with _quota_lock:
+                _quota_blocked_until = _time.monotonic() + _QUOTA_BACKOFF_SECS
+            if attempt == 0:
+                _time.sleep(5)
+                continue
+            raise RuntimeError("Gemini quota exceeded (429) — will retry automatically in 60 s")
+        response.raise_for_status()
+        break
+
     data = response.json()
     candidates = data.get("candidates") or []
     parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
@@ -86,7 +125,7 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
         subject = str(latest.get("subject") or thread.get("subject") or "Email")
         snippet = str(latest.get("snippet") or latest.get("body") or thread.get("snippet") or "")
         direction = str(latest.get("direction") or thread.get("direction") or "").lower()
-        scores = latest.get('context_scores') or {}
+        scores = latest.get("context_scores") or {}
         message_id = str(
             latest.get("id")
             or latest.get("gmail_id")
@@ -97,14 +136,14 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
         combined = f"{subject} {snippet}".strip()
 
         if scores and (
-            scores.get('spam_score', 0) >= 0.65
-            or scores.get('phishing_score', 0) >= 0.55
-            or scores.get('malicious_score', 0) >= 0.55
+            scores.get("spam_score", 0) >= 0.65
+            or scores.get("phishing_score", 0) >= 0.55
+            or scores.get("malicious_score", 0) >= 0.55
         ):
             continue
 
         if direction == "outbound":
-            if message_id and (not scores or scores.get('requires_reply')):
+            if message_id and (not scores or scores.get("requires_reply")):
                 waiting.append({
                     "subject": subject[:180],
                     "description": "Waiting for a reply.",
@@ -113,16 +152,16 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
                 })
             continue
 
-        is_actionable = scores.get('attention_allowed') if scores else bool(action_pattern.search(combined))
+        is_actionable = scores.get("attention_allowed") if scores else bool(action_pattern.search(combined))
         if is_actionable and message_id:
-            if re.search(r'\b(submit|submission|assignment|deliverable)\b', combined, re.I):
-                action_text = 'Complete the requested submission.'
-            elif re.search(r'\b(meeting|schedule|appointment|call)\b', combined, re.I):
-                action_text = 'Review the schedule request.'
-            elif re.search(r'\b(reply|respond|question|details needed|provide)\b', combined, re.I):
-                action_text = 'Reply with the requested details.'
+            if re.search(r"\b(submit|submission|assignment|deliverable)\b", combined, re.I):
+                action_text = "Complete the requested submission."
+            elif re.search(r"\b(meeting|schedule|appointment|call)\b", combined, re.I):
+                action_text = "Review the schedule request."
+            elif re.search(r"\b(reply|respond|question|details needed|provide)\b", combined, re.I):
+                action_text = "Reply with the requested details."
             else:
-                action_text = 'Review this request.'
+                action_text = "Review this request."
             needs.append({
                 "subject": subject[:180],
                 "description": action_text,
@@ -139,7 +178,8 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
             f"{len(needs)} message needs your attention."
             if len(needs) == 1
             else f"{len(needs)} messages need your attention."
-            if needs else "Nothing needs your attention right now."
+            if needs
+            else "Nothing needs your attention right now."
         ),
     }
 
@@ -149,47 +189,65 @@ def _source_fingerprint(threads):
     for thread in threads or []:
         latest = _latest(thread)
         source.append({
-            'thread_id': str(thread.get('id') or thread.get('threadId') or ''),
-            'message_id': str(latest.get('id') or latest.get('gmail_id') or ''),
-            'timestamp': str(latest.get('timestamp') or latest.get('date') or ''),
-            'direction': str(latest.get('direction') or thread.get('direction') or ''),
+            "thread_id": str(thread.get("id") or thread.get("threadId") or ""),
+            "message_id": str(latest.get("id") or latest.get("gmail_id") or ""),
+            "timestamp": str(latest.get("timestamp") or latest.get("date") or ""),
+            "direction": str(latest.get("direction") or thread.get("direction") or ""),
         })
-    packed = json.dumps(source, ensure_ascii=True, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha256(packed.encode('utf-8')).hexdigest()
+    packed = json.dumps(source, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(packed.encode("utf-8")).hexdigest()
 
 
 def _overview_candidates(threads, limit=15):
     action_pattern = re.compile(
-        r'\b(action required|urgent|due|deadline|submit|assignment|review|approve|reply|respond|please|meeting|schedule|extension|document|details needed)\b',
+        r"\b(action required|urgent|due|deadline|submit|assignment|review|approve|reply|respond|please|meeting|schedule|extension|document|details needed)\b",
         re.I,
     )
-    noise_pattern = re.compile(r'\b(unsubscribe|sale|offer|discount|newsletter|digest|promotion|recommended for you)\b', re.I)
+    noise_pattern = re.compile(
+        r"\b(unsubscribe|sale|offer|discount|newsletter|digest|promotion|recommended for you)\b",
+        re.I,
+    )
     candidates = []
     for thread in threads or []:
         latest = _latest(thread)
-        context_scores = latest.get('context_scores') or {}
-        if context_scores.get('spam_score', 0) >= 0.65 or context_scores.get('phishing_score', 0) >= 0.55 or context_scores.get('malicious_score', 0) >= 0.55:
+        context_scores = latest.get("context_scores") or {}
+        if (
+            context_scores.get("spam_score", 0) >= 0.65
+            or context_scores.get("phishing_score", 0) >= 0.55
+            or context_scores.get("malicious_score", 0) >= 0.55
+        ):
             continue
-        subject = str(latest.get('subject') or thread.get('subject') or 'Email')
-        snippet = str(latest.get('snippet') or latest.get('body') or thread.get('snippet') or '')
-        direction = str(latest.get('direction') or thread.get('direction') or '').lower()
-        labels = list(latest.get('labelIds') or latest.get('labels') or thread.get('labelIds') or thread.get('labels') or [])
-        combined = f'{subject} {snippet}'
-        label_text = ' '.join(str(label) for label in labels).lower()
-        if ('promotion' in label_text or 'social' in label_text or noise_pattern.search(combined)) and not action_pattern.search(combined):
+        subject = str(latest.get("subject") or thread.get("subject") or "Email")
+        snippet = str(latest.get("snippet") or latest.get("body") or thread.get("snippet") or "")
+        direction = str(latest.get("direction") or thread.get("direction") or "").lower()
+        labels = list(
+            latest.get("labelIds")
+            or latest.get("labels")
+            or thread.get("labelIds")
+            or thread.get("labels")
+            or []
+        )
+        combined = f"{subject} {snippet}"
+        label_text = " ".join(str(label) for label in labels).lower()
+        if (
+            ("promotion" in label_text or "social" in label_text or noise_pattern.search(combined))
+            and not action_pattern.search(combined)
+        ):
             continue
-        if direction != 'outbound' and not action_pattern.search(combined) and 'important' not in label_text:
+        if direction != "outbound" and not action_pattern.search(combined) and "important" not in label_text:
             continue
         candidates.append({
-            'thread_id': str(thread.get('id') or thread.get('threadId') or ''),
-            'message_id': str(latest.get('id') or latest.get('gmail_id') or thread.get('latest_message_id') or ''),
-            'subject': subject[:180],
-            'sender': str(latest.get('sender') or thread.get('sender') or '')[:160],
-            'latest_direction': direction or 'unknown',
-            'snippet': re.sub(r'\s+', ' ', snippet).strip()[:420],
-            'timestamp': str(latest.get('timestamp') or latest.get('date') or '')[:80],
-            'labels': [str(label)[:50] for label in labels[:8]],
-            'privacy': 'ALLOW',
+            "thread_id": str(thread.get("id") or thread.get("threadId") or ""),
+            "message_id": str(
+                latest.get("id") or latest.get("gmail_id") or thread.get("latest_message_id") or ""
+            ),
+            "subject": subject[:180],
+            "sender": str(latest.get("sender") or thread.get("sender") or "")[:160],
+            "latest_direction": direction or "unknown",
+            "snippet": re.sub(r"\s+", " ", snippet).strip()[:420],
+            "timestamp": str(latest.get("timestamp") or latest.get("date") or "")[:80],
+            "labels": [str(label)[:50] for label in labels[:8]],
+            "privacy": "ALLOW",
         })
         if len(candidates) >= limit:
             break
