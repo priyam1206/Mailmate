@@ -56,3 +56,40 @@ def test_unchanged_message_reuses_classification(monkeypatch):
     assert first['changed_count'] == 1
     assert second['changed_count'] == 0
     assert changed['changed_count'] == 1
+
+
+def _configure_supabase(monkeypatch):
+    monkeypatch.setenv('SUPABASE_CONTEXT_ENABLED', '1')
+    monkeypatch.setenv('SUPABASE_URL', 'https://example.supabase.co')
+    monkeypatch.setenv('SUPABASE_SECRET_KEY', 'server-secret')
+    monkeypatch.setenv('MAILMATE_USER_NAMESPACE_UUID', '12345678-1234-4234-8234-123456789abc')
+
+
+def test_irrelevant_email_is_not_persisted(monkeypatch):
+    _configure_supabase(monkeypatch)
+    service = MailContextService()
+    calls = []
+    monkeypatch.setattr(service, '_request', lambda method, table, **kwargs: calls.append((method, table, kwargs)))
+    result = service.update('user-1', [message(
+        subject='Weekly newsletter', snippet='Sale discount unsubscribe', labels=['CATEGORY_PROMOTIONS']
+    )])
+    assert result['persistence']['stored'] == 0
+    assert not any(method == 'POST' and table == 'active_ui_context' for method, table, _ in calls)
+
+
+def test_supabase_payload_is_minimized(monkeypatch):
+    _configure_supabase(monkeypatch)
+    service = MailContextService()
+    calls = []
+    monkeypatch.setattr(service, '_request', lambda method, table, **kwargs: calls.append((method, table, kwargs)))
+    result = service.update('user-1', [message(
+        body='private full body', body_html='<b>private</b>',
+        attachments=[{'filename': 'secret.pdf', 'data': 'private'}],
+        raw_headers={'Authorization': 'secret'},
+    )])
+    context_call = next(call for call in calls if call[0] == 'POST' and call[1] == 'active_ui_context')
+    payload = context_call[2]['payload'][0]
+    assert result['persistence']['stored'] == 1
+    assert not ({'body', 'body_html', 'snippet', 'attachments', 'raw_headers'} & set(payload))
+    assert payload['source_message_id'] == 'm-1'
+    assert payload['needs_attention'] is True

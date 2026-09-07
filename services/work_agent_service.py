@@ -22,6 +22,7 @@ from services.auto_send_policy import AutoSendPolicy
 from services.privacy_gate import PrivacyGate
 from services.agent import AgentSession, AgentLoop, PolicyEngine, ToolRegistry, Verifier
 from services.agent.models.lmstudio import LMStudioModel, ModelTimeout, ModelUnavailable
+from services.work_state_store import work_state_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -171,33 +172,20 @@ class WorkAgentService:
         return current
 
     def _read_jobs(self):
-        if not JOBS_FILE.exists():
-            return {}
-        try:
-            data = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return {}
-            # Ensure titles and verdicts are normalized
-            settings = self.get_settings()
-            for jid, j in data.items():
-                if "clean_title" not in j:
-                    j["clean_title"] = clean_job_title(j.get("title", ""), (j.get("source") or {}).get("subject", ""))
-                if "policy_verdict" not in j and j.get("output", {}).get("suggested_reply"):
-                    j["policy_verdict"] = AutoSendPolicy.evaluate(
-                        j["output"]["suggested_reply"],
-                        artifacts=j.get("artifacts", []),
-                        source=j.get("source", {}),
-                        settings=settings
-                    )
-            return data
-        except Exception:
-            return {}
+        data = work_state_store.read_all()
+        settings = self.get_settings()
+        for j in data.values():
+            if "clean_title" not in j:
+                j["clean_title"] = clean_job_title(j.get("title", ""), (j.get("source") or {}).get("subject", ""))
+            if "policy_verdict" not in j and j.get("output", {}).get("suggested_reply"):
+                j["policy_verdict"] = AutoSendPolicy.evaluate(
+                    j["output"]["suggested_reply"], artifacts=j.get("artifacts", []),
+                    source=j.get("source", {}), settings=settings
+                )
+        return data
 
     def _write_jobs(self, jobs):
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = JOBS_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(jobs, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(JOBS_FILE)
+        work_state_store.write_all(jobs)
 
     def _job_id(self, user_id, message_id):
         digest = hashlib.sha256(f"{user_id}:{message_id}".encode("utf-8")).hexdigest()[:12]
@@ -344,6 +332,7 @@ class WorkAgentService:
         return reconciled
 
     def list_jobs(self, user_id, reconcile=True):
+        work_state_store.hydrate(user_id)
         if reconcile and user_id:
             try:
                 self.reconcile_jobs_with_gmail(user_id)

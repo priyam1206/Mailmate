@@ -894,6 +894,15 @@ def _mailbox_snapshot(profile, force=False):
         history_id = None
     with _mailbox_snapshot_lock:
         cached = _mailbox_snapshots.get(account_key)
+    if not cached:
+        # Restore only minimized active context and the Gmail checkpoint. Raw mail
+        # is always fetched from Gmail and is never hydrated from Supabase.
+        mail_context_service.hydrate(account_key)
+        persisted_sync = mail_context_service.load_sync_state(account_key)
+    else:
+        persisted_sync = {}
+    with _mailbox_snapshot_lock:
+        cached = _mailbox_snapshots.get(account_key)
         if not force and cached and history_id and cached.get('history_id') == history_id:
             return deepcopy(cached['threads']), deepcopy(cached['emails']), True, False, history_id
 
@@ -914,6 +923,7 @@ def _mailbox_snapshot(profile, force=False):
                         'threads': deepcopy(threads),
                         'emails': deepcopy(emails),
                     }
+                mail_context_service.save_sync_state(account_key, resolved_history_id)
                 changed = bool(delta.get('changed_message_ids'))
                 return threads, emails, not changed, changed, resolved_history_id
         except Exception as exc:
@@ -921,13 +931,15 @@ def _mailbox_snapshot(profile, force=False):
 
     threads, emails = get_gmail_threads()
     with _mailbox_snapshot_lock:
-        _mailbox_snapshots.clear()
         _mailbox_snapshots[account_key] = {
             'history_id': history_id,
             'threads': deepcopy(threads),
             'emails': deepcopy(emails),
         }
-    return threads, emails, False, True, history_id
+    mail_context_service.save_sync_state(account_key, history_id, full_scan=True)
+    prior_history_id = persisted_sync.get('last_history_id')
+    source_changed = not prior_history_id or str(prior_history_id) != str(history_id or '')
+    return threads, emails, False, source_changed, history_id
 
 
 def _build_live_dashboard(profile, force_ai=False):
@@ -993,9 +1005,14 @@ def dashboard_overview():
         live_payload = _build_live_dashboard(profile, force_ai=force)
         user_id = profile.get('email') or profile.get('id')
         try:
-            threading.Thread(target=work_agent_service.sync_and_enqueue, args=(user_id, live_payload), daemon=True).start()
+            if force:
+                # Manual refresh is reconciliation-only: fetch current Gmail state
+                # and resolve/delete existing work without starting new AI work.
+                work_agent_service.reconcile_jobs_with_gmail(user_id)
+            else:
+                threading.Thread(target=work_agent_service.sync_and_enqueue, args=(user_id, live_payload), daemon=True).start()
         except Exception as sync_exc:
-            app.logger.debug('Work agent sync skipped: %s', sync_exc)
+            app.logger.debug('Work sync notice: %s', sync_exc)
         return jsonify(live_payload)
     except Exception as exc:
         app.logger.exception('Dashboard processing failed')
