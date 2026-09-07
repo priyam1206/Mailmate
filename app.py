@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import ipaddress
 import requests
+from copy import deepcopy
 from dateutil import parser as date_parser
 
 from flask import Flask, request, jsonify, redirect, send_from_directory, session, abort
@@ -31,7 +32,7 @@ os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 from email.utils import parseaddr
 from services.whisper_service import whisper_service
-from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft, find_sent_message_by_rfc_id
+from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_history_id, get_gmail_thread_changes, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft, find_sent_message_by_rfc_id
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
 from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
 from services.work_agent_service import work_agent_service
@@ -41,6 +42,7 @@ from services.automation_service import automation_service
 from services.calendar_conflicts import calculate_conflicts
 from services.agent.inference_broker import inference_broker
 from services.agent.token_budget import approximate_tokens, bounded_payload
+from services.mail_context_service import mail_context_service
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-secret-key-123')
@@ -74,6 +76,8 @@ CALENDAR_DISMISSALS_FILE = DATA_DIR / 'calendar_dismissals.json'
 _mail_send_lock = threading.Lock()
 _mail_send_operations = {}
 _calendar_dismissal_lock = threading.Lock()
+_mailbox_snapshot_lock = threading.Lock()
+_mailbox_snapshots = {}
 
 
 def _run_scheduled_kyle_goal(automation):
@@ -259,6 +263,7 @@ def serve_project_file(filename):
 
 @app.route('/api/health')
 def health():
+    supabase = mail_context_service.status()
     return jsonify({
         "ok": True,
         "googleClientConfigured": bool(os.getenv('GOOGLE_CLIENT_ID')),
@@ -266,9 +271,9 @@ def health():
         "geminiFallbackEnabled": str(os.getenv('MAILMATE_CLOUD_FALLBACK', '0')).lower() in {'1', 'true', 'yes', 'on'},
         "localModelConfigured": bool(os.getenv('LM_STUDIO_BASE_URL', 'http://127.0.0.1:2806/v1')),
         "whisper": whisper_service.get_status(),
-        "supabaseConfigured": False,
-        "supabase": {"enabled": False, "configured": False, "ready": False, "mode": "disabled"},
-        "privacyGate": {"enabled": True, "mode": "deterministic-local", "centralRetention": "disabled"},
+        "supabaseConfigured": supabase["configured"],
+        "supabase": supabase,
+        "privacyGate": {"enabled": True, "mode": "deterministic-local", "centralRetention": "derived-only-when-user-scoped"},
         "cachePolicy": {"syncCheckSeconds": CACHE_SYNC_SECONDS, "reprocessSeconds": CACHE_REPROCESS_SECONDS},
         "elevenLabsConfigured": bool(os.getenv('ELEVENLABS_API_KEY')),
         "calendar": calendar_access_status(),
@@ -879,8 +884,53 @@ def _reconcile_ai_calendar(payload, profile=None, force=False):
     }
 
 
-def _build_live_dashboard(profile, force_ai=False):
+def _mailbox_snapshot(profile, force=False):
+    """Use Gmail historyId as the cheap no-change path; raw data stays in process RAM."""
+    account_key = str(profile.get('id') or profile.get('sub') or profile.get('email') or 'default')
+    try:
+        history_id = get_gmail_history_id()
+    except Exception:
+        history_id = None
+    with _mailbox_snapshot_lock:
+        cached = _mailbox_snapshots.get(account_key)
+        if not force and cached and history_id and cached.get('history_id') == history_id:
+            return deepcopy(cached['threads']), deepcopy(cached['emails']), True, False, history_id
+
+    if not force and cached and cached.get('history_id') and history_id:
+        try:
+            delta = get_gmail_thread_changes(
+                cached['history_id'],
+                deepcopy(cached['threads']),
+                my_email=profile.get('email') or '',
+            )
+            if not delta.get('full_sync_required'):
+                threads = delta.get('threads') or []
+                emails = delta.get('emails') or []
+                resolved_history_id = delta.get('history_id') or history_id
+                with _mailbox_snapshot_lock:
+                    _mailbox_snapshots[account_key] = {
+                        'history_id': resolved_history_id,
+                        'threads': deepcopy(threads),
+                        'emails': deepcopy(emails),
+                    }
+                changed = bool(delta.get('changed_message_ids'))
+                return threads, emails, not changed, changed, resolved_history_id
+        except Exception as exc:
+            app.logger.info('Gmail incremental sync fell back to a bounded full scan: %s', exc)
+
     threads, emails = get_gmail_threads()
+    with _mailbox_snapshot_lock:
+        _mailbox_snapshots.clear()
+        _mailbox_snapshots[account_key] = {
+            'history_id': history_id,
+            'threads': deepcopy(threads),
+            'emails': deepcopy(emails),
+        }
+    return threads, emails, False, True, history_id
+
+
+def _build_live_dashboard(profile, force_ai=False):
+    threads, emails, mailbox_cached, source_changed, history_id = _mailbox_snapshot(profile, force=force_ai)
     if not threads:
         raise RuntimeError('No Gmail threads are available')
 
@@ -888,25 +938,43 @@ def _build_live_dashboard(profile, force_ai=False):
     for email in emails:
         email['privacy_gate'] = PrivacyGate.evaluate(email)
 
+    user_id = profile.get('id') or profile.get('sub') or profile.get('email') or ''
+    context_result = mail_context_service.update(user_id, emails)
+    context_by_message = {row['gmail_message_id']: row for row in context_result['rows']}
+    for email in emails:
+        email['context_scores'] = context_by_message.get(str(email.get('id') or email.get('gmail_id') or ''), {})
+    for thread in threads:
+        for message in thread.get('messages') or []:
+            message['context_scores'] = context_by_message.get(str(message.get('id') or message.get('gmail_id') or ''), {})
+
     ai_shielded = sum(1 for e in emails if not e.get('privacy_gate', {}).get('ai_allowed', True))
-    work_active = sum(1 for e in emails if e.get('privacy_gate', {}).get('work_agent_allowed', False))
+    work_active = sum(
+        1 for e in emails
+        if e.get('privacy_gate', {}).get('work_agent_allowed', False)
+        and e.get('context_scores', {}).get('work_allowed', False)
+    )
     privacy_summary = {
         "display_plane_total": len(emails),
         "ai_allowed_count": len(emails) - ai_shielded,
         "ai_shielded_count": ai_shielded,
         "work_active_count": work_active,
-        "central_retention": "disabled (browser-ram-only)"
+        "central_retention": "derived-only; raw mail stays transient"
     }
 
-    # Central mailbox retention is PROHIBITED (Gmail -> database = prohibited).
-    # Raw emails remain transient in browser RAM only.
+    # Gmail -> database is prohibited. Raw mail remains transient in process/browser RAM.
     overview = get_dashboard_overview(threads)
     overview['emails'] = emails
     overview['privacy_summary'] = privacy_summary
     overview['user'] = profile
     overview['user_id'] = profile.get('email') or profile.get('id') or ''
-    overview['cached'] = False
-    overview['source_changed'] = True
+    overview['cached'] = mailbox_cached
+    overview['source_changed'] = source_changed
+    overview['gmail_history_id'] = history_id
+    overview['context_sync'] = {
+        'changed_messages': context_result['changed_count'],
+        'classifier_version': 1,
+        'storage': context_result['persistence'],
+    }
     overview['calendar_dismissed_markers'] = sorted(_calendar_dismissed_markers(profile))
     overview['ai_calendar_sync'] = _reconcile_ai_calendar(overview, profile=profile, force=True)
 

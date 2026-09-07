@@ -52,7 +52,7 @@ Mailmate enforces a strict boundary between user email viewing and machine intel
 - **Google OAuth with Gmail modify & Calendar access**
 - **Transient In-Memory Inbox**: Full Gmail viewing with zero central mailbox storage
 - **Deterministic Local Privacy Gate**: Screens out banking, OTPs, and personal records before AI
-- **Proactive Work Agent**: Autonomously prepares checklists (`.md`, `.docx`) and response drafts
+- **Proactive Work Agent**: Uses LM Studio local-first to prepare checklists (`.md`, `.docx`) and response drafts
 - **Autopilot Safety Engine (`AutoSendPolicy`)**: 20-second cancelable auto-send countdown for routine acknowledgements only
 - **Kyle Browser Voice Assistant** with native browser speech input and speech synthesis
 - **Persistent Kyle Automations** with once, daily, weekly, and interval schedules; every run is recorded in Work
@@ -117,6 +117,25 @@ GEMINI_MODEL=gemini-3.6-flash
 GMAIL_FETCH_LIMIT=20
 GMAIL_QUERY=newer_than:30d
 ```
+
+### AI provider boundary
+
+- Gemini handles interactive Kyle language, mail drafting/editing, and privacy-approved Inbox intelligence.
+- Deterministic Kyle actions do not call an LLM.
+- LM Studio and `/api/compute` are reserved for Work Agent execution.
+- A `LOCAL_ONLY` Work item never falls back to Gemini or another cloud model.
+
+### Incremental derived context
+
+Mailmate checks Gmail's `historyId` before fetching thread metadata. If Gmail has not changed, it reuses the process-RAM snapshot and the existing overview result. Each message also has a versioned source fingerprint, so deterministic scoring only reruns for changed messages or a new classifier version.
+
+Optional Supabase storage contains minimized derived scores and identifiers only. It never contains raw bodies, HTML, attachments, links, recipient lists, or full subjects. To enable it:
+
+1. Apply `supabase/migrations/001_mail_context.sql` in the Supabase SQL editor.
+2. Set `SUPABASE_CONTEXT_ENABLED=1` and the four Supabase identity variables shown in `api.env.example`.
+3. Use the publishable key and legacy JWT signing secret. Do not configure a service-role key for this path.
+
+Flask maps the stable Google account ID to a namespaced UUID and signs a five-minute `authenticated` JWT. RLS then limits every operation to `auth.uid() = user_id`. Until that bridge is fully configured, storage remains memory-only by design.
 
 
 ---

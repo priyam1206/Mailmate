@@ -182,3 +182,22 @@ def test_mail_send_rejects_invalid_recipient(monkeypatch):
     })
     assert response.status_code == 400
     assert response.get_json()['code'] == 'invalid_recipient'
+
+
+def test_mailbox_snapshot_reuses_unchanged_history(monkeypatch):
+    mailmate_app._mailbox_snapshots.clear()
+    calls = {'threads': 0}
+    monkeypatch.setattr(mailmate_app, 'get_gmail_history_id', lambda: 'history-7')
+
+    def fetch_threads():
+        calls['threads'] += 1
+        email = {'id': 'm-1', 'thread_id': 't-1'}
+        return [{'thread_id': 't-1', 'messages': [email]}], [email]
+
+    monkeypatch.setattr(mailmate_app, 'get_gmail_threads', fetch_threads)
+    profile = {'id': 'google-user-1'}
+    first = mailmate_app._mailbox_snapshot(profile)
+    second = mailmate_app._mailbox_snapshot(profile)
+    assert calls['threads'] == 1
+    assert first[2:4] == (False, True)
+    assert second[2:4] == (True, False)

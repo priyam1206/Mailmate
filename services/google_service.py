@@ -234,6 +234,15 @@ def _gmail_query():
     return (os.getenv('GMAIL_QUERY') or 'newer_than:30d').strip()
 
 
+def get_gmail_history_id():
+    """Return Gmail's cheap mailbox change cursor without fetching message data."""
+    service = _gmail_service()
+    if not service:
+        return None
+    profile = service.users().getProfile(userId='me').execute()
+    return str(profile.get('historyId') or '') or None
+
+
 def get_gmail_message_ids(limit=250):
     """Cheap current-mail inventory used to prune stale cached/deleted messages."""
     service = _gmail_service()
@@ -453,7 +462,7 @@ def _batch_fetch_threads(service, refs):
                 userId='me',
                 id=thread_id,
                 format='metadata',
-                metadataHeaders=['From', 'To', 'Cc', 'Subject', 'Date'],
+                metadataHeaders=['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID'],
             )
             batch.add(request, callback=callback, request_id=thread_id)
         if refs:
@@ -473,7 +482,113 @@ def _batch_fetch_threads(service, refs):
                 ).execute()
             except Exception as item_exc:
                 print(f'[Gmail] thread {thread_id} skipped:', item_exc)
-        return payloads
+    return payloads
+
+
+def _parse_gmail_thread(thread_data, my_email):
+    thread_id = str(thread_data.get('id') or '')
+    messages = []
+    thread_subject = 'No Subject'
+    for item in thread_data.get('messages') or []:
+        headers = {str(h.get('name') or ''): str(h.get('value') or '') for h in (item.get('payload') or {}).get('headers', [])}
+        sender_raw = headers.get('From', '')
+        sender_name, sender_email = parseaddr(sender_raw)
+        sender_email = sender_email.lower()
+        subject = headers.get('Subject') or thread_subject
+        if subject and subject != 'No Subject':
+            thread_subject = subject
+        labels = item.get('labelIds', []) or []
+        is_sent_by_me = ('SENT' in labels) or (bool(my_email) and sender_email == my_email)
+        message = {
+            'id': item['id'],
+            'gmail_id': item['id'],
+            'thread_id': thread_id,
+            'sender': sender_raw,
+            'from': {'name': sender_name, 'email': sender_email},
+            'to': _address_list(headers.get('To', '')),
+            'cc': _address_list(headers.get('Cc', '')),
+            'subject': subject,
+            'rfc_message_id': headers.get('Message-ID') or headers.get('Message-Id') or '',
+            'date': headers.get('Date', ''),
+            'timestamp': headers.get('Date', ''),
+            'snippet': item.get('snippet', '') or '',
+            'body': item.get('snippet', '') or '',
+            'direction': 'outbound' if is_sent_by_me else 'inbound',
+            'is_sent_by_me': is_sent_by_me,
+            'is_read': 'UNREAD' not in labels,
+            'is_starred': 'STARRED' in labels,
+            'labels': labels,
+        }
+        messages.append(message)
+    return {
+        'thread_id': thread_id,
+        'subject': thread_subject,
+        'messages': messages,
+        'latest_direction': messages[-1]['direction'] if messages else 'inbound',
+    }, messages
+
+
+def get_gmail_thread_changes(start_history_id, cached_threads, my_email='', limit=None):
+    """Apply Gmail history changes to a recent in-memory thread snapshot."""
+    service = _gmail_service()
+    if not service or not start_history_id:
+        return {'full_sync_required': True}
+    changed_thread_ids = set()
+    changed_message_ids = set()
+    page_token = None
+    latest_history_id = str(start_history_id)
+    try:
+        while True:
+            kwargs = {'userId': 'me', 'startHistoryId': str(start_history_id), 'maxResults': 500}
+            if page_token:
+                kwargs['pageToken'] = page_token
+            response = service.users().history().list(**kwargs).execute()
+            latest_history_id = str(response.get('historyId') or latest_history_id)
+            for entry in response.get('history') or []:
+                candidates = list(entry.get('messages') or [])
+                for key in ('messagesAdded', 'messagesDeleted', 'labelsAdded', 'labelsRemoved'):
+                    candidates.extend(value.get('message') or {} for value in (entry.get(key) or []))
+                for message in candidates:
+                    if message.get('id'):
+                        changed_message_ids.add(str(message['id']))
+                    if message.get('threadId'):
+                        changed_thread_ids.add(str(message['threadId']))
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
+    except HttpError as exc:
+        if getattr(exc.resp, 'status', None) == 404:
+            return {'full_sync_required': True, 'history_id': latest_history_id}
+        raise
+
+    existing = {str(item.get('thread_id') or ''): item for item in (cached_threads or [])}
+    if not changed_thread_ids:
+        return {
+            'full_sync_required': False,
+            'history_id': latest_history_id,
+            'threads': list(existing.values()),
+            'emails': [message for thread in existing.values() for message in (thread.get('messages') or [])],
+            'changed_message_ids': [],
+        }
+
+    refs = [{'id': thread_id} for thread_id in changed_thread_ids]
+    payloads = _batch_fetch_threads(service, refs)
+    changed_threads = []
+    for thread_id in changed_thread_ids:
+        existing.pop(thread_id, None)
+        payload = payloads.get(thread_id)
+        if payload:
+            parsed, _ = _parse_gmail_thread(payload, str(my_email or '').lower())
+            changed_threads.append(parsed)
+    max_threads = max(1, min(int(limit or os.getenv('GMAIL_FETCH_LIMIT', '20') or 20), 50))
+    threads = (changed_threads + list(existing.values()))[:max_threads]
+    return {
+        'full_sync_required': False,
+        'history_id': latest_history_id,
+        'threads': threads,
+        'emails': [message for thread in threads for message in (thread.get('messages') or [])],
+        'changed_message_ids': sorted(changed_message_ids),
+    }
 
 
 def get_gmail_threads():
@@ -506,63 +621,14 @@ def get_gmail_threads():
     refs = service.users().threads().list(**kwargs).execute().get('threads', [])
     payloads = _batch_fetch_threads(service, refs)
 
-    results = []
-    emails = []
-
+    results, emails = [], []
     for ref in refs:
-        thread_id = str(ref.get('id') or '')
-        t_data = payloads.get(thread_id)
-        if not t_data:
+        thread_data = payloads.get(str(ref.get('id') or ''))
+        if not thread_data:
             continue
-
-        messages = []
-        thread_subject = 'No Subject'
-        for m in t_data.get('messages', []):
-            headers = {str(h.get('name') or ''): str(h.get('value') or '') for h in (m.get('payload') or {}).get('headers', [])}
-            sender_raw = headers.get('From', '')
-            sender_name, sender_email = parseaddr(sender_raw)
-            sender_email = sender_email.lower()
-            subject = headers.get('Subject') or thread_subject
-            if subject and subject != 'No Subject':
-                thread_subject = subject
-            date = headers.get('Date', '')
-            labels = m.get('labelIds', []) or []
-            is_sent_by_me = ('SENT' in labels) or (bool(my_email) and sender_email == my_email)
-            direction = 'outbound' if is_sent_by_me else 'inbound'
-            is_unread = 'UNREAD' in labels
-            is_starred = 'STARRED' in labels
-            snippet = m.get('snippet', '') or ''
-
-            msg_data = {
-                'id': m['id'],
-                'gmail_id': m['id'],
-                'thread_id': thread_id,
-                'sender': sender_raw,
-                'from': {'name': sender_name, 'email': sender_email},
-                'to': _address_list(headers.get('To', '')),
-                'cc': _address_list(headers.get('Cc', '')),
-                'subject': subject,
-                'rfc_message_id': headers.get('Message-ID') or headers.get('Message-Id') or '',
-                'date': date,
-                'timestamp': date,
-                'snippet': snippet,
-                'body': snippet,
-                'direction': direction,
-                'is_sent_by_me': is_sent_by_me,
-                'is_read': not is_unread,
-                'is_starred': is_starred,
-                'labels': labels,
-            }
-            messages.append(msg_data)
-            emails.append(msg_data)
-
-        latest_direction = messages[-1]['direction'] if messages else 'inbound'
-        results.append({
-            'thread_id': thread_id,
-            'subject': thread_subject,
-            'messages': messages,
-            'latest_direction': latest_direction,
-        })
+        parsed, parsed_messages = _parse_gmail_thread(thread_data, my_email)
+        results.append(parsed)
+        emails.extend(parsed_messages)
 
     return results, emails
 

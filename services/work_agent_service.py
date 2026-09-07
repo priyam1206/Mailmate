@@ -488,6 +488,9 @@ class WorkAgentService:
                 gate = PrivacyGate.evaluate(email if email else {"subject": subject, "snippet": snippet, "sender": sender})
                 if gate.get("work_agent_allowed") is not True:
                     continue
+                context_scores = email.get('context_scores') or {}
+                if context_scores and context_scores.get('work_allowed') is not True:
+                    continue
 
                 job_id = self._job_id(user_id, msg_id)
 

@@ -393,9 +393,11 @@ document.addEventListener('DOMContentLoaded', () => {
       setStep('fetch', 'done', 'Context loaded');
       setStep('extract', 'active', 'Extracting work, blockers, and deadlines');
       const data = await response.json();
-      setStep('extract', 'done', data.cached ? 'Loaded processed context' : 'New context extracted');
+      const changedMessages = Number(data.context_sync?.changed_messages || 0);
+      setStep('extract', 'done', changedMessages ? `Processed ${changedMessages} changed message${changedMessages === 1 ? '' : 's'}` : 'Reused processed context');
       setStep('store', 'active', 'Saving processed context');
-      setStep('store', 'done', 'Current transient context ready');
+      const storageMode = data.context_sync?.storage?.mode || 'memory-only';
+      setStep('store', 'done', storageMode === 'user-scoped-jwt' ? 'Saved private derived context' : 'Transient context ready');
 
       state.data = data;
       state.calendarDismissedMarkers = new Set(data.calendar_dismissed_markers || []);

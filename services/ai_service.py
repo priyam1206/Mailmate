@@ -146,6 +146,9 @@ def _overview_candidates(threads, limit=15):
     candidates = []
     for thread in threads or []:
         latest = _latest(thread)
+        context_scores = latest.get('context_scores') or {}
+        if context_scores.get('spam_score', 0) >= 0.65 or context_scores.get('phishing_score', 0) >= 0.55 or context_scores.get('malicious_score', 0) >= 0.55:
+            continue
         subject = str(latest.get('subject') or thread.get('subject') or 'Email')
         snippet = str(latest.get('snippet') or latest.get('body') or thread.get('snippet') or '')
         direction = str(latest.get('direction') or thread.get('direction') or '').lower()

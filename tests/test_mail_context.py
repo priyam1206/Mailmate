@@ -1,0 +1,58 @@
+from services.mail_context_service import MailContextService, classify_message
+
+
+def message(**overrides):
+    value = {
+        'id': 'm-1',
+        'thread_id': 't-1',
+        'subject': 'Please submit the project report tomorrow',
+        'sender': 'Teacher <teacher@example.edu>',
+        'snippet': 'Please send the PDF before the deadline tomorrow.',
+        'timestamp': '2026-09-07T10:00:00Z',
+        'direction': 'inbound',
+        'labels': ['INBOX', 'IMPORTANT'],
+        'privacy_gate': {'routing': 'CLOUD_ALLOWED'},
+    }
+    value.update(overrides)
+    return value
+
+
+def test_actionable_work_is_allowed():
+    row = classify_message(message(), {'routing': 'CLOUD_ALLOWED'})
+    assert row['attention_allowed'] is True
+    assert row['work_allowed'] is True
+    assert row['category'] == 'actionable_work'
+
+
+def test_prize_phishing_never_becomes_work():
+    row = classify_message(message(
+        subject='URGENT: claim your casino prize',
+        snippet='Verify your account password immediately at http://1.2.3.4/login',
+    ), {'routing': 'CLOUD_ALLOWED'})
+    assert row['phishing_score'] >= 0.55
+    assert row['attention_allowed'] is False
+    assert row['work_allowed'] is False
+    assert row['calendar_allowed'] is False
+
+
+def test_context_rows_never_contain_mail_content(monkeypatch):
+    monkeypatch.setenv('SUPABASE_CONTEXT_ENABLED', '0')
+    service = MailContextService()
+    result = service.update('user-1', [message(body='full private body')])
+    row = result['rows'][0]
+    assert result['changed_count'] == 1
+    assert 'subject' not in row
+    assert 'snippet' not in row
+    assert 'body' not in row
+    assert 'sender' not in row
+
+
+def test_unchanged_message_reuses_classification(monkeypatch):
+    monkeypatch.setenv('SUPABASE_CONTEXT_ENABLED', '0')
+    service = MailContextService()
+    first = service.update('user-1', [message()])
+    second = service.update('user-1', [message()])
+    changed = service.update('user-1', [message(snippet='Please send the updated PDF tomorrow.')])
+    assert first['changed_count'] == 1
+    assert second['changed_count'] == 0
+    assert changed['changed_count'] == 1
