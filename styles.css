@@ -60,57 +60,6 @@ body {
   border-width: 0;
 }
 
-/* Fallback Background: If video file is missing or blocked on another PC */
-.video-fallback-bg {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  background-color: #080307;
-  background-image: url('./assets/images/video_preview.jpg'), url('./video_preview.jpg');
-  background-size: cover;
-  background-position: center bottom;
-  filter: blur(14px);
-  transform: scale(1.08);
-  opacity: 0;
-  z-index: 0;
-  pointer-events: none;
-  transition: opacity 350ms ease;
-  will-change: opacity;
-}
-
-/* Background Video: Hidden on landing, blurred on scroll */
-.bg-video {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  object-fit: cover;
-  object-position: center bottom;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0;
-  filter: blur(14px);
-  transform: scale(1.08);
-  transition: opacity 350ms ease;
-  will-change: opacity;
-}
-
-/* Atmospheric Overlay: Transitions to deep obsidian glass theme on scroll */
-.video-overlay {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  background: radial-gradient(circle at 50% 45%, rgba(25, 25, 32, 0.45) 0%, rgba(12, 12, 16, 0.75) 60%, rgba(4, 4, 6, 0.96) 100%);
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 350ms ease;
-  will-change: opacity;
-}
-
 /* Ambient background silver sparks */
 #particles {
   position: fixed;
@@ -625,12 +574,6 @@ body.app-active .hero-identity,
 body.app-active .auth-container {
   opacity: 0 !important;
   pointer-events: none !important;
-}
-
-body.app-active .bg-video,
-body.app-active .video-fallback-bg,
-body.app-active .video-overlay {
-  opacity: 1 !important;
 }
 
 .mail-sidebar,

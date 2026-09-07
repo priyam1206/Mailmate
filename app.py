@@ -2467,8 +2467,9 @@ def _email_display_name(address):
 
 
 def _substantive_mail_body(body):
-    content = re.sub(r'(?im)^\s*(hi|hello|dear)\b[^\n]*[,!]?\s*$', '', str(body or ''))
-    content = re.sub(r'(?ims)\b(best regards|best|regards|sincerely|thanks)[,\s]*\n?\s*[^\n]{1,80}\s*$', '', content)
+    content = re.sub(r'\s+', ' ', str(body or '')).strip()
+    content = re.sub(r'^(?:hi|hello|dear)(?:\s+[^,.!?]{1,80})?[,!]\s*', '', content, count=1, flags=re.I)
+    content = re.sub(r'\s+\b(?:best regards|best|regards|sincerely|thanks)[,\s]+[^,.!?]{1,80}\s*$', '', content, flags=re.I)
     return len(re.sub(r'\W+', '', content)) >= 24
 
 
@@ -2481,6 +2482,40 @@ def _mail_body_fallback(recipient_name, intent, user_name, reply=False):
         message = request[:1].upper() + request[1:] if request else 'I wanted to share a quick update with you.'
         message = message.rstrip('.') + '.'
     return f"Hi {first_name},\n\n{message}\n\nBest regards,\n{user_name}"
+
+
+def _normalize_generated_mail_body(body, recipient_name, user_name):
+    """Keep model-written copy while enforcing a readable email shape."""
+    text = str(body or '').replace('\r\n', '\n').replace('\r', '\n').strip()
+    first_name = str(recipient_name or 'there').split()[0]
+    greeting = f"Hi {first_name},"
+    text = re.sub(
+        r'^(?:hi|hello|dear)(?:\s+[^,\n]+)?[,!]\s*',
+        f'{greeting}\n\n',
+        text,
+        count=1,
+        flags=re.I,
+    )
+    if not re.match(r'^(?:hi|hello|dear)\b', text, re.I):
+        text = f'{greeting}\n\n{text}'
+
+    signoff = re.compile(
+        rf'\s+(?:best regards|best|regards|sincerely|thanks),?\s+{re.escape(str(user_name))}\s*$',
+        re.I,
+    )
+    if signoff.search(text):
+        text = signoff.sub(f'\n\nBest,\n{user_name}', text)
+    elif not re.search(r'(?im)^(?:best regards|best|regards|sincerely|thanks),?\s*$', text):
+        text = f'{text.rstrip()}\n\nBest,\n{user_name}'
+    return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
+def _kyle_clock_reply(message):
+    if not re.search(r'\b(?:what(?:\s+is|\'s)?\s+the\s+time|what\s+time\s+is\s+it|current\s+time|time\s+now)\b', str(message or ''), re.I):
+        return None
+    now = datetime.now(APP_TZ)
+    hour = now.strftime('%I').lstrip('0') or '12'
+    return f"It's {hour}:{now.strftime('%M %p')} on {now.strftime('%A, %B')} {now.day}."
 
 
 def _handle_mail_intent(message, active_draft, selected_email, context_emails, user_profile):
@@ -2595,15 +2630,17 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 f"Recipient: {recipient_display} <{target_contact['email']}>\n"
                 f"Subject: {clean_sub}\n"
                 f"Instruction: {user_saying}\n\n"
-                f"Draft a concise, natural reply email. Include greeting ('Hi {first_name},'), the concise response message, and sign-off ('Regards,\n{user_name}').\n"
+                f"Write a complete, concise and natural reply. Turn the instruction into polished prose rather than repeating command wording. "
+                f"Use 2-5 useful sentences, greeting ('Hi {first_name},'), and sign-off ('Regards,\n{user_name}').\n"
                 f"Return ONLY the email body text."
             )
             body = chat_with_kyle(prompt).strip()
             if not _substantive_mail_body(body):
                 body = _mail_body_fallback(recipient_display, user_saying, user_name, reply=True)
+            body = _normalize_generated_mail_body(body, recipient_display, user_name)
 
             return {
-                'reply': f"I prepared a reply to {first_name}. You can review it above, make edits, or click Send.",
+                'reply': f"I've prepared a reply to {first_name}. It's ready here for you to review or edit.",
                 'actions': [{
                     'tool': 'mail.reply',
                     'args': {
@@ -2651,15 +2688,28 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                     'mode': 'recipient_required',
                 }
 
-            intent_m = re.search(r'\b(?:and\s+ask|asking|about|saying|that)\s+(.*)$', message, re.I)
-            user_intent = intent_m.group(1).strip() if intent_m else message
-
             first_name = target_contact['name'].split()[0]
+            intent_m = re.search(r'\b(?:and\s+ask|asking|about|saying|that|to\s+say)\s+(.*)$', message, re.I)
+            if intent_m:
+                user_intent = intent_m.group(1).strip()
+            elif explicit_address:
+                user_intent = message.lower().split(explicit_address.lower(), 1)[1].strip(' ,:.-')
+            else:
+                user_intent = ''
+
+            if not user_intent:
+                return {
+                    'reply': f"What would you like the email to {first_name} to say?",
+                    'actions': [],
+                    'mode': 'message_required',
+                }
+
             prompt = (
                 f"You are Kyle, an AI assistant composing a new email from {user_name}.\n"
                 f"Recipient: {target_contact['name']} <{target_contact['email']}>\n"
                 f"User instruction: {user_intent}\n\n"
-                f"Return JSON with 'subject' (concise 3-6 words) and 'body' (greeting, concise message, sign-off 'Best,\n{user_name}').\n"
+                f"Turn the instruction into a finished, natural email rather than copying command wording. "
+                f"Return JSON with 'subject' (specific, concise 3-6 words) and 'body' (greeting, 2-5 useful sentences, sign-off 'Best,\n{user_name}').\n"
                 f"Format: {{\"subject\": \"...\", \"body\": \"...\"}}"
             )
             raw = chat_with_kyle(prompt).strip()
@@ -2674,6 +2724,7 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 pass
             if not _substantive_mail_body(body):
                 body = _mail_body_fallback(target_contact['name'], user_intent, user_name)
+            body = _normalize_generated_mail_body(body, target_contact['name'], user_name)
 
             explicit_send = bool(re.search(r'\bsend\s+(?:an?\s+)?(?:email|mail)\s+to\b', lower))
             actions = [{
@@ -2689,7 +2740,7 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 actions.append({'tool': 'mail.send_draft', 'args': {'explicit_send': True}})
             return {
                 'reply': (f"I'm sending that email to {first_name}." if explicit_send else
-                          f"I prepared a draft for {first_name}. Review it above, edit if needed, and send whenever you're ready."),
+                          f"I've drafted that email to {first_name}. It's ready here whenever you want to send it."),
                 'actions': actions,
                 'mode': 'mail_composer'
             }
@@ -2785,6 +2836,17 @@ def kyle_agent_endpoint():
         'active_draft': active_draft,
         'conversation': (data.get('conversation') or [])[-12:],
     })
+
+    clock_reply = _kyle_clock_reply(message)
+    if clock_reply:
+        return jsonify({
+            'reply': clock_reply,
+            'text': clock_reply,
+            'voice': clock_reply,
+            'actions': [],
+            'mode': 'deterministic-context',
+            'context_version': system_ctx.get('context_version', 1),
+        })
 
     # Mail commands have a deterministic recipient/action path. Resolve them
     # before any semantic planning so explicit sends never depend on LM Studio.

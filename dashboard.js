@@ -111,10 +111,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!raw) return false;
       const snapshot = JSON.parse(raw);
       if (!snapshot?.data || Date.now() - Number(snapshot.savedAt || 0) > 15 * 60 * 1000) return false;
-      state.data = snapshot.data;
-      state.calendarDismissedMarkers = new Set(snapshot.data.calendar_dismissed_markers || []);
-      renderDashboard(snapshot.data);
-      if (snapshot.data.user) setProfile(snapshot.data.user);
+      state.data = normalizeTextTree(snapshot.data);
+      state.calendarDismissedMarkers = new Set(state.data.calendar_dismissed_markers || []);
+      renderDashboard(state.data);
+      if (state.data.user) setProfile(state.data.user);
       els.processState.textContent = 'Showing recent session · refreshing';
       return true;
     } catch (_) {
@@ -416,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!response.ok) throw new Error(`Dashboard returned ${response.status}`);
       setStep('fetch', 'done', 'Context loaded');
       setStep('extract', 'active', forceRefresh ? 'Reconciling mailbox changes' : 'Extracting work, blockers, and deadlines');
-      const data = await response.json();
+      const data = normalizeTextTree(await response.json());
       const changedMessages = Number(data.context_sync?.changed_messages || 0);
       setStep('extract', 'done', changedMessages ? `${changedMessages} changed message${changedMessages === 1 ? '' : 's'} updated` : 'No mailbox changes');
       setStep('store', 'active', forceRefresh ? 'Updating active context' : 'Saving processed context');
@@ -430,7 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const workResponse = await fetch(`${API_BASE}/api/work/jobs${forceRefresh ? '' : '?ensure=1'}`, { cache: 'no-store' });
         if (workResponse.ok) {
-          workJobs = await workResponse.json();
+          workJobs = normalizeTextTree(await workResponse.json());
           renderOverviewWorkingNow();
         }
       } catch (workSyncError) {
@@ -723,6 +723,7 @@ document.addEventListener('DOMContentLoaded', () => {
       })
       .then(detail => {
         if (!detail || detail.error) return;
+        detail = normalizeTextTree(detail);
         state.fullMessages.set(id, detail);
         const source = state.data?.emails?.find(item => emailKey(item) === id);
         if (source) Object.assign(source, detail, { is_read: source.is_read });
@@ -848,7 +849,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEmailDetail(email, true);
     try {
       const response = await fetch(`${API_BASE}/api/gmail/messages/${encodeURIComponent(id)}`, { cache: 'no-store' });
-      const detail = await response.json().catch(() => ({}));
+      const detail = normalizeTextTree(await response.json().catch(() => ({})));
       if (!response.ok) throw new Error(detail.error || `Gmail message returned ${response.status}`);
       state.fullMessages.set(id, detail);
       const source = state.data?.emails?.find(item => emailKey(item) === id);
@@ -1169,7 +1170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const res = await fetch(`${API_BASE}/api/work/jobs`, { cache: 'no-store' });
           if (res.ok) {
-            workJobs = await res.json();
+            workJobs = normalizeTextTree(await res.json());
             renderOverviewWorkingNow();
             if (state.currentPage === 'work') {
               renderWorkRail(workJobs);
@@ -1273,7 +1274,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await fetch(`${API_BASE}/api/work/jobs`);
       if (res.ok) {
-        workJobs = await res.json();
+        workJobs = normalizeTextTree(await res.json());
         if (state.currentPage === 'inbox' && state.data?.emails) {
           renderEmails(state.data.emails);
         }
@@ -1933,8 +1934,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function escapeHtml(value) {
     const div = document.createElement('div');
-    div.textContent = String(value ?? '');
+    div.textContent = repairTextEncoding(value);
     return div.innerHTML;
+  }
+
+  function repairTextEncoding(value) {
+    let text = String(value ?? '');
+    const replacements = new Map([
+      ['\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a2', '\u2022'],
+      ['\u00e2\u20ac\u00a2', '\u2022'], ['\u00c2\u00b7', '\u00b7'],
+      ['\u00e2\u20ac\u201c', '\u2013'], ['\u00e2\u20ac\u201d', '\u2014'],
+      ['\u00e2\u20ac\u00a6', '\u2026'], ['\u00e2\u20ac\u2122', '\u2019'],
+      ['\u00e2\u20ac\u02dc', '\u2018'], ['\u00e2\u20ac\u0153', '\u201c'],
+      ['\u00e2\u20ac\u009d', '\u201d'], ['\u00e2\u20ac\u0152', ''],
+      ['\u00e2\u20ac\u008d', ''], ['\u00c2 ', ' ']
+    ]);
+    replacements.forEach((replacement, broken) => { text = text.split(broken).join(replacement); });
+    return text.replace(/[\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '');
+  }
+
+  function normalizeTextTree(value) {
+    if (typeof value === 'string') return repairTextEncoding(value);
+    if (Array.isArray(value)) return value.map(normalizeTextTree);
+    if (value && typeof value === 'object') {
+      Object.keys(value).forEach(key => { value[key] = normalizeTextTree(value[key]); });
+    }
+    return value;
   }
 
   /**
@@ -1944,7 +1969,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function decodeHtml(value) {
     const ta = document.createElement('textarea');
     ta.innerHTML = String(value ?? '');
-    return ta.value
+    return repairTextEncoding(ta.value)
       .replace(/[\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '')
       .replace(/[ \t]{2,}/g, ' ')
       .trim();
@@ -2813,7 +2838,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Savingâ€¦';
+        submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Saving...';
       }
       try {
         const payload = automationPayload();

@@ -439,7 +439,10 @@
           !readOnlyMailIntent
         );
       if (composerRequest && !activeDraft) {
-        window.KyleUi?.active?.openPreparingComposer?.(/\breply\b/i.test(cleanPrompt) ? 'reply' : 'compose');
+        window.KyleUi?.active?.openPreparingComposer?.(
+          /\breply\b/i.test(cleanPrompt) ? 'reply' : 'compose',
+          cleanPrompt
+        );
         ui.setSubtitle?.('Preparing draft...');
       }
 
@@ -468,6 +471,8 @@
       // explicit error reminder before giving up.
       const composerToolMissing = (payload) => !(payload?.actions || [])
         .some(action => ['mail.compose', 'mail.reply', 'mail.update_draft', 'mail.send_draft'].includes(action.tool));
+      const composerNeedsClarification = (payload) =>
+        ['message_required', 'recipient_required', 'contact_disambiguation'].includes(payload?.mode);
 
       const MAX_TOOL_RETRIES = 2;
       let data = null;
@@ -478,7 +483,7 @@
             ? `${cleanPrompt}\n\nPlease use the appropriate mail tool for this request instead of returning text only.`
             : cleanPrompt;
           data = await askAgent(retryNote);
-          if (!composerRequest || !composerToolMissing(data)) {
+          if (!composerRequest || composerNeedsClarification(data) || !composerToolMissing(data)) {
             lastError = null;
             break;
           }
@@ -501,6 +506,11 @@
         return;
       }
       if (!data) throw lastError || new Error('Kyle returned no response');
+
+      if (composerRequest && composerNeedsClarification(data)) {
+        window.KyleUi?.active?.closeComposer?.();
+        window.KyleCanvas?.cancelPending?.();
+      }
 
       const useOverviewCanvas = window.KyleCanvas?.shouldPresent?.(cleanPrompt, data) || false;
       if (overviewCanvasStarted && !useOverviewCanvas) window.KyleCanvas?.cancelPending?.();

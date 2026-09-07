@@ -3257,8 +3257,13 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .main::-webkit-scrollbar, .tab
 .kyle-action-panel.kyle-overview-inline-composer {
   position: relative !important; inset: auto !important; left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
   width: 100% !important; max-height: none !important; margin: 0 !important; overflow: visible !important; border: 0 !important;
-  border-radius: 0 !important; background: transparent !important; box-shadow: none !important; transform: none !important;
-  opacity: 1 !important; pointer-events: auto !important; z-index: auto !important;
+  border-radius: 0 !important; background: transparent !important; box-shadow: none !important; transform: none;
+  opacity: 1; pointer-events: auto !important; z-index: auto !important;
+  animation: kyleComposerReveal 460ms cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes kyleComposerReveal {
+  from { opacity: 0; transform: translateY(18px) scale(.992); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 }
 .kyle-overview-inline-composer .kyle-panel-header { padding: 0 0 22px; border: 0; background: transparent; cursor: default; }
 .kyle-overview-inline-composer .kyle-panel-title { color: var(--text); font-family: "Space Grotesk",sans-serif; font-size: clamp(1.7rem,2.7vw,2.6rem); }
@@ -3754,7 +3759,7 @@ body > #kyleOverviewHome .kyle-shell {
 }
 
 .kyle-canvas-item::before {
-  content: "â€¢";
+  content: "\2022";
   position: absolute;
   left: 2px;
   top: -1px;

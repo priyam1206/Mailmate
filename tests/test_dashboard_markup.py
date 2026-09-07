@@ -19,10 +19,16 @@ def test_automation_modal_has_backdrop_and_complete_form():
 def test_kyle_composer_assets_are_cache_bumped():
     html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
-    assert 'dashboard.css?v=46' in html
+    assert 'dashboard.css?v=47' in html
     assert 'mailmate-master-polish.css?v=2' in html
-    assert 'kyle-ui.js?v=44' in html
-    assert 'kyle.js?v=38' in html
+    assert 'kyle-ui.js?v=45' in html
+    assert 'kyle.js?v=40' in html
+
+
+def test_mail_composer_allows_clarification_without_tool_failure():
+    js = (ROOT / 'kyle.js').read_text(encoding='utf-8')
+    assert 'composerNeedsClarification' in js
+    assert "'message_required', 'recipient_required', 'contact_disambiguation'" in js
 
 
 def test_inbox_hides_unattached_work_and_display_only_noise():
@@ -90,7 +96,7 @@ def test_overview_is_kyle_canvas_surface():
     assert 'id="kyleCanvas"' in html
     assert 'id="overviewDataSurface"' in html
     assert 'id="kyleCanvasComposerHost"' in html
-    assert 'kyle-canvas.js?v=5' in html
+    assert 'kyle-canvas.js?v=9' in html
     assert 'MAILMATE_OVERVIEW_CANVAS_V1' in css
     assert 'kyle-overview-inline-composer' in css
     assert 'window.KyleCanvas?.beginComposer?.(mode)' in ui
@@ -164,12 +170,18 @@ def test_floating_kyle_is_fixed_persistent_and_not_draggable():
     assert 'NO pointerdown' in drag
     assert 'dockMount' in drag
     assert 'dockPanel' in drag
+    assert "attributes: true" not in drag
+    assert "if (layoutFrame) return" in drag
+    assert 'kyle-drag.js?v=8' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
 
 def test_kyle_canvas_has_runtime_safe_frame_scheduler():
     canvas = (ROOT / 'kyle-canvas.js').read_text(encoding='utf-8')
     assert 'function requestAnimationFrameSafe' in canvas
     assert "typeof raf === 'function'" in canvas
+    assert 'function conversationalIntent' in canvas
+    assert '!conversationalIntent(prompt)' in canvas
+    assert 'what time is it' in canvas
 
 
 def test_canvas_scope_respects_specific_questions():

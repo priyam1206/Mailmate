@@ -71,7 +71,7 @@
             </div>
 
             <footer class="kyle-panel-footer" id="kylePanelFooter">
-              <div class="kyle-panel-status" id="kylePanelStatus">Draft ready Â· Edit anytime or click Send</div>
+              <div class="kyle-panel-status" id="kylePanelStatus">Draft ready - Edit anytime or click Send</div>
               <div class="kyle-panel-actions">
                 <button class="kyle-btn secondary-btn" id="kyleComposerChangeBtn" type="button">Cancel</button>
                 <button class="kyle-btn primary-btn" id="kyleComposerSendBtn" type="button">
@@ -447,10 +447,10 @@
       if (message) setComposerStatus(message, composerState === 'error');
     }
 
-    function openPreparingComposer(mode = 'compose') {
+    function openPreparingComposer(mode = 'compose', prompt = '') {
       activeDraft = { recipient: '', to: '', subject: '', body: '', thread_id: null, in_reply_to: null, operation_id: null, mode };
       const page = window.MailmateContext?.snapshot?.().page || presentationMode;
-      window.KyleCanvas?.beginComposer?.(mode);
+      window.KyleCanvas?.beginComposer?.(mode, prompt);
       setPresentationMode(page === 'overview' ? 'overview' : 'floating', { immediate: true });
       openSurface('email_review', mode === 'reply' ? 'Preparing reply' : 'Preparing email', 'Kyle is working');
       ensureComposerVisible();
@@ -575,7 +575,7 @@
       safe = safe
         .replace(/`([^`]+)`/g, '<code>$1</code>')
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/(^|\n)[*-]\s+([^\n]+)/g, '$1<span class="kyle-chat-bullet">Ã¢â‚¬Â¢ $2</span>')
+        .replace(/(^|\n)[*-]\s+([^\n]+)/g, '$1<span class="kyle-chat-bullet">&bull; $2</span>')
         .replace(/\n{2,}/g, '</p><p>')
         .replace(/\n/g, '<br>');
 
@@ -669,7 +669,7 @@
         if (generation !== fillGeneration || !activeDraft) return;
         subjectInput.value = activeDraft.subject || '';
         bodyInput.value = activeDraft.body || '';
-        setComposerState('draft_ready', 'Draft ready Â· Edit anytime or click Send');
+        setComposerState('draft_ready', 'Draft ready - Edit anytime or click Send');
         const rawTo = String(activeDraft.to || activeDraft.recipient || '');
         const emailMatch = rawTo.match(/<([^>]+)>/) || [null, rawTo];
         const cleanTo = emailMatch[1].trim();
@@ -678,7 +678,7 @@
       });
 
       panelFooter.style.display = 'flex';
-      panelStatus.textContent = 'Draft ready Â· Edit anytime or click Send';
+      panelStatus.textContent = 'Draft ready - Edit anytime or click Send';
       panelStatus.style.color = 'var(--muted)';
       changeBtn.style.display = '';
       changeBtn.textContent = 'Edit';
@@ -713,7 +713,7 @@
         const restoredState = stateBeforeMinimize === 'minimized' ? 'draft_ready' : stateBeforeMinimize;
         setComposerState(restoredState || 'draft_ready', restoredState === 'preparing' || restoredState === 'generating'
           ? 'Preparing your draft...'
-          : 'Draft ready Â· Edit anytime or click Send');
+          : 'Draft ready - Edit anytime or click Send');
       }
       dockActionPanel();
     }
@@ -731,21 +731,27 @@
       if (draft.subject !== undefined) {
         activeDraft.subject = draft.subject;
         activeDraft.operation_id = null;
-        subjectInput.value = draft.subject;
       }
       if (draft.body !== undefined) {
         activeDraft.body = draft.body;
         activeDraft.operation_id = null;
-        bodyInput.value = draft.body;
-        bodyInput.classList.add('draft-revised');
-        setTimeout(() => bodyInput.classList.remove('draft-revised'), 700);
       }
 
       const displayName = (activeDraft.recipient || activeDraft.to || '').split('<')[0].trim() || activeDraft.to || 'Contact';
       panelTitle.textContent = activeDraft.mode === 'reply' ? `Reply to ${displayName}` : `Email ${displayName}`;
       panelSubtitle.textContent = activeDraft.to || activeDraft.recipient || '';
-      panelStatus.textContent = 'Draft updated Â· Edit anytime or click Send';
-      panelStatus.style.color = 'var(--muted)';
+      const generation = ++fillGeneration;
+      setComposerState('generating', 'Writing your draft...');
+      Promise.all([
+        animateField(subjectInput, activeDraft.subject, generation),
+        animateField(bodyInput, activeDraft.body, generation)
+      ]).then(() => {
+        if (generation !== fillGeneration || !activeDraft) return;
+        setComposerState('draft_ready', 'Draft ready - Edit anytime or click Send');
+        bodyInput.classList.add('draft-revised');
+        setTimeout(() => bodyInput.classList.remove('draft-revised'), 700);
+        sendBtn.disabled = !isValidEmail(activeDraft.to);
+      });
     }
 
     function getActiveDraft() {
@@ -918,8 +924,8 @@
       const end = new Date(event.end || event.start);
       if (Number.isNaN(start.getTime())) return '';
       const day = start.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-      if (event.all_day) return `${day} Â· All day`;
-      return `${day} Â· ${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}â€“${end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+      if (event.all_day) return `${day} - All day`;
+      return `${day} - ${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}-${end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
     }
 
     function showCalendarConfirmation(events = []) {

@@ -8,22 +8,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=2">
+  <link rel="stylesheet" href="./styles.css?v=3">
+  <link rel="stylesheet" href="./landing.css?v=2">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="./script.js?v=2" defer></script>
+  <script src="./script.js?v=3" defer></script>
+  <script src="./landing.js?v=2" defer></script>
 </head>
-<body>
+<body class="landing-v2">
   <h1 class="sr-only">MailMate - Code2Create 7.0 Portal</h1>
-
-  <!-- Portable Fallback Background Image (Works if video is missing or unsupported) -->
-  <div class="video-fallback-bg" id="videoFallbackBg" aria-hidden="true"></div>
-
-  <!-- Background Video with Multi-Source Fallback (assets/videos/ and root ./) -->
-  <video id="bgVideo" class="bg-video" autoplay muted loop playsinline preload="auto" poster="./assets/images/video_preview.jpg">
-    <source src="./assets/videos/c2c_background.mp4" type="video/mp4">
-    <source src="./c2c_background.mp4" type="video/mp4">
-  </video>
-  <div class="video-overlay" id="videoOverlay" aria-hidden="true"></div>
 
   <!-- Ambient floating sakura sparks -->
   <div id="particles" aria-hidden="true"></div>
@@ -41,16 +33,115 @@
   <canvas class="dot-logo" id="dotLogo" aria-hidden="true"></canvas>
   <div class="hero-identity" aria-label="Mailmate by Ciphersquad">
     <h1>Mailmate</h1>
-    <p>Built by Ciphersquad · Code2Create 7.0</p>
+    <p>Built by Ciphersquad &middot; Code2Create 7.0</p>
   </div>
 
   <!-- Subtle Scroll Indicator -->
   <div class="scroll-prompt" id="scrollPrompt">
-    <span class="prompt-text">Scroll to Authenticate</span>
+    <span class="prompt-text">Scroll to explore</span>
     <div class="mouse-icon" aria-hidden="true">
       <div class="mouse-wheel"></div>
     </div>
   </div>
+
+  <div class="landing-story" id="landingStory" aria-label="About MailMate">
+    <section class="story-page story-page-hero" data-story-page="0" aria-label="MailMate intro"></section>
+
+    <section class="story-page story-page-signal" data-story-page="1" aria-labelledby="signalTitle">
+      <div class="story-shell story-grid">
+        <div class="story-copy story-reveal">
+          <p class="story-index">01 / SIGNAL</p>
+          <h2 id="signalTitle">Know what matters before you open the inbox.</h2>
+          <p class="story-lede">MailMate turns a noisy Gmail account into a clear operating view: what needs attention, what became Work, what has a deadline, and what can safely wait.</p>
+          <ul class="signal-key" aria-label="Mail intelligence signals">
+            <li><span></span>Priority</li><li><span></span>Action</li><li><span></span>Deadline</li><li><span></span>Context</li>
+          </ul>
+        </div>
+        <div class="inbox-visual story-reveal story-reveal-late" aria-label="Example intelligent inbox">
+          <header><span>INBOX / LIVE</span><small>20 recent messages</small></header>
+          <article class="mail-row mail-row-hot"><i></i><div><small>NEEDS ATTENTION</small><strong>Operating Systems submission</strong><p>Deadline detected. A reply or action is likely required.</p></div><time>Now</time></article>
+          <article class="mail-row"><i></i><div><small>CONTEXT</small><strong>Lab exam details</strong><p>Useful academic update. Visible without creating unnecessary Work.</p></div><time>12m</time></article>
+          <article class="mail-row mail-row-quiet"><i></i><div><small>INFORMATION</small><strong>Weekly newsletter</strong><p>Readable when you need it, kept out of the action queue.</p></div><time>1h</time></article>
+          <footer><span>Gmail remains the source of truth</span><span class="live-signal"><i></i> Updated</span></footer>
+        </div>
+      </div>
+    </section>
+
+    <section class="story-page story-page-kyle" data-story-page="2" aria-labelledby="kyleStoryTitle">
+      <div class="story-shell story-grid story-grid-reverse">
+        <div class="kyle-visual story-reveal" aria-hidden="true">
+          <div class="kyle-cloud"><span></span><span></span><span></span></div>
+          <div class="kyle-question"><small>YOU</small><p>What should I handle first today?</p></div>
+          <div class="kyle-answer"><small>KYLE / OVERVIEW</small><strong>Start with the OS submission.</strong><p>It has the nearest deadline. The lab update matters next; the rest of the inbox can wait.</p><div><span>Open email</span><span>Draft reply</span><span>Show schedule</span></div></div>
+        </div>
+        <div class="story-copy story-reveal story-reveal-late">
+          <p class="story-index">02 / KYLE</p>
+          <h2 id="kyleStoryTitle">Ask once. The workspace rearranges itself.</h2>
+          <p class="story-lede">Kyle can find the right message, move through MailMate, prepare a draft, bring Calendar context into view, and explain the result naturally by text or voice.</p>
+          <p class="story-note">Voice stays concise. The workspace carries the detail.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="story-page story-page-work" data-story-page="3" aria-labelledby="workStoryTitle">
+      <div class="story-shell">
+        <div class="story-copy story-copy-wide story-reveal">
+          <p class="story-index">03 / WORK</p>
+          <h2 id="workStoryTitle">From email to execution, with you in control.</h2>
+          <p class="story-lede">Only messages that genuinely require action become Work. Every step stays visible, and external or destructive actions remain approval-gated.</p>
+        </div>
+        <ol class="work-flow story-reveal story-reveal-late">
+          <li class="is-done"><span>01</span><small>DETECT</small><strong>Find the actual request</strong><p>Separate actionable mail from useful context and noise.</p></li>
+          <li class="is-done"><span>02</span><small>PLAN</small><strong>Gather what matters</strong><p>Resolve Gmail, Calendar and existing Work state.</p></li>
+          <li class="is-live"><span>03</span><small>PREPARE</small><strong>Build the result</strong><p>Show progress while drafts, files and next steps are prepared.</p></li>
+          <li><span>04</span><small>APPROVE</small><strong>Keep human control</strong><p>Review risky actions before anything leaves your account.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="story-page story-page-context" data-story-page="4" aria-labelledby="contextStoryTitle">
+      <div class="story-shell story-grid">
+        <div class="story-copy story-reveal">
+          <p class="story-index">04 / CONTEXT</p>
+          <h2 id="contextStoryTitle">Useful continuity, not a second mailbox.</h2>
+          <p class="story-lede">Gmail remains authoritative. MailMate keeps compact, user-scoped context for the interface, Kyle, Work and Calendar, avoiding a full inbox reprocess on every visit.</p>
+          <p class="story-note">Provider separation keeps interactive intelligence and local Work execution on their intended paths.</p>
+        </div>
+        <div class="context-visual story-reveal story-reveal-late" aria-label="MailMate context architecture">
+          <div class="context-node"><small>SOURCE</small><strong>Gmail</strong><span>Threads, labels, sent state</span></div>
+          <div class="context-line"><i></i><i></i><i></i></div>
+          <div class="context-node context-node-main"><small>INTERPRET</small><strong>Mail intelligence</strong><span>Priority, action, deadline, privacy</span></div>
+          <div class="context-line"><i></i><i></i><i></i></div>
+          <div class="context-node"><small>STATE</small><strong>Compact context</strong><span>Useful derived state only</span></div>
+          <div class="context-outputs"><span>Overview</span><span>Kyle</span><span>Work</span><span>Calendar</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="story-page story-page-system" data-story-page="5" aria-labelledby="systemStoryTitle">
+      <div class="story-shell story-center">
+        <div class="story-copy story-copy-center story-reveal">
+          <p class="story-index">05 / SYSTEM</p>
+          <h2 id="systemStoryTitle">One calm workspace. Multiple intelligence layers.</h2>
+          <p class="story-lede">Google services, Gemini, local Work compute, speech and durable state meet in one observable system built by Ciphersquad.</p>
+        </div>
+        <div class="system-map story-reveal story-reveal-late" aria-label="MailMate system components">
+          <div class="system-core"><img src="./assets/images/cs_logo.png" alt=""><strong>MAILMATE</strong><small>CIPHERSQUAD</small></div>
+          <span style="--slot:0">Gmail</span><span style="--slot:1">Calendar</span><span style="--slot:2">Gemini</span><span style="--slot:3">Kyle</span><span style="--slot:4">Work Agent</span><span style="--slot:5">Supabase</span>
+        </div>
+        <p class="final-line story-reveal">Connect when you are ready. Authentication remains within reach at the top right.</p>
+      </div>
+    </section>
+  </div>
+
+  <nav class="story-pagination" id="storyPagination" aria-label="Landing sections">
+    <button type="button" class="is-active" data-story-target="0" aria-label="Home"><span>00</span><b>Home</b></button>
+    <button type="button" data-story-target="1" aria-label="Signal"><span>01</span><b>Signal</b></button>
+    <button type="button" data-story-target="2" aria-label="Kyle"><span>02</span><b>Kyle</b></button>
+    <button type="button" data-story-target="3" aria-label="Work"><span>03</span><b>Work</b></button>
+    <button type="button" data-story-target="4" aria-label="Context"><span>04</span><b>Context</b></button>
+    <button type="button" data-story-target="5" aria-label="System"><span>05</span><b>System</b></button>
+  </nav>
 
   <!-- Google Auth Login Section (Revealed on Scroll with Glassmorphism) -->
   <section class="auth-container" id="authContainer" aria-label="Participant Authentication">

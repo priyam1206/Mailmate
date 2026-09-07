@@ -75,29 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  const bgVideo = document.getElementById('bgVideo');
-  const videoFallbackBg = document.getElementById('videoFallbackBg');
-
-  if (bgVideo) {
-    const playPromise = bgVideo.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(() => {
-        const startPlay = () => {
-          bgVideo.play();
-          window.removeEventListener('click', startPlay);
-          window.removeEventListener('scroll', startPlay);
-          window.removeEventListener('touchstart', startPlay);
-        };
-        window.addEventListener('click', startPlay, { once: true });
-        window.addEventListener('scroll', startPlay, { once: true });
-        window.addEventListener('touchstart', startPlay, { once: true });
-      });
-    }
-    bgVideo.addEventListener('error', () => {
-      if (videoFallbackBg) videoFallbackBg.style.display = 'block';
-    });
-  }
-
   const particlesContainer = document.getElementById('particles');
   const PARTICLE_COUNT = 30;
   for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -229,8 +206,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   let startTime = null;
-  const videoOverlay = document.getElementById('videoOverlay');
-
   function animateLogo(time) {
     if (!startTime) startTime = time;
     const elapsed = time - startTime;
@@ -241,11 +216,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     updateTubelightGlitch(now);
     currentScatter += (targetScatter - currentScatter) * 0.085;
-
-    const videoOpacity = Math.min(1, Math.max(0, (currentScatter - 0.1) / 0.65));
-    if (bgVideo) bgVideo.style.opacity = videoOpacity;
-    if (videoFallbackBg) videoFallbackBg.style.opacity = videoOpacity;
-    if (videoOverlay) videoOverlay.style.opacity = Math.min(1, Math.max(0, (currentScatter - 0.08) / 0.7));
 
     if (currentScatter < 0.25) {
       if (glitchActive && glitchIntensity > 0.2) {

@@ -1,7 +1,13 @@
 import base64
 from unittest.mock import Mock, patch
 
-from services.google_service import _readable_message_body, _safe_message_html, mark_gmail_message_read
+from services.google_service import (
+    _decode_header_value,
+    _readable_message_body,
+    _repair_mojibake,
+    _safe_message_html,
+    mark_gmail_message_read,
+)
 
 
 def _encoded(value):
@@ -18,6 +24,12 @@ def test_plain_text_is_preferred_over_html():
     }
 
     assert _readable_message_body(payload) == 'Plain first\n\nSecond line'
+
+
+def test_mojibake_and_encoded_headers_are_repaired():
+    assert _repair_mojibake('\u00e2\u20ac\u0152Happy Birthday') == 'Happy Birthday'
+    assert _repair_mojibake('Draft ready \u00c2\u00b7 Send') == 'Draft ready \u00b7 Send'
+    assert _decode_header_value('=?UTF-8?B?SGFwcHkgQmlydGhkYXkh?=') == 'Happy Birthday!'
 
 
 def test_html_fallback_is_readable_and_drops_script_content():

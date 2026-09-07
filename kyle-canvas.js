@@ -89,13 +89,19 @@
       || (/\bsend\b/i.test(text) && /@|\bto\b|\bsaying\b|\bsubject\b|\bbody\b|\bhim\b|\bher\b|\bthem\b/i.test(text));
   }
 
+  function conversationalIntent(prompt) {
+    const text = String(prompt || '').trim().toLowerCase().replace(/[!?.,]+$/g, '').trim();
+    return /^(?:hi|hello|hey|hiya|yo|good morning|good afternoon|good evening|how are you|how are you doing|what'?s up|whats up|who are you|what can you do|thanks|thank you|okay|ok|cool|nice|what(?: is|'s) the time|what time is it|current time|time now|what(?: is|'s) the date|what day is it|who sent (?:it|this|that)|when was (?:it|this|that) sent|say that again)$/.test(text);
+  }
+
   function shouldBegin(prompt) {
-    return isOverview() && !navigationIntent(prompt) && !composerIntent(prompt);
+    return isOverview() && !navigationIntent(prompt) && !composerIntent(prompt) && !conversationalIntent(prompt);
   }
 
   function shouldPresent(prompt, payload = {}) {
     if (!isOverview()) return false;
     if (payload.presentation === 'navigate') return false;
+    if (conversationalIntent(prompt)) return false;
     if ((payload.actions || []).some(action => action?.tool === 'navigation.open')) return false;
     if (composerIntent(prompt)) return false;
     if (payload.presentation === 'canvas') return true;
@@ -154,15 +160,11 @@
     return shouldBegin(prompt) ? begin(prompt) : false;
   }
 
-  function beginComposer(mode = 'compose') {
+  function beginComposer(mode = 'compose', prompt = '') {
     if (!isOverview()) return false;
-    const wasActive = state.active;
-    if (!wasActive) {
-      begin(mode === 'reply' ? 'Draft a reply' : 'Draft an email', { composer: true });
-      state.composerOwnsCanvas = true;
-    } else {
-      state.composerOwnsCanvas = false;
-    }
+    const request = prompt || (state.composerOwnsCanvas && state.prompt) || (mode === 'reply' ? 'Draft a reply' : 'Draft an email');
+    begin(request, { composer: true });
+    state.composerOwnsCanvas = true;
     const e = els();
     if (e.status) e.status.textContent = mode === 'reply' ? 'Preparing your reply...' : 'Preparing your email...';
     setTimeout(placeComposer, 0);

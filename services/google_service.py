@@ -7,6 +7,7 @@ import html
 import re
 from pathlib import Path
 from datetime import datetime, timezone
+from email.header import decode_header, make_header
 from email.utils import getaddresses, parseaddr
 from html.parser import HTMLParser
 
@@ -399,12 +400,44 @@ class _SafeEmailHtmlParser(HTMLParser):
         pass
 
 
+def _repair_mojibake(value):
+    """Repair common UTF-8-as-Windows-1252 artifacts without altering valid text."""
+    text = str(value or '')
+    replacements = {
+        '\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a2': '\u2022',
+        '\u00e2\u20ac\u00a2': '\u2022',
+        '\u00c2\u00b7': '\u00b7',
+        '\u00e2\u20ac\u201c': '\u2013',
+        '\u00e2\u20ac\u201d': '\u2014',
+        '\u00e2\u20ac\u00a6': '\u2026',
+        '\u00e2\u20ac\u2122': '\u2019',
+        '\u00e2\u20ac\u02dc': '\u2018',
+        '\u00e2\u20ac\u0153': '\u201c',
+        '\u00e2\u20ac\u009d': '\u201d',
+        '\u00e2\u20ac\u0152': '',
+        '\u00e2\u20ac\u008d': '',
+        '\u00c2 ': ' ',
+    }
+    for broken, repaired in replacements.items():
+        text = text.replace(broken, repaired)
+    return text
+
+
+def _decode_header_value(value):
+    try:
+        value = str(make_header(decode_header(str(value or ''))))
+    except (LookupError, UnicodeError):
+        value = str(value or '')
+    return _repair_mojibake(value)
+
+
 def _decode_gmail_body(data):
     if not data:
         return ''
     padded = str(data) + '=' * (-len(str(data)) % 4)
     try:
-        return base64.urlsafe_b64decode(padded.encode('ascii')).decode('utf-8', errors='replace')
+        decoded = base64.urlsafe_b64decode(padded.encode('ascii')).decode('utf-8', errors='replace')
+        return _repair_mojibake(decoded)
     except Exception:
         return ''
 
@@ -431,7 +464,7 @@ def _message_body_parts(payload):
 
 
 def _clean_message_text(value):
-    value = html.unescape(str(value or '')).replace('\r\n', '\n').replace('\r', '\n')
+    value = html.unescape(_repair_mojibake(value)).replace('\r\n', '\n').replace('\r', '\n')
     value = re.sub(r'[\u200b-\u200d\ufeff]', '', value)
     value = re.sub(r'[ \t]+', ' ', value)
     value = re.sub(r' *\n *', '\n', value)
@@ -484,7 +517,10 @@ def get_gmail_message(message_id):
         raise RuntimeError('Google credentials are not available')
     message = service.users().messages().get(userId='me', id=str(message_id), format='full').execute()
     payload = message.get('payload') or {}
-    headers = {str(item.get('name') or ''): str(item.get('value') or '') for item in payload.get('headers') or []}
+    headers = {
+        str(item.get('name') or ''): _decode_header_value(item.get('value'))
+        for item in payload.get('headers') or []
+    }
     sender_raw = headers.get('From', '')
     sender_name, sender_email = parseaddr(sender_raw)
     labels = message.get('labelIds') or []
@@ -500,7 +536,7 @@ def get_gmail_message(message_id):
         'rfc_message_id': headers.get('Message-ID') or headers.get('Message-Id') or '',
         'date': headers.get('Date', ''),
         'timestamp': headers.get('Date', ''),
-        'snippet': message.get('snippet') or '',
+        'snippet': _repair_mojibake(message.get('snippet') or ''),
         'body': _readable_message_body(payload, message.get('snippet') or ''),
         'body_html': _safe_message_html(payload),
         'is_read': 'UNREAD' not in labels,

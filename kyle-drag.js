@@ -14,21 +14,17 @@
   function clearLegacyGeometry(el) {
     if (!el) return;
     el.classList.remove('kyle-drag-near-corner', 'snapped', 'kyle-traveling');
-    el.style.left = '';
-    el.style.top = '';
-    el.style.right = '';
-    el.style.bottom = '';
-    el.style.transform = '';
-    el.style.transition = '';
-    el.style.cursor = '';
+    ['left', 'top', 'right', 'bottom', 'transform', 'transition', 'cursor'].forEach(prop => {
+      if (el.style[prop]) el.style[prop] = '';
+    });
   }
 
   function dockMount(mount) {
     if (!mount || isOverviewMount(mount)) return;
     clearLegacyGeometry(mount);
     mount.classList.add('kyle-floating-mount');
-    mount.style.visibility = 'visible';
-    mount.style.opacity = '1';
+    if (mount.style.visibility !== 'visible') mount.style.visibility = 'visible';
+    if (mount.style.opacity !== '1') mount.style.opacity = '1';
     if (typeof mount.removeAttribute === 'function') mount.removeAttribute('hidden');
     else mount.hidden = false;
   }
@@ -37,9 +33,9 @@
     if (!panel) return;
     if (window.KyleCanvas?.isInlineComposer?.(panel)) return;
     clearLegacyGeometry(panel);
-    panel.style.position = 'fixed';
-    panel.style.right = '24px';
-    panel.style.bottom = '116px';
+    if (panel.style.position !== 'fixed') panel.style.position = 'fixed';
+    if (panel.style.right !== '24px') panel.style.right = '24px';
+    if (panel.style.bottom !== '116px') panel.style.bottom = '116px';
   }
 
   function controller(el, kind) {
@@ -88,16 +84,19 @@
     }
 
     if (!window._kyleFixedDockObserver) {
+      let layoutFrame = 0;
       window._kyleFixedDockObserver = new MutationObserver(function () {
-        dockMount(document.getElementById('kyleMount'));
-        dockPanel(document.querySelector('.kyle-action-panel.is-open'));
+        if (layoutFrame) return;
+        layoutFrame = requestAnimationFrame(function () {
+          layoutFrame = 0;
+          dockMount(document.getElementById('kyleMount'));
+          dockPanel(document.querySelector('.kyle-action-panel.is-open'));
+        });
       });
 
       window._kyleFixedDockObserver.observe(document.body, {
         childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['class']
+        subtree: true
       });
     }
   }
