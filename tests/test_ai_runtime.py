@@ -76,7 +76,7 @@ def test_work_request_disables_thinking_and_is_bounded(monkeypatch):
     assert sum(approximate_tokens(item['content']) for item in captured['messages']) <= 600
 
 
-def test_overview_is_compact_and_single_flight_cached(monkeypatch):
+def test_overview_is_deterministic_and_single_flight_cached(monkeypatch):
     ai_service._overview_cache.clear()
     ai_service._overview_inflight.clear()
     monkeypatch.setattr(ai_service.PrivacyGate, 'filter_threads_for_ai', lambda threads: threads)
@@ -101,9 +101,9 @@ def test_overview_is_compact_and_single_flight_cached(monkeypatch):
     first = ai_service.get_dashboard_overview(threads)
     second = ai_service.get_dashboard_overview(threads)
     assert first == second
-    assert len(prompts) == 1
-    assert len(prompts[0]) < 4000
-    assert 'private body ' * 100 not in prompts[0]
+    assert prompts == []
+    assert first['ai_insight'] == '1 message needs your attention.'
+    assert first['needs_attention'][0]['description'] == 'Review this request.'
 
 
 def test_common_work_uses_one_structured_plan(monkeypatch):

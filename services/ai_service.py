@@ -86,6 +86,7 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
         subject = str(latest.get("subject") or thread.get("subject") or "Email")
         snippet = str(latest.get("snippet") or latest.get("body") or thread.get("snippet") or "")
         direction = str(latest.get("direction") or thread.get("direction") or "").lower()
+        scores = latest.get('context_scores') or {}
         message_id = str(
             latest.get("id")
             or latest.get("gmail_id")
@@ -95,18 +96,36 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
         )
         combined = f"{subject} {snippet}".strip()
 
+        if scores and (
+            scores.get('spam_score', 0) >= 0.65
+            or scores.get('phishing_score', 0) >= 0.55
+            or scores.get('malicious_score', 0) >= 0.55
+        ):
+            continue
+
         if direction == "outbound":
-            if message_id:
+            if message_id and (not scores or scores.get('requires_reply')):
                 waiting.append({
-                    "description": combined[:280],
+                    "subject": subject[:180],
+                    "description": "Waiting for a reply.",
                     "owner": "other",
                     "source_message_id": message_id,
                 })
             continue
 
-        if action_pattern.search(combined) and message_id:
+        is_actionable = scores.get('attention_allowed') if scores else bool(action_pattern.search(combined))
+        if is_actionable and message_id:
+            if re.search(r'\b(submit|submission|assignment|deliverable)\b', combined, re.I):
+                action_text = 'Complete the requested submission.'
+            elif re.search(r'\b(meeting|schedule|appointment|call)\b', combined, re.I):
+                action_text = 'Review the schedule request.'
+            elif re.search(r'\b(reply|respond|question|details needed|provide)\b', combined, re.I):
+                action_text = 'Reply with the requested details.'
+            else:
+                action_text = 'Review this request.'
             needs.append({
-                "description": combined[:280],
+                "subject": subject[:180],
+                "description": action_text,
                 "owner": "me",
                 "source_message_id": message_id,
                 "deadline": _deadline(combined),
@@ -117,8 +136,10 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
         "needs_attention": needs[:12],
         "waiting_on_others": waiting[:8],
         "ai_insight": (
-            f"{len(needs)} actionable item{'s' if len(needs) != 1 else ''} found."
-            if needs else "No clear actionable requests detected."
+            f"{len(needs)} message needs your attention."
+            if len(needs) == 1
+            else f"{len(needs)} messages need your attention."
+            if needs else "Nothing needs your attention right now."
         ),
     }
 
@@ -200,41 +221,10 @@ def get_dashboard_overview(threads):
             cached = _overview_cache.get(fingerprint)
         return deepcopy(cached) if cached is not None else _heuristic_overview(safe_threads)
 
-    candidates = _overview_candidates(safe_threads)
-    prompt = f"""Classify these compact, privacy-approved email candidates.
-Return JSON exactly:
-{{
-  "metrics": {{"emails": 0, "important": 0, "actions": 0}},
-  "needs_attention": [{{"description": "...", "owner": "me", "source_message_id": "...", "deadline": "..."}}],
-  "waiting_on_others": [{{"description": "...", "owner": "other", "source_message_id": "..."}}],
-  "ai_insight": "..."
-}}
-Rules:
-- Only unresolved inbound requests assigned to the current user belong in needs_attention.
-- If the latest message is outbound and has no reply, prefer waiting_on_others.
-- Ignore newsletters/promotions/social noise.
-- Preserve the exact source message id.
-- Never invent deadlines.
-Candidates:
-{json.dumps(candidates, ensure_ascii=False, separators=(',', ':'))}
-"""
-
-    parsed = None
-    try:
-        if candidates:
-            parsed = _json_object(_gemini_completion(
-                prompt,
-                json_mode=True,
-                max_input_tokens=3200,
-                max_output_tokens=450,
-            ))
-    except Exception as exc:
-        print("[AI] Gemini overview notice:", exc)
-
-    if parsed is None:
-        parsed = _heuristic_overview(safe_threads)
-    if not isinstance(parsed, dict):
-        parsed = _heuristic_overview(safe_threads)
+    # Overview is a fast deterministic projection. Gemini receives this saved
+    # context later when Kyle is asked to reason, but page rendering never waits
+    # for generated prose or fails because a model returned malformed JSON.
+    parsed = _heuristic_overview(safe_threads)
 
     parsed.setdefault("metrics", {})
     parsed.setdefault("needs_attention", [])

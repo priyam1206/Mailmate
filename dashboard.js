@@ -441,8 +441,10 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       addError(error.message);
       els.processState.textContent = 'Needs attention';
-      els.summaryText.textContent = error.message;
-      window.Kyle?.setContext({ health: state.health, emails: [], metrics: {}, currentPage: state.currentPage });
+      if (!state.data) {
+        els.summaryText.textContent = 'Your inbox summary is temporarily unavailable. Try refresh.';
+        window.Kyle?.setContext({ health: state.health, emails: [], metrics: {}, currentPage: state.currentPage });
+      }
     }
   }
 
