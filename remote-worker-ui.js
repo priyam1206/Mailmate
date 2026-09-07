@@ -1,7 +1,8 @@
 (() => {
   'use strict';
 
-  const POLL_MS = 4000;
+  const IDLE_POLL_MS = 12000;
+  const ACTIVE_POLL_MS = 3500;
   const FAILURE_THRESHOLD = 3;
   const SUCCESS_THRESHOLD = 2;
   const ACTIVE = new Set([
@@ -178,13 +179,14 @@
       console.warn('[Kyle Compute]', error);
     } finally {
       runtime.busy = false;
+      clearTimeout(runtime.timer);
+      runtime.timer = setTimeout(() => poll(false), active(list).length ? ACTIVE_POLL_MS : IDLE_POLL_MS);
     }
   }
 
   function start() {
     banner();
     poll(true);
-    runtime.timer = setInterval(() => poll(false), POLL_MS);
     window.addEventListener('focus', () => poll(true));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(true); });
     window.addEventListener('mailmate:work-refresh', () => poll(true));

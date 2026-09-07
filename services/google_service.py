@@ -400,6 +400,7 @@ def get_gmail_message(message_id):
         'to': _address_list(headers.get('To', '')),
         'cc': _address_list(headers.get('Cc', '')),
         'subject': headers.get('Subject') or 'No Subject',
+        'rfc_message_id': headers.get('Message-ID') or headers.get('Message-Id') or '',
         'date': headers.get('Date', ''),
         'timestamp': headers.get('Date', ''),
         'snippet': message.get('snippet') or '',
@@ -541,6 +542,7 @@ def get_gmail_threads():
                 'to': _address_list(headers.get('To', '')),
                 'cc': _address_list(headers.get('Cc', '')),
                 'subject': subject,
+                'rfc_message_id': headers.get('Message-ID') or headers.get('Message-Id') or '',
                 'date': date,
                 'timestamp': date,
                 'snippet': snippet,
@@ -642,34 +644,23 @@ def update_gmail_draft(draft_id, to, subject, body, thread_id=None, in_reply_to=
 
 def send_gmail_draft(draft_id):
     """Send an exact existing draft after explicit human approval."""
-    last_error = None
-    for attempt in range(2):
-        service = _gmail_service()
-        if not service:
-            raise RuntimeError("Google account not connected")
-        try:
-            sent = service.users().drafts().send(userId='me', body={'id': draft_id}).execute()
-            return {
-                'id': sent.get('id'),
-                'thread_id': sent.get('threadId'),
-                'labels': sent.get('labelIds', [])
-            }
-        except HttpError as err:
-            if err.resp.status == 403 or 'insufficient' in str(err).lower():
-                raise GmailInsufficientPermissionError()
-            raise err
-        except Exception as err:
-            last_error = err
-            _reset_gmail_service()
-            if attempt == 0:
-                time.sleep(0.3)
-                continue
-            raise err
-    if last_error:
-        raise last_error
+    service = _gmail_service()
+    if not service:
+        raise RuntimeError("Google account not connected")
+    try:
+        sent = service.users().drafts().send(userId='me', body={'id': draft_id}).execute()
+        return {
+            'id': sent.get('id'),
+            'thread_id': sent.get('threadId'),
+            'labels': sent.get('labelIds', [])
+        }
+    except HttpError as err:
+        if err.resp.status == 403 or 'insufficient' in str(err).lower():
+            raise GmailInsufficientPermissionError()
+        raise
 
 
-def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None):
+def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None, message_id_header=None):
     """Send an exact email message directly via Gmail API users.messages.send."""
     from email.message import EmailMessage
 
@@ -677,6 +668,8 @@ def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None):
     msg.set_content(body or '')
     msg['To'] = to or ''
     msg['Subject'] = subject or 'No Subject'
+    if message_id_header:
+        msg['Message-ID'] = message_id_header
     if in_reply_to:
         msg['In-Reply-To'] = in_reply_to
         msg['References'] = in_reply_to
@@ -688,31 +681,40 @@ def send_gmail_direct(to, subject, body, thread_id=None, in_reply_to=None):
     if thread_id:
         body_payload['threadId'] = thread_id
 
-    last_error = None
-    for attempt in range(2):
-        service = _gmail_service()
-        if not service:
-            raise RuntimeError("Google account not connected")
-        try:
-            sent = service.users().messages().send(userId='me', body=body_payload).execute()
-            return {
-                'id': sent.get('id'),
-                'thread_id': sent.get('threadId'),
-                'labels': sent.get('labelIds', [])
-            }
-        except HttpError as err:
-            if err.resp.status == 403 or 'insufficient' in str(err).lower():
-                raise GmailInsufficientPermissionError()
-            raise err
-        except Exception as err:
-            last_error = err
-            _reset_gmail_service()
-            if attempt == 0:
-                time.sleep(0.3)
-                continue
-            raise err
-    if last_error:
-        raise last_error
+    service = _gmail_service()
+    if not service:
+        raise RuntimeError("Google account not connected")
+    try:
+        sent = service.users().messages().send(userId='me', body=body_payload).execute()
+        return {
+            'id': sent.get('id'),
+            'thread_id': sent.get('threadId'),
+            'labels': sent.get('labelIds', [])
+        }
+    except HttpError as err:
+        if err.resp.status == 403 or 'insufficient' in str(err).lower():
+            raise GmailInsufficientPermissionError()
+        raise
+
+
+def find_sent_message_by_rfc_id(message_id_header):
+    """Reconcile an ambiguous send without issuing another send request."""
+    value = str(message_id_header or '').strip()
+    if not value:
+        return None
+    service = _gmail_service()
+    if not service:
+        return None
+    result = service.users().messages().list(
+        userId='me',
+        q=f'in:sent rfc822msgid:{value}',
+        maxResults=1,
+    ).execute()
+    matches = result.get('messages') or []
+    if not matches:
+        return None
+    message = matches[0]
+    return {'id': message.get('id'), 'thread_id': message.get('threadId')}
 
 
 def get_gmail_thread(thread_id):
@@ -760,6 +762,7 @@ def get_gmail_thread(thread_id):
             'from': {'name': sender_name, 'email': sender_email},
             'to': _address_list(headers.get('To', '')),
             'subject': subject,
+            'rfc_message_id': headers.get('Message-ID') or headers.get('Message-Id') or '',
             'date': date,
             'internal_date': internal_date,
             'timestamp': date,
