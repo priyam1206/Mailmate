@@ -106,6 +106,28 @@ def test_overview_is_deterministic_and_single_flight_cached(monkeypatch):
     assert first['needs_attention'][0]['description'] == 'Review this request.'
 
 
+def test_overview_preserves_exact_day_first_deadline_from_context(monkeypatch):
+    ai_service._overview_cache.clear()
+    monkeypatch.setattr(ai_service.PrivacyGate, 'filter_threads_for_ai', lambda threads: threads)
+    threads = [{'id': 'thread-deadline', 'messages': [{
+        'id': 'message-deadline', 'subject': 'Confirm participation',
+        'snippet': 'Please confirm attendance before 9 September 2026 at 3:00 PM.',
+        'direction': 'inbound',
+        'context_scores': {'attention_allowed': True, 'deadline_at': '2026-09-09T15:00:00+05:30'},
+    }]}]
+    result = ai_service.get_dashboard_overview(threads)
+    assert result['needs_attention'][0]['deadline'] == '2026-09-09T15:00:00+05:30'
+
+
+def test_calendar_deadline_parser_preserves_times_and_uses_end_of_day():
+    timed, has_time = mailmate_app._deadline_target({'deadline': '2026-09-09T15:00:00+05:30'})
+    date_only, date_has_time = mailmate_app._deadline_target({'deadline': '2026-09-10'})
+    assert has_time is True
+    assert (timed.hour, timed.minute) == (15, 0)
+    assert date_has_time is False
+    assert (date_only.hour, date_only.minute) == (23, 59)
+
+
 def test_common_work_uses_one_structured_plan(monkeypatch):
     calls = []
     monkeypatch.setattr(LMStudioModel, 'work_plan', lambda self, source: calls.append(source) or {
@@ -149,6 +171,17 @@ def test_explicit_email_address_is_preserved(monkeypatch):
         {'name': 'Priyam'},
     )
     assert result['actions'][0]['args']['to'] == 'sreyankosinha@gmail.com'
+
+
+def test_compose_replaces_signoff_only_model_output(monkeypatch):
+    monkeypatch.setattr(mailmate_app, 'chat_with_kyle', lambda _prompt: '{"subject":"Confirmation","body":"Best Regards,\\nPriyam"}')
+    result = mailmate_app._handle_mail_intent(
+        'send an email to attendee@example.com saying I confirm my attendance',
+        None, None, [], {'name': 'Priyam'},
+    )
+    body = result['actions'][0]['args']['body']
+    assert 'confirm my attendance' in body.lower()
+    assert len(body) > len('Best Regards, Priyam')
 
 
 def test_mail_send_operation_is_idempotent(monkeypatch):

@@ -18,11 +18,33 @@
     DONE: 'DONE'
   };
 
+  function storageKey() {
+    let userId = 'guest';
+    try { userId = window.localStorage?.getItem?.('userId') || 'guest'; } catch (_) {}
+    return `mailmate.kyle.conversation.v1.${String(userId).toLowerCase()}`;
+  }
+
+  function loadConversation() {
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem?.(storageKey()) || '[]');
+      if (!Array.isArray(parsed)) return [];
+      return parsed.slice(-40).filter(item =>
+        ['user', 'kyle'].includes(item?.role) && typeof item?.text === 'string' && item.text.trim()
+      ).map(item => ({ role: item.role, text: item.text.slice(0, 2400), at: item.at || new Date().toISOString() }));
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function saveConversation(messages) {
+    try { window.localStorage?.setItem?.(storageKey(), JSON.stringify(messages.slice(-40))); } catch (_) {}
+  }
+
   function createKyleState() {
     return {
       states,
       current: states.IDLE,
-      conversation: [],
+      conversation: loadConversation(),
       lastResults: [],
       selectedEmail: null,
       currentPage: 'overview',
@@ -37,6 +59,7 @@
         const message = { role, text, at: new Date().toISOString() };
         this.conversation.push(message);
         if (this.conversation.length > 40) this.conversation.splice(0, this.conversation.length - 40);
+        saveConversation(this.conversation);
         window.dispatchEvent(new CustomEvent('kyle:message', { detail: message }));
       }
     };

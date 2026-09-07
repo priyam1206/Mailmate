@@ -1,3 +1,5 @@
+import pytest
+
 from services.mail_context_service import MailContextService, classify_message
 
 
@@ -65,6 +67,29 @@ def test_concrete_email_request_is_work(monkeypatch):
     ), {'routing': 'CLOUD_ALLOWED'})
     assert row['attention_allowed'] is True
     assert row['work_allowed'] is True
+
+
+@pytest.mark.parametrize(('subject', 'snippet', 'expected_deadline'), [
+    ('Participation confirmation required', 'Please confirm your attendance before 9 September 2026 at 3:00 PM.', '2026-09-09T15:00:00+05:30'),
+    ('IMPORTANT: Project Review Deadline - 10 September', 'Project documentation must be submitted for review by 10 September 2026.', '2026-09-10'),
+    ('URGENT FINAL REMINDER: Deadline in 24 Hours - 10 September', 'The deadline is 10 September 2026 at 11:59 PM. Please complete the required action.', '2026-09-10T23:59:00+05:30'),
+])
+def test_real_deadline_messages_become_work_with_exact_time(monkeypatch, subject, snippet, expected_deadline):
+    monkeypatch.setenv('MAILMATE_SEMANTIC_CLASSIFIER_ENABLED', '0')
+    monkeypatch.setenv('APP_TIMEZONE', 'Asia/Kolkata')
+    row = classify_message(message(subject=subject, snippet=snippet), {'routing': 'CLOUD_ALLOWED'})
+    assert row['attention_allowed'] is True
+    assert row['work_allowed'] is True
+    assert row['calendar_allowed'] is True
+    assert row['deadline_at'] == expected_deadline
+
+
+def test_semantic_null_deadline_does_not_erase_deterministic_value():
+    from services.mail_context_service import _apply_semantic, _fallback_classify_message
+    value = message(snippet='Please submit the project before 9 September 2026 at 3:00 PM.')
+    baseline = _fallback_classify_message(value, {'routing': 'CLOUD_ALLOWED'})
+    row = _apply_semantic(value, baseline, {'work_required': True, 'deadline_at': None})
+    assert row['deadline_at'] == '2026-09-09T15:00:00+05:30'
 
 
 def test_context_rows_never_contain_mail_content(monkeypatch):

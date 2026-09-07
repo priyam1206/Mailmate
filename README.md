@@ -99,7 +99,7 @@ Required for Gemini analysis and Kyle replies:
 ```env
 GEMINI_API_KEY=your_google_gemini_api_key
 GEMINI_MODEL=gemini-3.6-flash
-GMAIL_FETCH_LIMIT=20
+GMAIL_FETCH_LIMIT=50
 GMAIL_QUERY=newer_than:30d
 ```
 

@@ -24,6 +24,27 @@ function narrationTest() {
   assert.equal(narrate(transaction(4)), 'I found 4 important messages.');
 }
 
+function conversationPersistenceTest() {
+  const values = new Map([['userId', 'person@example.com']]);
+  const events = [];
+  const window = {
+    localStorage: {
+      getItem: key => values.has(key) ? values.get(key) : null,
+      setItem: (key, value) => values.set(key, value)
+    },
+    dispatchEvent: event => events.push(event)
+  };
+  const context = vm.createContext({ window, CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } } });
+  loadScript('kyle-state.js', context);
+  const first = window.KyleState.createKyleState();
+  first.addMessage('user', 'Remember this deadline');
+  first.addMessage('kyle', 'I will remember it.');
+  const restored = window.KyleState.createKyleState();
+  assert.equal(restored.conversation.length, 2);
+  assert.equal(restored.conversation[0].text, 'Remember this deadline');
+  assert.equal(events.length, 2);
+}
+
 async function audioInterruptionTest() {
   let handlers;
   let aborts = 0;
@@ -116,6 +137,7 @@ async function audioInterruptionTest() {
 
 (async () => {
   narrationTest();
+  conversationPersistenceTest();
   await audioInterruptionTest();
   console.log('Kyle runtime tests: ok');
 })().catch(error => {

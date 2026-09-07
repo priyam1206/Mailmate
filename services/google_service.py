@@ -689,7 +689,7 @@ def get_gmail_thread_changes(start_history_id, cached_threads, my_email='', limi
         if payload:
             parsed, _ = _parse_gmail_thread(payload, str(my_email or '').lower())
             changed_threads.append(parsed)
-    max_threads = max(1, min(int(limit or os.getenv('GMAIL_FETCH_LIMIT', '20') or 20), 50))
+    max_threads = max(1, min(int(limit or os.getenv('GMAIL_FETCH_LIMIT', '50') or 50), 50))
     threads = (changed_threads + list(existing.values()))[:max_threads]
     return {
         'full_sync_required': False,
@@ -721,7 +721,7 @@ def get_gmail_threads():
         except Exception:
             return [], []
     my_email = str(profile.get('emailAddress') or '').strip().lower()
-    limit = max(1, min(int(os.getenv('GMAIL_FETCH_LIMIT', '20') or 20), 50))
+    limit = max(1, min(int(os.getenv('GMAIL_FETCH_LIMIT', '50') or 50), 50))
     query = _gmail_query()
 
     kwargs = {'userId': 'me', 'maxResults': limit, 'includeSpamTrash': False}

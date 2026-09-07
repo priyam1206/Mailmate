@@ -19,5 +19,5 @@ def test_automation_modal_has_backdrop_and_complete_form():
 def test_kyle_composer_assets_are_cache_bumped():
     html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
-    assert 'kyle-ui.js?v=34' in html
+    assert 'kyle-ui.js?v=35' in html
     assert 'kyle.js?v=32' in html

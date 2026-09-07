@@ -105,18 +105,24 @@ def _deadline(text: str) -> str:
         return "tomorrow"
     if re.search(r"\b(today|tonight)\b", text, re.I):
         return "today"
-    match = re.search(
-        r"\b(?:due|deadline|submit(?:ted)? by|before)\s+(?:on\s+)?([A-Za-z]{3,9}\s+\d{1,2}(?:,\s*\d{4})?|\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)",
-        text,
-        re.I,
-    )
-    return match.group(1) if match else ""
+    month = r"(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+    clock = r"(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?"
+    patterns = [
+        rf"\b(\d{{1,2}}(?:st|nd|rd|th)?\s+{month}(?:\s+\d{{4}})?{clock})\b",
+        rf"\b({month}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?{clock})\b",
+        rf"\b(\d{{1,2}}[-/]\d{{1,2}}(?:[-/]\d{{2,4}})?{clock})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            return re.sub(r"\s+", " ", match.group(1)).strip()
+    return ""
 
 
 def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
     needs, waiting = [], []
     action_pattern = re.compile(
-        r"\b(due|deadline|submit|submission|assignment|exam|quiz|review|approve|approval|send|share|provide|reply|respond|urgent|action required|please|can you|could you|meeting|schedule|extension|pdf|document|details needed)\b",
+        r"\b(due|deadline|submit(?:ted)?|submission|assignment|exam|quiz|review|approve|approval|confirm(?:ation)?|attendance|participation|verify|complete|required|send|share|provide|reply|respond|urgent|important|action required|please|can you|could you|meeting|schedule|extension|pdf|documents?|files?|details needed)\b",
         re.I,
     )
 
@@ -167,7 +173,7 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "description": action_text,
                 "owner": "me",
                 "source_message_id": message_id,
-                "deadline": _deadline(combined),
+                "deadline": scores.get("deadline_at") or _deadline(combined),
             })
 
     return {
@@ -200,7 +206,7 @@ def _source_fingerprint(threads):
 
 def _overview_candidates(threads, limit=15):
     action_pattern = re.compile(
-        r"\b(action required|urgent|due|deadline|submit|assignment|review|approve|reply|respond|please|meeting|schedule|extension|document|details needed)\b",
+        r"\b(action required|urgent|important|due|deadline|submit(?:ted)?|submission|assignment|review|approve|reply|respond|confirm(?:ation)?|attendance|participation|verify|complete|required|please|meeting|schedule|extension|documents?|files?|details needed)\b",
         re.I,
     )
     noise_pattern = re.compile(

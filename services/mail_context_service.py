@@ -6,12 +6,15 @@ import threading
 import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from dateutil import parser as date_parser
 
 import requests
 
 
-CLASSIFIER_VERSION = 2
-RULES_VERSION = 1
+CLASSIFIER_VERSION = 3
+RULES_VERSION = 2
 
 
 def _clamp(value):
@@ -37,6 +40,57 @@ def _contains(pattern, text):
     return bool(re.search(pattern, text, re.I))
 
 
+def _app_timezone():
+    try:
+        return ZoneInfo(os.getenv('APP_TIMEZONE', 'Asia/Kolkata'))
+    except Exception:
+        return timezone(timedelta(hours=5, minutes=30))
+
+
+def _extract_deadline_at(text):
+    """Extract an explicit due date without relying on an LLM."""
+    value = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if not value:
+        return None
+    now = datetime.now(_app_timezone())
+    lower = value.lower()
+    relative = re.search(r'\bwithin\s+(\d+)\s*(minutes?|mins?|hours?|hrs?|days?)\b', lower)
+    if relative:
+        amount = int(relative.group(1))
+        unit = relative.group(2)
+        delta = timedelta(days=amount) if unit.startswith('day') else timedelta(
+            minutes=amount * 60 if unit.startswith(('hour', 'hr')) else amount
+        )
+        return (now + delta).replace(second=0, microsecond=0).isoformat()
+
+    clock = r'(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?'
+    month = r'(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)'
+    patterns = [
+        rf'\b\d{{1,2}}(?:st|nd|rd|th)?\s+{month}(?:\s+\d{{4}})?{clock}\b',
+        rf'\b{month}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?{clock}\b',
+        rf'\b\d{{1,2}}[-/]\d{{1,2}}(?:[-/]\d{{2,4}})?{clock}\b',
+    ]
+    matches = [match for pattern in patterns for match in re.finditer(pattern, value, re.I)]
+    timed = [match for match in matches if re.search(r'\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|\b\d{1,2}:\d{2}\b', match.group(0), re.I)]
+    match = timed[-1] if timed else (matches[0] if matches else None)
+    if match:
+        phrase = re.sub(r'(\d)(?:st|nd|rd|th)\b', r'\1', match.group(0), flags=re.I)
+        try:
+            parsed = date_parser.parse(phrase, fuzzy=True, dayfirst=bool(re.match(r'^\d', phrase)), default=now)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=now.tzinfo)
+            has_time = bool(re.search(r'\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|\b\d{1,2}:\d{2}\b', phrase, re.I))
+            return parsed.replace(second=0, microsecond=0).isoformat() if has_time else parsed.date().isoformat()
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    for word, days in (('tomorrow', 1), ('today', 0), ('tonight', 0)):
+        if re.search(rf'\b{word}\b', lower):
+            target = now + timedelta(days=days)
+            return target.date().isoformat()
+    return None
+
+
 def _fallback_classify_message(message, gate=None):
     """Return minimized, deterministic derived context; never return mail content."""
     subject = str(message.get('subject') or '')
@@ -50,12 +104,13 @@ def _fallback_classify_message(message, gate=None):
     money_claim = _contains(r'\b(prize|lottery|jackpot|casino|gambling|bet|crypto giveaway|claim reward)\b', text)
     credential_request = _contains(r'\b(password|otp|one[- ]time password|verify your account|login immediately|credentials?)\b', text)
     suspicious_link = _contains(r'https?://(?:\d{1,3}\.){3}\d{1,3}|\b(bit\.ly|tinyurl\.com|t\.co)/', text)
-    action_signal = _contains(r'\b(action required|please|can you|could you|reply|respond|review|approve|submit|submission|assignment|send|provide|meeting|schedule|note that|inform you|writing to inform)\b', text)
-    deadline_signal = _contains(r'\b(due|deadline|today|tonight|tomorrow|within \d+ (?:hours?|days?)|next month|take place|scheduled for|will be held|before (?:january|february|march|april|may|june|july|august|september|october|november|december) \d{1,2})\b', text)
-    work_object = _contains(r'\b(assignment|submission|deliverable|project|report|document|spreadsheet|presentation|proposal|code|repository|email|reply|response)\b', text)
-    direct_work_request = _contains(r'\b(prepare|create|complete|finish|write|submit|send|provide|implement|review and (?:approve|comment|submit))\b', text)
+    deadline_at = _extract_deadline_at(text)
+    action_signal = _contains(r'\b(action required|please|can you|could you|reply|respond|review|approve|confirm(?:ation)?|verify|complete|submit(?:ted)?|submission|assignment|send|provide|include|required files?|meeting|schedule|note that|inform you|writing to inform)\b', text)
+    deadline_signal = bool(deadline_at) or _contains(r'\b(due|deadline|today|tonight|tomorrow|within \d+ (?:minutes?|hours?|days?)|next month|take place|scheduled for|will be held)\b', text)
+    work_object = _contains(r'\b(assignment|submission|deliverable|project|report|documents?|files?|spreadsheet|presentation|proposal|code|repository|email|reply|response|confirmation|attendance|participation|reserved place|required action)\b', text)
+    direct_work_request = _contains(r'\b(prepare|create|complete|finish|write|submit(?:ted)?|send|provide|implement|confirm|verify|include|review and (?:approve|comment|submit))\b', text)
     work_signal = work_object and direct_work_request
-    calendar_signal = _contains(r'\b(meeting|appointment|call|schedule|calendar|due|deadline|exam|scheduled|take place|will be held|before (?:january|february|march|april|may|june|july|august|september|october|november|december) \d{1,2})\b', text)
+    calendar_signal = deadline_signal or _contains(r'\b(meeting|appointment|call|schedule|calendar|exam|scheduled|take place|will be held)\b', text)
 
     deterministic_phishing = (
         (0.35 if credential_request else 0)
@@ -117,7 +172,7 @@ def _fallback_classify_message(message, gate=None):
         'display_title': subject[:240] or 'Gmail item',
         'sender_display': sender[:180],
         'summary': 'Action is required.' if action_signal else 'Review when convenient.',
-        'deadline_at': None,
+        'deadline_at': deadline_at,
         'source_updated_at': str(message.get('timestamp') or message.get('date') or '') or None,
         'processed_at': datetime.now(timezone.utc).isoformat(),
         'classifier_version': CLASSIFIER_VERSION,
@@ -212,7 +267,7 @@ def _apply_semantic(message, baseline, semantic):
         'work_allowed': work, 'calendar_allowed': calendar,
         'context_type': 'work' if work else 'calendar' if calendar else 'reply' if semantic.get('requires_reply') else 'attention',
         'summary': str(semantic.get('summary') or baseline['summary'])[:500],
-        'deadline_at': semantic.get('deadline_at'),
+        'deadline_at': semantic.get('deadline_at') or baseline.get('deadline_at'),
         'classifier_reason': str(semantic.get('reason') or '')[:500],
     })
     return baseline

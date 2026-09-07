@@ -422,6 +422,8 @@
       messages.scrollTop = messages.scrollHeight;
     }
 
+    (store.conversation || []).slice(-8).forEach(message => appendMessage(message.role, message.text));
+
     function renderResults(title, items) {
       if (!items || !items.length) {
         if (currentPanelMode === 'result') closeSurface();

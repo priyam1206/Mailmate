@@ -718,6 +718,8 @@ def _deadline_target(item):
         else:
             parsed = parsed.astimezone(APP_TZ)
         has_time = bool(re.search(r'\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b', lower))
+        if not has_time:
+            parsed = parsed.replace(hour=23, minute=59, second=0, microsecond=0)
         return parsed, has_time
     except Exception:
         return None, False
@@ -2356,6 +2358,23 @@ def _email_display_name(address):
     return ' '.join(word.capitalize() for word in words) or address
 
 
+def _substantive_mail_body(body):
+    content = re.sub(r'(?im)^\s*(hi|hello|dear)\b[^\n]*[,!]?\s*$', '', str(body or ''))
+    content = re.sub(r'(?ims)\b(best regards|best|regards|sincerely|thanks)[,\s]*\n?\s*[^\n]{1,80}\s*$', '', content)
+    return len(re.sub(r'\W+', '', content)) >= 24
+
+
+def _mail_body_fallback(recipient_name, intent, user_name, reply=False):
+    first_name = str(recipient_name or 'there').split()[0]
+    request = re.sub(r'\s+', ' ', str(intent or '')).strip().rstrip('.!?')
+    if reply:
+        message = f"Thank you for your message. {request[:1].upper() + request[1:] if request else 'I have noted the request and will follow up shortly'}."
+    else:
+        message = request[:1].upper() + request[1:] if request else 'I wanted to share a quick update with you.'
+        message = message.rstrip('.') + '.'
+    return f"Hi {first_name},\n\n{message}\n\nBest regards,\n{user_name}"
+
+
 def _handle_mail_intent(message, active_draft, selected_email, context_emails, user_profile):
     lower = message.lower().strip()
     user_name = user_profile.get('name') or 'Priyam'
@@ -2391,6 +2410,8 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 f"Return ONLY the revised email body text. Keep the greeting and sign-off consistent."
             )
             revised_body = chat_with_kyle(prompt).strip()
+            if not _substantive_mail_body(revised_body):
+                revised_body = current_body
             return {
                 'reply': "I've updated the draft for you.",
                 'actions': [{
@@ -2470,6 +2491,8 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 f"Return ONLY the email body text."
             )
             body = chat_with_kyle(prompt).strip()
+            if not _substantive_mail_body(body):
+                body = _mail_body_fallback(recipient_display, user_saying, user_name, reply=True)
 
             return {
                 'reply': f"I prepared a reply to {first_name}. You can review it above, make edits, or click Send.",
@@ -2541,6 +2564,8 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                 body = parsed.get('body') or body
             except Exception:
                 pass
+            if not _substantive_mail_body(body):
+                body = _mail_body_fallback(target_contact['name'], user_intent, user_name)
 
             explicit_send = bool(re.search(r'\bsend\s+(?:an?\s+)?(?:email|mail)\s+to\b', lower))
             actions = [{

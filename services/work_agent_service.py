@@ -46,6 +46,22 @@ def _clean(val, limit=2000):
     return re.sub(r"\s+", " ", str(val or "")).strip()[:limit]
 
 
+def _substantive_reply(body):
+    content = re.sub(r'(?im)^\s*(hi|hello|dear)\b[^\n]*[,!]?\s*$', '', str(body or ''))
+    content = re.sub(r'(?ims)\b(best regards|best|regards|sincerely|thanks)[,\s]*\n?\s*priyam\s*$', '', content)
+    return len(re.sub(r'\W+', '', content)) >= 24
+
+
+def _fallback_reply(sender, subject, deadline=''):
+    name = str(sender or '').split('<')[0].strip() or 'there'
+    timing = f' I have noted the deadline as {deadline}.' if deadline else ''
+    return (
+        f"Hi {name},\n\nThank you for the reminder about {subject or 'this request'}."
+        f"{timing} I am reviewing the requirements and will complete the requested action on time.\n\n"
+        "Best regards,\nPriyam"
+    )
+
+
 def _strict_newer_outbound(messages, source_msg_id):
     # Return (source_message, newer_outbound, reason).
     # Never scan the whole thread when the exact source cannot be identified.
@@ -906,8 +922,8 @@ class WorkAgentService:
         clean_subject = re.sub(r'^(Re:\s*)+', '', source.get('subject') or 'Update', flags=re.I)
         subject = str(reply.get('subject') or f'Re: {clean_subject}')[:180]
         body = str(reply.get('body') or '').strip()
-        if not body:
-            return None
+        if not _substantive_reply(body):
+            body = _fallback_reply(source.get('sender'), source.get('subject'), source.get('deadline'))
         session.set_reply(body, subject=subject, to=to_email)
         session.record_step('', 'mail.prepare_reply', {'subject': subject, 'to': to_email}, {'allowed': True}, {
             'ok': True, 'summary': 'Reply drafted',
@@ -1068,11 +1084,11 @@ class WorkAgentService:
                 draft_id = art.get("draft_id")
                 break
 
-        suggested_reply = final_session.reply_draft.get("body") or (
-            f"Hi {sender.split('<')[0].strip()},\n\n"
-            f"I received your email regarding '{subject}'. I am reviewing the details now.\n\n"
-            f"Best regards,\nPriyam"
-        )
+        suggested_reply = final_session.reply_draft.get("body") or ""
+        if not _substantive_reply(suggested_reply):
+            suggested_reply = _fallback_reply(sender, subject, deadline)
+            reply_subject = "Re: " + re.sub(r"^(Re:\s*)+", "", subject, flags=re.I)
+            final_session.set_reply(suggested_reply, subject=reply_subject)
 
         if not draft_id and settings.get("create_gmail_drafts", True):
             try:
