@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     inboxFilter: 'all',
     currentPage: 'overview',
     calendarEvents: [],
+    calendarConflictPairs: [],
     calendarWeekStart: startOfWeek(new Date()),
     calendarSelectedEventId: null,
     calendarSyncTimer: null,
@@ -1630,7 +1631,9 @@ document.addEventListener('DOMContentLoaded', () => {
       end: allDay ? toLocalDateInput(end) : end.toISOString(),
       all_day: allDay,
       source: 'deadline',
+      blocking: false,
       conflict: false,
+      conflict_with: [],
       deadline_label: raw
     };
   }
@@ -1660,48 +1663,13 @@ document.addEventListener('DOMContentLoaded', () => {
       .map(deadlineToCalendarItem)
       .filter(Boolean);
 
-    // Deduplicate calendar events by ID
-    const seenIds = new Set();
-    const uniqueCalEvents = [];
-    for (const ev of state.calendarEvents) {
-      const eid = String(ev.id || '');
-      if (eid && seenIds.has(eid)) continue;
-      if (eid) seenIds.add(eid);
-      uniqueCalEvents.push(ev);
-    }
-
-    return [...uniqueCalEvents, ...deadlines];
+    return window.CalendarConflicts.deduplicate([...state.calendarEvents, ...deadlines]);
   }
 
   function localConflictPass(events) {
-    (events || []).forEach(e => {
-      e.conflict = false;
-      e.conflict_with = [];
-    });
-
-    // Deadlines (source === 'deadline') never participate in occupied-time collision detection
-    const timed = (events || [])
-      .filter(e => !e.all_day && e.source !== 'deadline')
-      .map(e => ({ event: e, start: parseEventStart(e), end: parseEventEnd(e) }))
-      .filter(x => x.start && x.end);
-
-    for (let i = 0; i < timed.length; i += 1) {
-      for (let j = i + 1; j < timed.length; j += 1) {
-        const a = timed[i];
-        const b = timed[j];
-        if (a.start < b.end && b.start < a.end) {
-          a.event.conflict = true;
-          b.event.conflict = true;
-          if (!a.event.conflict_with.some(x => x.id === b.event.id)) {
-            a.event.conflict_with.push({ id: b.event.id, title: b.event.title });
-          }
-          if (!b.event.conflict_with.some(x => x.id === a.event.id)) {
-            b.event.conflict_with.push({ id: a.event.id, title: a.event.title });
-          }
-        }
-      }
-    }
-    return events;
+    const result = window.CalendarConflicts.annotate(events || []);
+    state.calendarConflictPairs = result.pairs;
+    return result.events;
   }
 
   function initCalendarControls() {
@@ -1796,12 +1764,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!grid || !allDay) return;
 
     const { start: weekStart, end: weekEnd } = calendarRange();
-    const weekItems = combinedCalendarItems().filter(event => {
+    const visibleItems = combinedCalendarItems().filter(event => {
       const start = parseEventStart(event);
       const end = parseEventEnd(event) || start;
       return start && end && start < weekEnd && end >= weekStart;
     });
-    localConflictPass(weekItems);
+    const weekItems = localConflictPass(visibleItems);
 
     const rangeLabel = $('calendarRangeLabel');
     if (rangeLabel) {
@@ -1811,7 +1779,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderAllDayRow(allDay, weekStart, weekItems);
     renderTimedGrid(grid, weekStart, weekItems);
-    renderConflictAlert(weekItems);
+    renderConflictAlert();
   }
 
   function renderAllDayRow(container, weekStart, items) {
@@ -1965,15 +1933,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function renderConflictAlert(items) {
+  function renderConflictAlert() {
     const alert = $('calendarConflictAlert');
     const text = $('calendarConflictText');
     if (!alert || !text) return;
-    const conflicts = (items || []).filter(item => item.conflict && item.source !== 'deadline');
-    const uniqueIds = new Set(conflicts.map(c => c.id));
-    const pairCount = Math.max(1, Math.floor(uniqueIds.size / 2));
-    alert.hidden = conflicts.length === 0;
-    if (conflicts.length) {
+    const pairCount = state.calendarConflictPairs.length;
+    alert.hidden = pairCount === 0;
+    alert.style.display = pairCount === 0 ? 'none' : '';
+    if (pairCount) {
       text.textContent = `${pairCount} schedule clash${pairCount === 1 ? '' : 'es'} this week. Conflicting events are highlighted in red.`;
     }
   }
