@@ -29,22 +29,23 @@ body {
   overflow-x: hidden;
 }
 
-/* Custom subtle scrollbar */
+/* Custom subtle scrollbar - hidden */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 0;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-track {
-  background: #000000;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.25);
-  border-radius: 999px;
+  background: transparent;
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: transparent;
 }
 
 .sr-only {

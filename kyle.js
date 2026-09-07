@@ -412,27 +412,60 @@
         ui.setSubtitle?.('Preparing draft...');
       }
 
-      const response = await fetch(`${API_BASE}/api/kyle/agent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: cleanPrompt,
-          userId: getUserId(),
-          context: store.context,
-          uiContext: window.MailmateContext?.snapshot?.() || {},
-          resolvedReferences: resolution.references,
-          selectedCalendarEventId: window.AgentCalendar?.getSelectedEventId?.() || null,
-          activeDraft: activeDraft,
-          selectedEmail: selectedEmail,
-          conversation: (store.conversation || []).slice(-12)
-        })
-      });
-      if (!response.ok) throw new Error(`Kyle returned ${response.status}`);
+      const askAgent = async (message) => {
+        const response = await fetch(`${API_BASE}/api/kyle/agent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: message,
+            userId: getUserId(),
+            context: store.context,
+            uiContext: window.MailmateContext?.snapshot?.() || {},
+            resolvedReferences: resolution.references,
+            selectedCalendarEventId: window.AgentCalendar?.getSelectedEventId?.() || null,
+            activeDraft: activeDraft,
+            selectedEmail: selectedEmail,
+            conversation: (store.conversation || []).slice(-12)
+          })
+        });
+        if (!response.ok) throw new Error(`Kyle returned ${response.status}`);
+        return response.json();
+      };
 
-      const data = await response.json();
-      if (composerRequest && !(data.actions || []).some(action => ['mail.compose', 'mail.reply', 'mail.update_draft', 'mail.send_draft'].includes(action.tool))) {
+      // Tool-call enforcement: a composer request MUST come back with a proper
+      // mail.* tool action. If the model forgot the tool call, retry with an
+      // explicit error reminder before giving up.
+      const composerToolMissing = (payload) => !(payload?.actions || [])
+        .some(action => ['mail.compose', 'mail.reply', 'mail.update_draft', 'mail.send_draft'].includes(action.tool));
+
+      const MAX_TOOL_RETRIES = 2;
+      let data = null;
+      let lastError = null;
+      for (let attempt = 0; attempt <= MAX_TOOL_RETRIES; attempt++) {
+        try {
+          const retryNote = attempt > 0
+            ? `${cleanPrompt}\n\n[SYSTEM ERROR: your previous response did not include a required tool call. You MUST respond with a mail.compose/mail.reply/mail.update_draft tool action for this request. Do not reply with text only.]`
+            : cleanPrompt;
+          data = await askAgent(retryNote);
+          if (!composerRequest || !composerToolMissing(data)) {
+            lastError = null;
+            break;
+          }
+          lastError = new Error('agent returned no composer tool call');
+          console.warn(`[Kyle Agent] missing composer tool call (attempt ${attempt + 1}/${MAX_TOOL_RETRIES + 1}), retrying`);
+        } catch (err) {
+          lastError = err;
+          if (attempt < MAX_TOOL_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, 600 * (attempt + 1)));
+            continue;
+          }
+        }
+      }
+
+      if (composerRequest && lastError && composerToolMissing(data || {})) {
         window.KyleUi?.active?.closeComposer?.();
       }
+      if (!data) throw lastError || new Error('Kyle returned no response');
       if (data.mode !== 'semantic-agent') {
         const recentFallback = /\b(most\s+recent|latest|newest|show\s+(?:me\s+)?(?:the\s+)?recent)\s+(?:e?mail|message)\b/i.test(cleanPrompt);
         if (recentFallback) {
