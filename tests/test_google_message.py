@@ -63,3 +63,19 @@ def test_mark_read_removes_only_the_unread_label():
         body={'removeLabelIds': ['UNREAD']},
     )
     assert result['is_read'] is True
+
+
+def test_safe_html_preserves_hidden_preheader_and_min_width_layout():
+    payload = {
+        'mimeType': 'text/html',
+        'body': {'data': _encoded(
+            '<div style="visibility:hidden; opacity:0; overflow:hidden; max-height:0; width:0">preheader</div>'
+            '<table style="min-width:600px; width:100%"><tr><td>Body</td></tr></table>'
+        )},
+    }
+    rendered = _safe_message_html(payload)
+    assert 'visibility: hidden' in rendered
+    assert 'opacity: 0' in rendered
+    assert 'overflow: hidden' in rendered
+    assert 'max-height: 0' in rendered
+    assert 'min-width: 600px' in rendered

@@ -540,20 +540,55 @@ document.addEventListener('DOMContentLoaded', () => {
     renderWork(data);
   }
 
-  function privacyPillHtml(gate) {
+  function privacyPillHtml(gate, email = null) {
     if (!gate) return '';
-    if (gate.work_agent_allowed) {
-      return `<span class="privacy-pill work-active" title="Actionable: Work Agent active"><i class="fas fa-robot"></i> Work Active</span>`;
-    }
     if (gate.ai_allowed === false) {
       return `<span class="privacy-pill private" title="Private: Excluded from AI &amp; Work Agent (${escapeHtml(gate.reason || gate.label || 'Sensitive')})"><i class="fas fa-shield-halved"></i> Private</span>`;
     }
-    // Ordinary safe mail has no badge to eliminate visual noise
+    if (gate.work_agent_allowed) {
+      const work = emailWorkPresentation(email || { privacy_gate: gate });
+      if (work.state === 'done') {
+        return `<span class="privacy-pill work-done" title="Work completed for this source email"><i class="fas fa-check"></i> Work done</span>`;
+      }
+      if (work.state === 'needs-input') {
+        return `<span class="privacy-pill work-needs-input" title="Kyle needs input before continuing"><i class="fas fa-circle-exclamation"></i> Needs input</span>`;
+      }
+      if (work.state === 'active') {
+        return `<span class="privacy-pill work-active" title="Kyle Work is active for this source email"><i class="fas fa-robot"></i> Work Active</span>`;
+      }
+      return `<span class="privacy-pill work-eligible" title="This email is eligible for Work, but no active run is attached"><i class="fas fa-bolt"></i> Work eligible</span>`;
+    }
     return '';
   }
 
   function emailOverviewText(email) {
     return email.pdf_summary || email.summary || email.ai_summary || email.snippet || 'No preview available.';
+  }
+
+  function shouldRenderRichEmailHtml(email) {
+    const html = String(email?.body_html || '');
+    if (!html) return false;
+    const tableCount = (html.match(/<table\b/gi) || []).length;
+    const linkCount = (html.match(/<a\b/gi) || []).length;
+    const designed = /<(?:h1|h2|h3)\b|background-color\s*:|\bbgcolor=|role=\"presentation\"/i.test(html);
+    return tableCount > 0 || linkCount >= 3 || designed;
+  }
+
+  function workJobForEmail(email) {
+    const messageId = String(emailKey(email) || '');
+    if (!messageId) return null;
+    return (workJobs || []).find(job => String(job?.source?.message_id || '') === messageId) || null;
+  }
+
+  function emailWorkPresentation(email) {
+    const gate = email?.privacy_gate || {};
+    if (!gate.work_agent_allowed) return { state: 'none', job: null };
+    const job = workJobForEmail(email);
+    if (!job) return { state: 'eligible', job: null };
+    const status = String(job.status || '');
+    if (WORK_TERMINAL_STATUSES.has(status) || status === 'failed') return { state: 'done', job };
+    if (status === 'needs_input') return { state: 'needs-input', job };
+    return { state: 'active', job };
   }
 
   async function openSourceEmail(sourceId, fallback = {}) {
@@ -576,7 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await openEmail(source);
   }
 
-  function privacyDetailBox(gate) {
+  function privacyDetailBox(gate, email = null) {
     if (!gate) return '';
     if (gate.ai_allowed === false) {
       return `
@@ -588,20 +623,35 @@ document.addEventListener('DOMContentLoaded', () => {
               <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(gate.reason || 'Contains financial, security, or sensitive information.')}</p>
             </div>
           </div>
-          <span style="font-size:0.72rem;background:#ffe4e6;color:#9f1239;padding:2px 8px;border-radius:6px;white-space:nowrap;font-weight:600;">Private</span>
+          <span class="privacy-state-label private">Private</span>
         </div>`;
     }
     if (gate.work_agent_allowed) {
+      const work = emailWorkPresentation(email || { privacy_gate: gate });
+      const done = work.state === 'done';
+      const needs = work.state === 'needs-input';
+      const active = work.state === 'active';
+      const cardClass = done ? 'work-done' : needs ? 'work-needs-input' : 'work';
+      const title = done ? 'Work completed' : needs ? 'Work needs input' : active ? 'Actionable Task Plane' : 'Work eligible';
+      const subtitle = done
+        ? 'Kyle has already resolved or completed the Work item attached to this source email.'
+        : needs
+          ? 'Kyle is waiting for required input before it can continue.'
+          : active
+            ? 'Kyle Work is currently active for this source email.'
+            : 'This message can become a Work item, but no active run is currently attached.';
+      const label = done ? 'Work done' : needs ? 'Needs input' : active ? 'Work Active' : 'Eligible';
+      const icon = done ? 'fa-check' : needs ? 'fa-circle-exclamation' : active ? 'fa-robot' : 'fa-bolt';
       return `
-        <div class="email-privacy-card work">
+        <div class="email-privacy-card ${cardClass}">
           <div style="display:flex;align-items:center;gap:8px;">
-            <i class="fas fa-robot" style="font-size:1.1rem;color:#9333ea;"></i>
+            <i class="fas ${icon}" style="font-size:1.05rem;"></i>
             <div>
-              <strong>Actionable Task Plane</strong> · Work Agent active
-              <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(gate.reason || 'Coursework or project deliverable.')}</p>
+              <strong>${title}</strong>
+              <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(subtitle)}</p>
             </div>
           </div>
-          <span style="font-size:0.72rem;background:#f3e8ff;color:#6b21a8;padding:2px 8px;border-radius:6px;white-space:nowrap;font-weight:600;">Work Active</span>
+          <span class="privacy-state-label">${label}</span>
         </div>`;
     }
     return `
@@ -613,7 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <p style="margin:2px 0 0;font-size:0.75rem;">${escapeHtml(gate.reason || 'Direct correspondence; suitable for contextual summarization.')}</p>
           </div>
         </div>
-        <span style="font-size:0.72rem;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:6px;white-space:nowrap;font-weight:600;">Display only</span>
+        <span class="privacy-state-label safe">Display only</span>
       </div>`;
   }
 
@@ -663,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="email-copy">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">
                 <p class="email-sender">${escapeHtml(senderName(email.sender))}</p>
-                ${privacyPillHtml(email.privacy_gate)}
+                ${privacyPillHtml(email.privacy_gate, email)}
               </div>
               <p class="email-subject">${escapeHtml(email.subject || 'No subject')}</p>
               <p class="email-preview">${safeSnippet(emailOverviewText(email))}</p>
@@ -772,17 +822,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const hasFullBody = Boolean(email.body_html || email.body);
+    const useRichHtml = shouldRenderRichEmailHtml(email);
     let bodyContent = '';
-    if (email.body_html) {
+    if (useRichHtml) {
       bodyContent = `<div class="email-html-content">${email.body_html}</div>`;
     } else if (hasFullBody) {
-      bodyContent = linkifyText(email.body);
+      bodyContent = `<div class="email-plain-content">${linkifyText(email.body || email.snippet || '')}</div>`;
     } else if (loading) {
       bodyContent = `
         <div class="email-prefetch-indicator"><i class="fas fa-circle-notch fa-spin"></i> Loading full message...</div>
-        <div class="email-snippet-content">${safeSnippet(email.snippet || 'Loading preview...')}</div>`;
+        <div class="email-plain-content email-snippet-content">${safeSnippet(email.snippet || 'Loading preview...')}</div>`;
     } else {
-      bodyContent = linkifyText(email.body || email.snippet || 'This message has no readable text body.');
+      bodyContent = `<div class="email-plain-content">${linkifyText(email.body || email.snippet || 'This message has no readable text body.')}</div>`;
     }
 
     els.emailDetail.innerHTML = `
@@ -790,13 +841,13 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="email-detail-title-row">
           <p class="section-label">${isImportant(email) ? 'Needs attention' : 'Message'}</p>
           <div style="display:flex;align-items:center;gap:8px;">
-            ${privacyPillHtml(email.privacy_gate)}
+            ${privacyPillHtml(email.privacy_gate, email)}
             <button class="email-trash-btn" id="emailTrashBtn" type="button" title="Move this message to Gmail Trash"><i class="far fa-trash-can"></i> Trash</button>
           </div>
         </div>
         <h2>${escapeHtml(email.subject || 'No subject')}</h2>
         <div class="email-detail-meta"><span>${escapeHtml(email.sender || 'Unknown sender')}</span><time>${escapeHtml(formatDate(email.date || email.timestamp, true))}</time></div>
-        ${privacyDetailBox(email.privacy_gate)}
+        ${privacyDetailBox(email.privacy_gate, email)}
       </header>
       <div class="email-body" ${loading ? 'aria-busy="true"' : ''}>${bodyContent}</div>`;
     $('emailTrashBtn')?.addEventListener('click', () => trashEmail(email));
@@ -1177,6 +1228,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch(`${API_BASE}/api/work/jobs`);
       if (res.ok) {
         workJobs = await res.json();
+        if (state.currentPage === 'inbox' && state.data?.emails) {
+          renderEmails(state.data.emails);
+        }
       }
     } catch (e) {
       console.warn('Failed to load work jobs:', e);

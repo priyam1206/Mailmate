@@ -189,6 +189,23 @@ class PrivacyGate:
                     label="Medical / Legal"
                 )
 
+        # Outbound/sent messages may be displayed and summarized locally, but they
+        # must never create or advertise an active Work task. Sensitive rules above
+        # still take precedence, so an outbound financial/security message remains blocked.
+        direction = str(item.get("direction") or "").strip().lower()
+        labels = {str(label).upper() for label in (item.get("labels") or [])}
+        if direction == "outbound" or "SENT" in labels:
+            return cls._decision(
+                visible_to_user=True,
+                ai_allowed=True,
+                work_agent_allowed=False,
+                store_derived_state=False,
+                category="outbound_message",
+                reason="Sent by you; not an inbound task for Kyle Work",
+                label="Sent Mail",
+                routing="LOCAL_ONLY"
+            )
+
         # 4. Check Actionable Academic Tasks -> ALLOWED FOR AI & WORK AGENT
         for pat in cls.ACADEMIC_KEYWORDS:
             if re.search(pat, text, re.I):

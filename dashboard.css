@@ -438,10 +438,11 @@ h2 { font-size: 1rem; }
 .email-detail-header { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .email-detail-header h2 { margin-top: 10px; font-size: 1.35rem; line-height: 1.35; }
 .email-detail-meta { margin-top: 14px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 0.78rem; }
-.email-body { padding-top: 24px; color: var(--soft); line-height: 1.75; word-break: break-word; max-width: 900px; }
+.email-body { padding-top: 24px; color: var(--soft); line-height: 1.75; word-break: break-word; width: 100%; max-width: none; }
+.email-plain-content { max-width: 900px; }
 .email-html-content {
   width: 100%;
-  max-width: 780px;
+  max-width: 960px;
   margin: 0 auto;
   overflow-x: auto;
   color: var(--text);
@@ -449,7 +450,8 @@ h2 { font-size: 1rem; }
   font-size: 14px;
   line-height: 1.5;
 }
-.email-html-content table { width: auto; max-width: 100%; border-collapse: collapse; }
+.email-html-content > table { margin-left: auto; margin-right: auto; }
+.email-html-content table { max-width: 100%; border-collapse: collapse; }
 .email-html-content td, .email-html-content th { vertical-align: top; }
 .email-html-content a { color: #2563eb; }
 .email-body .email-link { color: var(--accent, #7c6af7); text-decoration: underline; word-break: break-all; }
@@ -2275,6 +2277,21 @@ h2 { font-size: 1rem; }
   border: 1px solid #d8b4fe;
   color: #6b21a8;
 }
+.privacy-pill.work-eligible {
+  background: #f6f3ff;
+  border: 1px solid #ddd6fe;
+  color: #6d5aa8;
+}
+.privacy-pill.work-done {
+  background: #f1f5f2;
+  border: 1px solid #cfe0d3;
+  color: #477054;
+}
+.privacy-pill.work-needs-input {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a5b13;
+}
 .privacy-pill.private {
   background: #fff1f2;
   border: 1px solid #fda4af;
@@ -2326,6 +2343,27 @@ h2 { font-size: 1rem; }
 .email-privacy-card.work p {
   color: #6b21a8;
   opacity: 1;
+}
+.email-privacy-card.work-done {
+  background: #f3f8f4;
+  border: 1px solid #d8e7dc;
+  color: #285a37;
+}
+.email-privacy-card.work-done p { color: #4b6d55; }
+.email-privacy-card.work-needs-input {
+  background: #fff8ee;
+  border: 1px solid #fed7aa;
+  color: #9a5b13;
+}
+.email-privacy-card.work-needs-input p { color: #a16207; }
+.privacy-state-label {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.045);
+  font-size: .72rem;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 /* Badges for Work Job Statuses */

@@ -334,9 +334,11 @@ class _SafeEmailHtmlParser(HTMLParser):
         'background-color', 'border', 'border-collapse', 'color', 'display',
         'font-family', 'font-size', 'font-style', 'font-weight', 'height',
         'line-height', 'margin', 'margin-bottom', 'margin-left', 'margin-right',
-        'margin-top', 'max-width', 'padding', 'padding-bottom', 'padding-left',
-        'padding-right', 'padding-top', 'text-align', 'text-decoration',
-        'vertical-align', 'white-space', 'width',
+        'margin-top', 'max-height', 'max-width', 'min-height', 'min-width',
+        'opacity', 'overflow', 'overflow-x', 'overflow-y', 'padding',
+        'padding-bottom', 'padding-left', 'padding-right', 'padding-top',
+        'text-align', 'text-decoration', 'vertical-align', 'visibility',
+        'white-space', 'width', 'word-break',
     }
 
     def __init__(self):
@@ -978,7 +980,3 @@ def delete_gmail_draft(draft_id):
         _reset_gmail_service()
         print(f"[Gmail] delete_gmail_draft error ({draft_id}): {e}")
         return False
-
-
-
-
