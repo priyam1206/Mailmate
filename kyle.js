@@ -16,6 +16,7 @@
   let bargePeaks = 0;
 
   let currentRecorder = null;
+  let activeInputMode = 'text';
 
   function saveMutePreference() {
     try {
@@ -48,6 +49,12 @@
         stopListening();
         return;
       }
+      if ([store.states.THINKING, store.states.NAVIGATING, store.states.WORKING].includes(store.current)) {
+        interrupt(false);
+        ui.setLiveText('Action canceled.', 2500);
+        return;
+      }
+      activeInputMode = 'voice';
       startListening();
     },
     onMute: () => {
@@ -60,6 +67,7 @@
     onTextFocus: () => stopAudioForText(),
     onText: prompt => {
       stopAudioForText();
+      activeInputMode = 'text';
       handlePrompt(prompt);
     }
   });
@@ -94,6 +102,11 @@
   async function startListening() {
     if (store.muted) return;
     if (store.current === store.states.LISTENING || store.current === store.states.TRANSCRIBING) return;
+    if ([store.states.THINKING, store.states.NAVIGATING, store.states.WORKING].includes(store.current)) {
+      console.log('[Kyle Voice] startListening suppressed: Kyle is actively working');
+      return;
+    }
+    activeInputMode = 'voice';
     interrupt(false);
 
     activeRun += 1;
@@ -109,13 +122,14 @@
 
     try {
       await micPromise;
-      if (run !== activeRun) return;
+      if (run !== activeRun || activeInputMode !== 'voice') return;
       console.log(`[Kyle Voice] mic ready after ${Math.round(performance.now() - startedAt)} ms`);
       const useWhisper = await whisperPromise;
       if (useWhisper) return startWhisperListening(run, true);
       return startBrowserListening(run, true);
     } catch (error) {
       console.warn('[Kyle Voice] mic startup failed:', error.message || error);
+      if (run !== activeRun || activeInputMode !== 'voice') return;
       return startBrowserListening(run, false);
     }
   }
@@ -123,7 +137,7 @@
   async function startWhisperListening(run, micReady = false) {
     try {
       if (!micReady) await audio.openMic();
-      if (run !== activeRun) return;
+      if (run !== activeRun || activeInputMode !== 'voice') return;
 
       store.set(store.states.LISTENING);
       ui.setLiveText('Listening (Whisper)...');
@@ -138,7 +152,9 @@
     } catch (error) {
       console.warn('[Kyle Voice] local recording unavailable:', error.message || error);
       audio.cleanupMic();
-      startBrowserListening(run);
+      if (run === activeRun && activeInputMode === 'voice') {
+        startBrowserListening(run);
+      }
     }
   }
 
@@ -148,7 +164,7 @@
     currentRecorder = null;
     audio.scheduleMicClose?.(10000);
 
-    if (run !== activeRun) return;
+    if (run !== activeRun || activeInputMode !== 'voice') return;
     if (!blob || blob.size < 1000) {
       store.set(store.states.IDLE);
       ui.setLiveText('');
@@ -170,6 +186,8 @@
       const data = await response.json();
       const transcript = String(data.text || '').trim();
 
+      if (run !== activeRun || activeInputMode !== 'voice') return;
+
       if (!transcript) {
         store.set(store.states.IDLE);
         ui.setLiveText('');
@@ -181,9 +199,11 @@
       handlePrompt(transcript, run);
     } catch (error) {
       console.warn('[Kyle Voice] Whisper failed:', error.message || error);
-      if (SpeechRecognition) {
+      if (run === activeRun && activeInputMode === 'voice' && SpeechRecognition) {
         ui.setLiveText('Local STT failed. Using browser fallback…', 1800);
-        setTimeout(() => startBrowserListening(run), 150);
+        setTimeout(() => {
+          if (run === activeRun && activeInputMode === 'voice') startBrowserListening(run);
+        }, 150);
       } else {
         fail('Voice transcription failed. You can still type to Kyle.');
       }
@@ -198,7 +218,7 @@
 
     try {
       if (!micReady) await audio.openMic();
-      if (run !== activeRun) return;
+      if (run !== activeRun || activeInputMode !== 'voice') return;
 
       recognition = new SpeechRecognition();
       recognition.lang = 'en-IN';
@@ -207,6 +227,10 @@
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
+        if (run !== activeRun || activeInputMode !== 'voice') {
+          try { recognition.abort(); } catch (_) {}
+          return;
+        }
         store.set(store.states.LISTENING);
         ui.setLiveText('Listening…');
         console.log('[Kyle Voice] browser fallback recognition started');
@@ -281,15 +305,6 @@
     if (store.muted) return;
     if (store.current === store.states.LISTENING) {
       ui.setAmplitude(value, 0.016);
-      return;
-    }
-
-    if (store.current !== store.states.SPEAKING || performance.now() - speakingStartedAt < 650) return;
-    bargePeaks = value > 0.42 ? bargePeaks + 1 : Math.max(0, bargePeaks - 1);
-    if (bargePeaks >= 5) {
-      console.log('[Kyle Voice] barge-in detected');
-      bargePeaks = 0;
-      interrupt(true);
     }
   }
 
@@ -485,10 +500,7 @@
       if (run !== activeRun) return;
       speakingStartedAt = performance.now();
       smoothedSpeechEnergy = 0;
-      bargePeaks = 0;
       startSpeechAnimation(text, run);
-      // Only open the mic for barge-in after speech begins.
-      if (!store.muted) audio.openMic().catch(error => console.warn('[Kyle Voice] barge-in mic unavailable:', error.message || error));
     };
 
     utterance.onend = () => finishSpeech(run);
@@ -571,8 +583,12 @@
     stopSpeech(true);
     audio.cleanupMic();
     store.set(store.states.INTERRUPTED);
-    if (thenListen && !store.muted) setTimeout(() => startListening(), 90);
-    else store.set(store.states.IDLE);
+    if (thenListen && !store.muted) {
+      activeInputMode = 'voice';
+      setTimeout(() => startListening(), 90);
+    } else {
+      store.set(store.states.IDLE);
+    }
   }
 
   function narrateObservedActions(actions) {
@@ -596,8 +612,15 @@
   }
 
   function stopAudioForText() {
+    activeInputMode = 'text';
+    clearTimeout(recognitionTimer);
+    recognitionTimer = null;
+    audio.cancelScheduledClose?.();
+
     const active =
       recognition ||
+      currentRecorder ||
+      audio.isMicLive?.() ||
       [
         store.states.LISTENING,
         store.states.TRANSCRIBING,

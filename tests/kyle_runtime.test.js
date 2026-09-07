@@ -94,6 +94,24 @@ async function audioInterruptionTest() {
   assert.equal(store.current, states.IDLE);
   assert.equal(aborts, 2);
   assert.ok(cleanups >= 2);
+
+  // Verification: startListening must not interrupt active working states
+  store.current = states.THINKING;
+  await window.Kyle.startListening();
+  assert.equal(store.current, states.THINKING, 'startListening must not override THINKING state');
+
+  store.current = states.WORKING;
+  await window.Kyle.startListening();
+  assert.equal(store.current, states.WORKING, 'startListening must not override WORKING state');
+
+  store.current = states.NAVIGATING;
+  await window.Kyle.startListening();
+  assert.equal(store.current, states.NAVIGATING, 'startListening must not override NAVIGATING state');
+
+  // Verification: text prompt does not enter LISTENING
+  store.current = states.IDLE;
+  handlers.onText('test prompt');
+  assert.notEqual(store.current, states.LISTENING, 'Submitting text prompt must not enter LISTENING');
 }
 
 (async () => {
