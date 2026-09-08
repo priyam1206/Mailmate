@@ -19,10 +19,10 @@ def test_automation_modal_has_backdrop_and_complete_form():
 def test_kyle_composer_assets_are_cache_bumped():
     html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
-    assert 'dashboard.css?v=49' in html
+    assert 'dashboard.css?v=51' in html
     assert 'mailmate-master-polish.css?v=2' in html
     assert 'kyle-ui.js?v=45' in html
-    assert 'kyle.js?v=42' in html
+    assert 'kyle.js?v=43' in html
 
 
 def test_mail_composer_allows_clarification_without_tool_failure():
@@ -33,7 +33,7 @@ def test_mail_composer_allows_clarification_without_tool_failure():
 
 def test_inbox_hides_unattached_work_and_display_only_noise():
     js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
-    assert 'dashboard.js?v=42' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    assert 'dashboard.js?v=43' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
     assert 'Safe for local AI overview' not in js
     assert 'Kyle will prepare a Work item for this email on the next sync' not in js
     assert "if (work.state === 'eligible') return '';" in js
@@ -96,12 +96,13 @@ def test_overview_is_kyle_canvas_surface():
     assert 'id="kyleCanvas"' in html
     assert 'id="overviewDataSurface"' in html
     assert 'id="kyleCanvasComposerHost"' in html
-    assert 'kyle-canvas.js?v=9' in html
+    assert 'kyle-canvas.js?v=14' in html
     assert 'MAILMATE_OVERVIEW_CANVAS_V1' in css
     assert 'kyle-overview-inline-composer' in css
     assert 'window.KyleCanvas?.beginComposer?.(mode)' in ui
     assert 'window.KyleCanvas?.prepare?.' in js
-    assert 'speak(voice || reply, run, revealCanvas)' in js
+    assert 'await window.KyleCanvas?.reveal?.()' in js
+    assert 'speak(voice || reply, run)' in js
     assert '"presentation": presentation' in planner
     assert '"canvas": _validate_canvas' in planner
 
@@ -225,6 +226,7 @@ def test_canvas_has_user_prompt_bubble_and_text_cleanup():
     css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
 
     assert 'function cleanCanvasText' in canvas
+    assert "decoder.innerHTML = text" in canvas
     assert 'normalized.title = cleanCanvasText' in canvas
     assert '.kyle-canvas-query' in css
     assert 'align-self: flex-end !important' in css
@@ -259,10 +261,38 @@ def test_kyle_response_text_and_speech_are_synchronized():
 
     assert 'const beginSpeaking = async () =>' in js
     assert 'await signalReady()' in js
-    assert 'if (!await onReady?.()) return false' in js
+    assert 'if (!await onReady?.()) {' in js
+    assert 'await elevenAudio.play();' in js
     assert '.kyle-overview-mount .kyle-caption-bubble' in css
-    assert '.kyle-widget[data-state="THINKING"] .kyle-shell' in css
+    assert '.kyle-widget[data-state="THINKING"] .kyle-shell' not in css
     assert '.kyle-widget[data-state="SPEAKING"] .kyle-orb' in css
+    assert 'speakWithBrowser' not in js
+    assert 'window.speechSynthesis.speak' not in js
+
+
+def test_canvas_history_restore_and_deferred_opening_are_session_persistent():
+    html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    canvas = (ROOT / 'kyle-canvas.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+
+    assert 'id="kyleCanvasHistory"' in html
+    assert 'id="kyleCanvasRestore"' in html
+    assert 'sessionStorage.setItem(storageKey()' in canvas
+    assert 'function hydrateSession()' in canvas
+    assert 'function sanitizeStoredRecord' in canvas
+    assert 'function reopen()' in canvas
+    assert 'state.pending = true' in canvas
+    assert '.kyle-canvas-history-entry' in css
+    assert '@keyframes kyleCanvasPeelIn' in css
+    assert '.kyle-canvas-restore' in css
+
+
+def test_google_profile_photo_uses_authenticated_same_origin_proxy():
+    js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
+    app = (ROOT / 'app.py').read_text(encoding='utf-8')
+
+    assert '`${API_BASE}/api/user/avatar`' in js
+    assert "@app.route('/api/user/avatar')" in app
 
 
 def test_open_action_panel_hides_transcript_overlap():

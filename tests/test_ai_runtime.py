@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 import os
 
 import pytest
@@ -173,6 +174,40 @@ def test_common_work_uses_one_structured_plan(monkeypatch):
 
 os.environ.setdefault('MAILMATE_DISABLE_WHISPER_INIT', '1')
 mailmate_app = importlib.import_module('app')
+
+
+def test_user_avatar_proxies_authenticated_google_photo(monkeypatch):
+    upstream = SimpleNamespace(
+        content=b'jpeg-bytes',
+        headers={'Content-Type': 'image/jpeg'},
+        raise_for_status=lambda: None,
+    )
+    monkeypatch.setattr(mailmate_app, 'get_user_profile', lambda: {
+        'email': 'user@example.com',
+        'picture': 'https://lh3.googleusercontent.com/example',
+    })
+    monkeypatch.setattr(mailmate_app.requests, 'get', lambda url, timeout: upstream)
+
+    response = mailmate_app.app.test_client().get('/api/user/avatar')
+
+    assert response.status_code == 200
+    assert response.data == b'jpeg-bytes'
+    assert response.content_type == 'image/jpeg'
+    assert response.headers['Cache-Control'] == 'private, max-age=3600'
+
+
+def test_user_profile_caches_google_photo_for_avatar_proxy(monkeypatch):
+    monkeypatch.setattr(mailmate_app, 'get_user_profile', lambda: {
+        'email': 'user@example.com',
+        'picture': 'https://lh3.googleusercontent.com/example',
+    })
+    client = mailmate_app.app.test_client()
+
+    response = client.get('/api/user/profile')
+
+    assert response.status_code == 200
+    with client.session_transaction() as browser_session:
+        assert browser_session['user_picture'] == 'https://lh3.googleusercontent.com/example'
 
 
 def test_explicit_email_address_is_preserved(monkeypatch):

@@ -344,12 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.userPicture = profile.picture || '';
     }
 
-    let picture = state.userPicture || fallback;
-    if (state.userPicture && /googleusercontent\.com/i.test(state.userPicture)) {
-      // Request a fresh, slightly larger avatar rather than a stale cached 96px URL.
-      picture = state.userPicture.replace(/=s\d+(?:-c)?(?:$|&)/, '=s128-c$&');
-      picture += (picture.includes('?') ? '&' : '?') + 'ah_avatar=1';
-    }
+    const picture = state.userPicture ? `${API_BASE}/api/user/avatar` : fallback;
 
     localStorage.setItem('userName', name);
     if (state.userId) {

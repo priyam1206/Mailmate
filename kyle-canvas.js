@@ -15,7 +15,10 @@
 
   const state = {
     active: false,
+    pending: false,
     prepared: null,
+    lastResult: null,
+    history: [],
     prompt: '',
     page: 'overview',
     composerOwnsCanvas: false,
@@ -26,13 +29,24 @@
   const $ = id => document.getElementById(id);
 
   function cleanCanvasText(value) {
-    return String(value ?? '')
+    let text = String(value ?? '');
+    if (text.includes('&') && typeof document !== 'undefined') {
+      const decoder = document.createElement('textarea');
+      decoder.innerHTML = text;
+      text = decoder.value;
+    }
+    return text
       .replace(/\u00c2\u00b7/g, '·')
       .replace(/\u00e2\u20ac\u00a2/g, '•')
       .replace(/\u00e2\u2020\u2019/g, '→')
       .replace(/\u00e2\u20ac\u201c/g, '–')
       .replace(/\u00e2\u20ac\u201d/g, '—')
       .replace(/\u00c2(?=\s)/g, '')
+      .replace(/\b(\d{4})-(\d{2})-(\d{2})T00:00:00(?:\+00:00|Z)?\b/g, (_, year, month, day) =>
+        new Date(Number(year), Number(month) - 1, Number(day)).toLocaleDateString(undefined, {
+          month: 'short', day: 'numeric', year: 'numeric'
+        })
+      )
       .replace(/\s{2,}/g, ' ')
       .trim();
   }
@@ -44,6 +58,8 @@
       brief: document.querySelector('#tab-overview .overview-brief'),
       data: $('overviewDataSurface'),
       canvas: $('kyleCanvas'),
+      history: $('kyleCanvasHistory'),
+      restoreButton: $('kyleCanvasRestore'),
       query: $('kyleCanvasQuery'),
       thinking: $('kyleCanvasThinking'),
       status: $('kyleCanvasStatus'),
@@ -72,6 +88,10 @@
     }
 
     home.classList.toggle('is-active', isOverview());
+    const restoreButton = $('kyleCanvasRestore');
+    if (restoreButton && restoreButton.parentElement !== document.body) {
+      document.body.appendChild(restoreButton);
+    }
     return home;
   }
 
@@ -87,6 +107,82 @@
     const text = String(prompt || '');
     return /\b(reply|draft|compose|write)\b/i.test(text)
       || (/\bsend\b/i.test(text) && /@|\bto\b|\bsaying\b|\bsubject\b|\bbody\b|\bhim\b|\bher\b|\bthem\b/i.test(text));
+  }
+
+  function storageKey() {
+    let userId = 'session';
+    try { userId = localStorage.getItem('userId') || userId; } catch (_) {}
+    return `mailmate.kyle.canvas.v1.${String(userId).toLowerCase()}`;
+  }
+
+  function persistSession() {
+    try {
+      sessionStorage.setItem(storageKey(), JSON.stringify({
+        history: state.history.slice(-8),
+        lastResult: state.lastResult
+      }));
+    } catch (_) {}
+  }
+
+  function sanitizeStoredRecord(record) {
+    if (!record || typeof record !== 'object' || !record.canvas) return null;
+    const canvas = record.canvas;
+    return {
+      prompt: cleanCanvasText(record.prompt || ''),
+      createdAt: Number(record.createdAt) || Date.now(),
+      canvas: {
+        ...canvas,
+        title: cleanCanvasText(canvas.title || ''),
+        lede: cleanCanvasText(canvas.lede || ''),
+        highlights: (canvas.highlights || []).map(item => ({
+          ...item,
+          label: cleanCanvasText(item?.label || ''),
+          value: cleanCanvasText(item?.value || '')
+        })),
+        sections: (canvas.sections || []).map(section => ({
+          ...section,
+          heading: cleanCanvasText(section?.heading || ''),
+          items: (section?.items || []).map(item => ({
+            ...item,
+            title: cleanCanvasText(item?.title || ''),
+            detail: cleanCanvasText(item?.detail || ''),
+            meta: cleanCanvasText(item?.meta || '')
+          }))
+        }))
+      }
+    };
+  }
+
+  function hydrateSession() {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey()) || '{}');
+      state.history = Array.isArray(saved.history)
+        ? saved.history.slice(-8).map(sanitizeStoredRecord).filter(Boolean)
+        : [];
+      state.lastResult = sanitizeStoredRecord(saved.lastResult);
+      if (state.lastResult) {
+        state.prompt = state.lastResult.prompt || '';
+        state.prepared = state.lastResult.canvas || null;
+      }
+    } catch (_) {
+      state.history = [];
+      state.lastResult = null;
+    }
+    updateRestoreButton();
+  }
+
+  function updateRestoreButton() {
+    const button = els().restoreButton;
+    if (!button) return;
+    button.hidden = state.active || state.pending || !isOverview() || !(state.lastResult || state.history.length);
+  }
+
+  function archiveLastResult() {
+    if (!state.lastResult) return;
+    state.history.push(state.lastResult);
+    state.history = state.history.slice(-8);
+    state.lastResult = null;
+    persistSession();
   }
 
   function conversationalIntent(prompt) {
@@ -135,7 +231,9 @@
     const e = els();
     if (!e.canvas) return false;
 
+    archiveLastResult();
     state.active = true;
+    state.pending = false;
     state.prompt = String(prompt || '').trim();
     state.prepared = null;
     state.revealRun += 1;
@@ -153,11 +251,18 @@
     if (e.title) e.title.textContent = '';
     if (e.lede) e.lede.textContent = '';
     hideOverviewData();
+    updateRestoreButton();
     return true;
   }
 
   function beginForPrompt(prompt) {
-    return shouldBegin(prompt) ? begin(prompt) : false;
+    if (!shouldBegin(prompt)) return false;
+    archiveLastResult();
+    state.pending = true;
+    state.prompt = String(prompt || '').trim();
+    state.prepared = null;
+    updateRestoreButton();
+    return true;
   }
 
   function beginComposer(mode = 'compose', prompt = '') {
@@ -609,8 +714,24 @@ function normalizeCanvasBase(canvas, reply, prompt) {
 
 
   function prepare(payload = {}) {
-    if (!state.active || !isOverview()) return false;
+    if (!isOverview() || (!state.active && !state.pending)) return false;
+    if (!state.active) {
+      const e = els();
+      state.active = true;
+      state.pending = false;
+      e.tab?.classList.add('kyle-canvas-active');
+      if (e.canvas) e.canvas.hidden = false;
+      e.canvas?.classList.remove('is-thinking', 'is-error');
+      e.canvas?.classList.add('is-ready');
+      if (e.thinking) e.thinking.hidden = true;
+      if (e.answer) e.answer.hidden = true;
+      if (e.query) e.query.textContent = payload.prompt || state.prompt;
+      hideOverviewData();
+    }
+    const e = els();
+    if (e.query) e.query.textContent = payload.prompt || state.prompt;
     state.prepared = normalizeCanvas(payload.canvas, payload.reply || payload.text || '', payload.prompt || state.prompt);
+    updateRestoreButton();
     return true;
   }
 
@@ -636,6 +757,64 @@ function normalizeCanvasBase(canvas, reply, prompt) {
       window.KyleActions?.openPage?.('calendar');
       setTimeout(() => window.Kyle?.handlePrompt?.(`Open ${reference.label || 'that calendar event'}`), 80);
     }
+  }
+
+  function appendHistoryResult(host, record) {
+    const data = record?.canvas;
+    if (!host || !data) return;
+    const entry = document.createElement('section');
+    entry.className = 'kyle-canvas-history-entry';
+    const query = document.createElement('p');
+    query.className = 'kyle-canvas-history-query';
+    query.textContent = record.prompt || 'Earlier request';
+    entry.appendChild(query);
+    if (data.title) {
+      const title = document.createElement('h2');
+      title.textContent = data.title;
+      entry.appendChild(title);
+    }
+    if (data.lede) {
+      const lede = document.createElement('p');
+      lede.className = 'kyle-canvas-history-lede';
+      lede.textContent = data.lede;
+      entry.appendChild(lede);
+    }
+    for (const section of (data.sections || [])) {
+      const block = document.createElement('div');
+      block.className = 'kyle-canvas-history-section';
+      if (section.heading) {
+        const heading = document.createElement('h3');
+        heading.textContent = section.heading;
+        block.appendChild(heading);
+      }
+      for (const item of (section.items || [])) {
+        const row = document.createElement(item.reference ? 'button' : 'div');
+        row.className = 'kyle-canvas-history-item';
+        if (item.reference) {
+          row.type = 'button';
+          row.addEventListener('click', () => activateReference(item.reference));
+        }
+        const title = document.createElement('strong');
+        title.textContent = item.title || 'Open';
+        row.appendChild(title);
+        if (item.detail) {
+          const detail = document.createElement('span');
+          detail.textContent = item.detail;
+          row.appendChild(detail);
+        }
+        block.appendChild(row);
+      }
+      entry.appendChild(block);
+    }
+    host.appendChild(entry);
+  }
+
+  function renderHistory() {
+    const host = els().history;
+    if (!host) return;
+    host.replaceChildren();
+    state.history.forEach(record => appendHistoryResult(host, record));
+    host.hidden = state.history.length === 0;
   }
 
   function buildPreparedDom() {
@@ -701,21 +880,47 @@ function normalizeCanvasBase(canvas, reply, prompt) {
     if (!state.active || !isOverview()) return false;
     const e = els();
     const run = ++state.revealRun;
+    renderHistory();
     const built = buildPreparedDom();
+    e.canvas?.classList.remove('is-peeling');
+    void e.canvas?.offsetWidth;
+    e.canvas?.classList.add('is-peeling');
     e.canvas?.classList.remove('is-thinking', 'is-error');
     e.canvas?.classList.add('is-ready');
     if (e.thinking) e.thinking.hidden = true;
     if (e.answer) e.answer.hidden = false;
-    await typeText(e.title, built.data.title, run, 12);
-    await wait(65);
-    await typeText(e.lede, built.data.lede, run, 5);
+    await typeText(e.title, built.data.title, run, 5);
+    await wait(35);
+    await typeText(e.lede, built.data.lede, run, 2);
     if (run !== state.revealRun) return false;
     built.highlightNodes.forEach((node, i) => setTimeout(() => node.classList.remove('is-pending'), 80 * i));
     built.sectionNodes.forEach((node, i) => setTimeout(() => node.classList.remove('is-pending'), 120 + 105 * i));
+    state.lastResult = {
+      prompt: state.prompt,
+      canvas: state.prepared,
+      createdAt: Date.now()
+    };
+    persistSession();
+    updateRestoreButton();
+    setTimeout(scrollCurrentIntoView, 40);
     return true;
   }
 
+  function scrollCurrentIntoView() {
+    const answer = els().answer;
+    if (!answer || answer.hidden) return;
+    const top = Math.max(0, window.scrollY + answer.getBoundingClientRect().top - 74);
+    window.scrollTo({ top, behavior: 'auto' });
+  }
+
   function cancelPending() {
+    if (state.pending) {
+      state.pending = false;
+      state.prepared = state.lastResult?.canvas || null;
+      state.prompt = state.lastResult?.prompt || '';
+      updateRestoreButton();
+      return;
+    }
     if (!state.active) return;
     if (!state.prepared && !document.querySelector('#kyleCanvasComposerHost .kyle-action-panel.is-open')) restore();
   }
@@ -723,16 +928,42 @@ function normalizeCanvasBase(canvas, reply, prompt) {
   function restore() {
     const e = els();
     state.active = false;
-    state.prepared = null;
-    state.prompt = '';
+    state.pending = false;
     state.composerOwnsCanvas = false;
     state.revealRun += 1;
     e.tab?.classList.remove('kyle-canvas-active');
     e.canvas?.classList.remove('is-thinking', 'is-ready', 'is-error');
     if (e.canvas) e.canvas.hidden = true;
     if (e.thinking) e.thinking.hidden = true;
-    if (e.answer) e.answer.hidden = true;
     showOverviewData();
+    updateRestoreButton();
+  }
+
+  function reopen() {
+    const record = state.lastResult || state.history[state.history.length - 1];
+    if (!record || !isOverview()) return false;
+    const e = els();
+    state.active = true;
+    state.pending = false;
+    state.prompt = record.prompt || '';
+    state.prepared = record.canvas || null;
+    e.tab?.classList.add('kyle-canvas-active');
+    if (e.canvas) e.canvas.hidden = false;
+    e.canvas?.classList.remove('is-thinking', 'is-error');
+    e.canvas?.classList.add('is-ready', 'is-peeling');
+    if (e.query) e.query.textContent = state.prompt;
+    if (e.thinking) e.thinking.hidden = true;
+    if (e.answer) e.answer.hidden = false;
+    renderHistory();
+    const built = buildPreparedDom();
+    if (e.title) e.title.textContent = built.data.title;
+    if (e.lede) e.lede.textContent = built.data.lede;
+    built.highlightNodes.forEach(node => node.classList.remove('is-pending'));
+    built.sectionNodes.forEach(node => node.classList.remove('is-pending'));
+    hideOverviewData();
+    setTimeout(scrollCurrentIntoView, 260);
+    updateRestoreButton();
+    return true;
   }
 
   function placeComposer() {
@@ -773,6 +1004,7 @@ function normalizeCanvasBase(canvas, reply, prompt) {
       if (els().canvas) els().canvas.hidden = false;
       hideOverviewData();
     }
+    updateRestoreButton();
     setTimeout(placeComposer, 0);
   }
 
@@ -836,8 +1068,11 @@ function normalizeCanvasBase(canvas, reply, prompt) {
 
   function bind() {
     ensureOverviewDock();
+    hydrateSession();
     const back = $('kyleCanvasBack');
     if (back && back.dataset.bound !== '1') { back.dataset.bound = '1'; back.addEventListener('click', restore); }
+    const restoreButton = $('kyleCanvasRestore');
+    if (restoreButton && restoreButton.dataset.bound !== '1') { restoreButton.dataset.bound = '1'; restoreButton.addEventListener('click', reopen); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, { once: true }); else bind();
 
@@ -854,6 +1089,7 @@ function normalizeCanvasBase(canvas, reply, prompt) {
     prepare,
     reveal,
     restore,
+    reopen,
     cancelPending,
     showError,
     consumeActivity,

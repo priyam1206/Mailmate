@@ -751,8 +751,33 @@ def auth_google_callback():
 @app.route('/api/user/profile')
 def user_profile():
     profile = get_user_profile()
-    if profile: return jsonify(profile)
+    if profile:
+        if profile.get('picture'):
+            session['user_picture'] = profile['picture']
+        return jsonify(profile)
     return jsonify({"error": "Not authenticated"}), 401
+
+
+@app.route('/api/user/avatar')
+def user_avatar():
+    profile = get_user_profile()
+    picture_url = str((profile or {}).get('picture') or session.get('user_picture') or '').strip()
+    if not picture_url:
+        abort(404)
+    try:
+        upstream = requests.get(picture_url, timeout=8)
+        upstream.raise_for_status()
+        content_type = upstream.headers.get('Content-Type', 'image/jpeg')
+        if not content_type.startswith('image/'):
+            abort(502)
+        return Response(
+            upstream.content,
+            content_type=content_type,
+            headers={'Cache-Control': 'private, max-age=3600'},
+        )
+    except requests.RequestException:
+        app.logger.exception('Google profile image proxy failed')
+        abort(502)
 
 
 @app.route('/api/auth/logout', methods=['POST'])

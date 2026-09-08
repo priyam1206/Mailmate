@@ -363,7 +363,6 @@
     if (!cleanPrompt) return;
 
     store.addMessage('user', cleanPrompt);
-    ui.setLiveText(cleanPrompt);
     const overviewCanvasStarted = window.KyleCanvas?.beginForPrompt?.(cleanPrompt) || false;
 
     if (window.KylePlanner?.isUndo(cleanPrompt)) {
@@ -417,7 +416,6 @@
 
     try {
       store.set(store.states.THINKING);
-      ui.setSubtitle?.('Understanding your request...');
       const activeDraft = window.KyleUi?.active?.getActiveDraft?.() || null;
       const selectedEmail = window.AgentMail?.getSelectedEmail?.() || null;
       // Composer intent must represent a WRITE/SEND action, not a read-only
@@ -585,12 +583,12 @@
 
       if (useOverviewCanvas) {
         window.KyleCanvas?.prepare?.({ canvas: data.canvas, reply, text: reply, prompt: cleanPrompt });
+        await window.KyleCanvas?.reveal?.();
       }
 
       store.addMessage('kyle', reply);
       ui.setLiveText(voice || reply, 5200);
-      const revealCanvas = useOverviewCanvas ? () => window.KyleCanvas?.reveal?.() : null;
-      speak(voice || reply, run, revealCanvas);
+      speak(voice || reply, run);
     } catch (error) {
       console.error('[Kyle Voice] chat failed:', error.message || error);
       window.KyleCanvas?.showError?.(error.message || 'Kyle chat failed.');
@@ -662,11 +660,14 @@
 
     if (typeof window.Audio === 'function' && window.URL?.createObjectURL) {
       speakWithElevenLabs(text, run, beginSpeaking).then(played => {
-        if (!played && run === activeRun) speakWithBrowser(text, run, beginSpeaking);
+        if (!played && run === activeRun) {
+          store.set(window.KyleExecutor?.pending?.() ? store.states.WAITING_APPROVAL : store.states.IDLE);
+          ui.setLiveText(text);
+        }
       });
       return;
     }
-    speakWithBrowser(text, run, beginSpeaking);
+    store.set(window.KyleExecutor?.pending?.() ? store.states.WAITING_APPROVAL : store.states.IDLE);
   }
 
   async function speakWithElevenLabs(text, run, onReady = null) {
@@ -687,55 +688,25 @@
       elevenAudio.onended = () => finishSpeech(run);
       elevenAudio.onerror = () => {
         stopElevenAudio();
-        if (run === activeRun) speakWithBrowser(text, run);
+        if (run === activeRun) {
+          store.set(window.KyleExecutor?.pending?.() ? store.states.WAITING_APPROVAL : store.states.IDLE);
+          ui.setLiveText(text);
+        }
       };
-      if (!await onReady?.()) return false;
       await elevenAudio.play();
+      if (!await onReady?.()) {
+        stopElevenAudio();
+        return false;
+      }
       return true;
     } catch (error) {
       if (error?.name !== 'AbortError') {
         console.warn('[Kyle Voice] ElevenLabs failed:', error);
-        ui.setSubtitle?.('Cloud voice unavailable. Using device voice...');
       }
       return false;
     } finally {
       if (speechRequest === controller) speechRequest = null;
     }
-  }
-
-  async function speakWithBrowser(text, run, onReady = null) {
-    if (!('speechSynthesis' in window)) {
-      await onReady?.();
-      finishSpeech(run);
-      return;
-    }
-    const UtteranceClass = window.SpeechSynthesisUtterance || (typeof SpeechSynthesisUtterance !== 'undefined' ? SpeechSynthesisUtterance : null);
-    if (!UtteranceClass) {
-      finishSpeech(run);
-      return;
-    }
-    utterance = new UtteranceClass(text);
-    utterance.rate = 1.02;
-    utterance.pitch = 0.97;
-    utterance.volume = 1;
-    chooseVoice(utterance);
-
-    utterance.onend = () => finishSpeech(run);
-    utterance.onerror = event => {
-      if (event.error === 'interrupted' || event.error === 'canceled') return;
-      finishSpeech(run);
-    };
-
-    if (!await onReady?.()) return;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-  }
-
-  function chooseVoice(target) {
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(voice => /^en-IN/i.test(voice.lang) && /natural|google|microsoft/i.test(voice.name))
-      || voices.find(voice => /^en-(IN|GB|US)/i.test(voice.lang));
-    if (preferred) target.voice = preferred;
   }
 
   function startSpeechAnimation(text, run) {
