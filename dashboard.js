@@ -1331,7 +1331,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function renderWork(data) {
     try {
-      const res = await fetch(`${API_BASE}/api/work/jobs`);
+      // Entering Work is an explicit request to reconcile actionable Gmail into
+      // WorkJobs. This prevents an empty Work pane when Overview already shows
+      // Work-ready attention items.
+      const res = await fetch(`${API_BASE}/api/work/jobs?ensure=1&reconcile=1`, { cache: 'no-store' });
       if (res.ok) {
         workJobs = normalizeTextTree(await res.json());
         if (state.currentPage === 'inbox' && state.data?.emails) {
