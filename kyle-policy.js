@@ -12,6 +12,12 @@
 
   function evaluate(action = {}) {
     const tool = String(action.tool || '');
+    if (tool === 'automation.create') {
+      if (!action.args?.explicit_user_request) {
+        return { allowed: false, reason: 'Automation creation requires an explicit recurring request from the user.' };
+      }
+      return { allowed: true, risk: 'write', basis: 'explicit-user-automation' };
+    }
     if (UI_TOOLS.has(tool)) return { allowed: true, risk: 'ui' };
     if (WRITE_TOOLS.has(tool)) {
       if (tool === 'mail.send_draft') {
@@ -63,7 +69,10 @@
               loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
                 loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
                 loadBranchFix('./mailmate-product-v8.js?v=1', 'mailmateProductV8', () => {
-                  loadBranchFix('./mailmate-live-diff.js?v=1', 'mailmateLiveDiff');
+                  loadBranchFix('./mailmate-live-diff.js?v=1', 'mailmateLiveDiff', () => {
+                    loadBranchStyle('./mailmate-product-v9.css?v=2', 'mailmate-product-v9');
+                    loadBranchFix('./mailmate-product-v9.js?v=1', 'mailmateProductV9');
+                  });
                 });
               });
             });
