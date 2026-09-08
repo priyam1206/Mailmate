@@ -33,16 +33,11 @@
 
   window.KylePolicy = { evaluate };
 
-  // Branch-scoped architecture fixes. Keep these separate from the policy so
-  // each behavior can be reviewed or removed independently before merge.
-  function loadBranchFix(src, marker) {
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = false;
-    script.dataset[marker] = '1';
-    document.head.appendChild(script);
-  }
-
-  loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes');
-  loadBranchFix('./work-main-fixes.js?v=1', 'mailmateWorkMainFixes');
+  // Branch-scoped Kyle fixes stay isolated from the policy so the patch can be
+  // reviewed or removed cleanly before merge.
+  const script = document.createElement('script');
+  script.src = './kyle-main-fixes.js?v=2';
+  script.async = false;
+  script.dataset.mailmateKyleMainFixes = '1';
+  document.head.appendChild(script);
 })();
