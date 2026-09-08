@@ -62,7 +62,9 @@
               loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');
               loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
                 loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
-                loadBranchFix('./mailmate-product-v8.js?v=1', 'mailmateProductV8');
+                loadBranchFix('./mailmate-product-v8.js?v=1', 'mailmateProductV8', () => {
+                  loadBranchFix('./mailmate-live-diff.js?v=1', 'mailmateLiveDiff');
+                });
               });
             });
           });
