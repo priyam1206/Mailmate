@@ -334,9 +334,10 @@
       const before = ui.getActiveDraft?.() || canonicalDraft || null;
       const result = await originalSendCurrentComposer();
       if (result?.ok) {
-        const subject = document.getElementById('kyleComposerSubject')?.value ?? before?.subject ?? '';
-        const body = document.getElementById('kyleComposerText')?.value ?? before?.body ?? '';
-        rememberLastSent({ ...before, subject, body }, result);
+        // `before` is captured synchronously after the full-draft guard runs.
+        // Do not re-read the animated fields after Gmail returns; they may still
+        // be painting and could otherwise corrupt the resend receipt.
+        rememberLastSent(before, result);
       }
       return result;
     };
