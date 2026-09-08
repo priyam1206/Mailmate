@@ -42,12 +42,13 @@
     document.head.appendChild(script);
   }
 
-  // Preserve the architecture patch, then layer UX/safety, then the stable
-  // inbox/read-state model. The v2 stability layer replaces the earlier
-  // click-only pinning patch and disables the mutation-driven re-sort loop.
+  // Branch-only fix stack. Each layer loads after the previous one so wrappers
+  // around fetch/KyleTools are deterministic and easy to review before merge.
   loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
     loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
-      loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2');
+      loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
+        loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4');
+      });
     });
   });
 })();
