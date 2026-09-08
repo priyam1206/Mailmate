@@ -33,11 +33,18 @@
 
   window.KylePolicy = { evaluate };
 
-  // Branch-scoped Kyle fixes stay isolated from the policy so the patch can be
-  // reviewed or removed cleanly before merge.
-  const script = document.createElement('script');
-  script.src = './kyle-main-fixes.js?v=2';
-  script.async = false;
-  script.dataset.mailmateKyleMainFixes = '1';
-  document.head.appendChild(script);
+  function loadBranchFix(src, marker, onload) {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    script.dataset[marker] = '1';
+    if (typeof onload === 'function') script.addEventListener('load', onload, { once: true });
+    document.head.appendChild(script);
+  }
+
+  // Preserve the earlier architecture patch, then layer the UX/safety patch
+  // on top so it wraps the already-guarded fetch/send behavior deterministically.
+  loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
+    loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes');
+  });
 })();
