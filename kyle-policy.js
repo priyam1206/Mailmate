@@ -60,7 +60,10 @@
           loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
             loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6', () => {
               loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');
-              loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7');
+              loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
+                loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
+                loadBranchFix('./mailmate-product-v8.js?v=1', 'mailmateProductV8');
+              });
             });
           });
         });
