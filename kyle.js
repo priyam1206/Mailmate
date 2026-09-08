@@ -105,6 +105,19 @@
     }
   }
 
+  async function prewarmVoiceInput() {
+    try {
+      await Promise.all([whisperReady(), audio.prewarmMic?.()]);
+      console.log('[Kyle Voice] input stack prewarmed');
+    } catch (error) {
+      // A denied browser permission is handled normally on the first mic click.
+      console.log('[Kyle Voice] microphone prewarm deferred:', error.message || error);
+    }
+  }
+
+  setTimeout(prewarmVoiceInput, 0);
+  window.addEventListener('beforeunload', () => audio.cleanupMic?.(true));
+
   async function startListening() {
     if (store.muted) return;
     if (store.current === store.states.LISTENING || store.current === store.states.TRANSCRIBING) return;

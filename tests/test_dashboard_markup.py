@@ -22,7 +22,7 @@ def test_kyle_composer_assets_are_cache_bumped():
     assert 'dashboard.css?v=47' in html
     assert 'mailmate-master-polish.css?v=2' in html
     assert 'kyle-ui.js?v=45' in html
-    assert 'kyle.js?v=40' in html
+    assert 'kyle.js?v=41' in html
 
 
 def test_mail_composer_allows_clarification_without_tool_failure():
@@ -239,6 +239,18 @@ def test_kyle_prompt_has_microphone_button():
     assert "const promptMic = mount.querySelector('.kyle-prompt-mic')" in ui
     assert "promptMic?.addEventListener('click'" in ui
     assert '.kyle-prompt-mic' in css
+
+
+def test_voice_input_is_prewarmed_for_the_session():
+    html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    audio = (ROOT / 'kyle-audio.js').read_text(encoding='utf-8')
+    kyle = (ROOT / 'kyle.js').read_text(encoding='utf-8')
+
+    assert 'kyle-audio.js?v=31' in html
+    assert 'async function prewarmMic()' in audio
+    assert 'mic parked warm' in audio
+    assert 'setTimeout(prewarmVoiceInput, 0)' in kyle
+    assert "beforeunload', () => audio.cleanupMic?.(true)" in kyle
 
 
 def test_open_action_panel_hides_transcript_overlap():

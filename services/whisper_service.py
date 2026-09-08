@@ -5,8 +5,17 @@ import wave
 from faster_whisper import WhisperModel
 
 class WhisperService:
-    def __init__(self, model_name="small", model_dir="models/whisper-small"):
-        self.model_name = model_name
+    def __init__(self, model_name=None, model_dir="models/whisper-small"):
+        self.requested_model = model_name or os.getenv('WHISPER_MODEL', '').strip()
+        self.gpu_model = os.getenv('WHISPER_GPU_MODEL', 'small').strip() or 'small'
+        self.cpu_model = os.getenv('WHISPER_CPU_MODEL', 'base.en').strip() or 'base.en'
+        self.model_name = self.requested_model or self.gpu_model
+        self.language = os.getenv('WHISPER_LANGUAGE', 'en').strip() or 'en'
+        try:
+            configured_threads = int(os.getenv('WHISPER_CPU_THREADS', '4'))
+        except (TypeError, ValueError):
+            configured_threads = 4
+        self.cpu_threads = max(1, min(configured_threads, os.cpu_count() or 1))
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.model_dir = model_dir if os.path.isabs(model_dir) else os.path.join(root, model_dir)
         self.model = None
@@ -39,18 +48,35 @@ class WhisperService:
             except Exception:
                 pass
 
+            self.model_name = self.requested_model or (
+                self.gpu_model if self.device == 'cuda' else self.cpu_model
+            )
+
             print(f"[Whisper] model: {self.model_name}")
             print(f"[Whisper] device: {self.device}")
             print(f"[Whisper] loading...")
 
             os.makedirs(self.model_dir, exist_ok=True)
             try:
-                self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type, download_root=self.model_dir)
+                self.model = WhisperModel(
+                    self.model_name,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    download_root=self.model_dir,
+                    cpu_threads=self.cpu_threads,
+                )
             except Exception:
                 if self.device != 'cuda':
                     raise
                 self.device, self.compute_type = 'cpu', 'int8'
-                self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type, download_root=self.model_dir)
+                self.model_name = self.requested_model or self.cpu_model
+                self.model = WhisperModel(
+                    self.model_name,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    download_root=self.model_dir,
+                    cpu_threads=self.cpu_threads,
+                )
             self._warm_model()
             self.is_ready = True
             self.ready_event.set()
@@ -67,6 +93,9 @@ class WhisperService:
             "available": self.is_ready,
             "model": self.model_name,
             "device": self.device,
+            "compute_type": self.compute_type,
+            "cpu_threads": self.cpu_threads,
+            "language": self.language,
             "loaded": self.is_ready,
             "downloading": self.is_downloading,
             "warmed": self.warmed,
@@ -84,7 +113,8 @@ class WhisperService:
             audio_path,
             vad_filter=True,
             beam_size=1,
-            condition_on_previous_text=False
+            condition_on_previous_text=False,
+            language=self.language,
         )
 
         text = " ".join([segment.text for segment in segments])
@@ -104,8 +134,23 @@ class WhisperService:
                 output.setsampwidth(2)
                 output.setframerate(16000)
                 output.writeframes(b'\x00\x00' * 3200)
-            segments, _info = self.model.transcribe(path, beam_size=1, condition_on_previous_text=False)
+            segments, _info = self.model.transcribe(
+                path,
+                beam_size=1,
+                condition_on_previous_text=False,
+                language=self.language,
+            )
             list(segments)
+            # Production transcription enables VAD. Exercise that path during
+            # startup too so Silero and its kernels are not loaded on first use.
+            vad_segments, _vad_info = self.model.transcribe(
+                path,
+                vad_filter=True,
+                beam_size=1,
+                condition_on_previous_text=False,
+                language=self.language,
+            )
+            list(vad_segments)
             self.warmed = True
         except Exception as exc:
             print(f"[Whisper] warm-up skipped: {exc}")

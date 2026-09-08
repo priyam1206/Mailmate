@@ -9,6 +9,7 @@
     let chunks = [];
     let smoothed = 0;
     let closeTimer = null;
+    let prewarmPromise = null;
     const data = new Float32Array(1024);
 
     function ensureContext() {
@@ -18,6 +19,24 @@
 
     function micLive() {
       return Boolean(stream && stream.getAudioTracks().some(track => track.readyState === 'live'));
+    }
+
+    async function prewarmMic() {
+      cancelScheduledClose();
+      if (micLive()) return stream;
+      if (prewarmPromise) return prewarmPromise;
+      const now = () => globalThis.performance?.now?.() ?? Date.now();
+      const started = now();
+      prewarmPromise = navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      }).then(nextStream => {
+        stream = nextStream;
+        console.log(`[Kyle Voice] microphone prewarmed in ${Math.round(now() - started)} ms`);
+        return stream;
+      }).finally(() => {
+        prewarmPromise = null;
+      });
+      return prewarmPromise;
     }
 
     function startAnalyser() {
@@ -50,11 +69,7 @@
     async function openMic() {
       cancelScheduledClose();
       if (!micLive()) {
-        const started = performance.now();
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-        });
-        console.log(`[Kyle Voice] cold mic ready in ${Math.round(performance.now() - started)} ms`);
+        await prewarmMic();
       } else {
         console.log('[Kyle Voice] warm mic reused');
       }
@@ -98,16 +113,20 @@
       startAnalyser();
     }
 
-    function cleanupMic() {
+    function cleanupMic(release = false) {
       cancelScheduledClose();
       stopAnalyser();
       recorder = null;
       if (source) { try { source.disconnect(); } catch (_) {} }
       source = null;
       analyser = null;
-      stream?.getTracks().forEach(track => track.stop());
-      stream = null;
-      console.log('[Kyle Voice] mic closed');
+      if (release) {
+        stream?.getTracks().forEach(track => track.stop());
+        stream = null;
+        console.log('[Kyle Voice] mic released');
+      } else {
+        console.log('[Kyle Voice] mic parked warm');
+      }
     }
 
     function scheduleMicClose(delayMs = 10000) {
@@ -124,6 +143,7 @@
 
     return {
       openMic,
+      prewarmMic,
       startRecording,
       connectAudioElement,
       cleanupMic,

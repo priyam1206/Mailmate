@@ -127,7 +127,9 @@ Flask maps the stable Google account ID to a namespaced UUID and signs a five-mi
 
 ## Kyle Voice Assistant
 
-- Speech-to-text uses the browser's built-in `SpeechRecognition` / `webkitSpeechRecognition` support.
+- Speech-to-text uses local Faster Whisper first and browser speech recognition as a fallback. Mailmate preloads both the model and microphone stream so a permitted mic starts immediately.
+- CUDA machines default to `small` with FP16. CPU-only machines default to the lighter English `base.en` model with INT8 and at most four worker threads.
+- Override those portable defaults with `WHISPER_MODEL`, `WHISPER_GPU_MODEL`, `WHISPER_CPU_MODEL`, `WHISPER_CPU_THREADS`, or `WHISPER_LANGUAGE`.
 - Kyle uses ElevenLabs Flash TTS with the George voice when `ELEVENLABS_API_KEY` is a valid `sk_...` secret; browser speech synthesis remains the automatic fallback.
 - Private ElevenLabs Agents use the server-only `ELEVENLABS_AGENT_ID` signed-URL endpoint, so the API key is never exposed to the browser.
 - Calendar deletions always show the exact event or grouped event list before Kyle makes the change.
