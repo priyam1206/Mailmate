@@ -42,6 +42,15 @@
     document.head.appendChild(script);
   }
 
+  function loadBranchStyle(src, marker) {
+    if (document.querySelector(`link[data-${marker}]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = src;
+    link.setAttribute(`data-${marker}`, '1');
+    document.head.appendChild(link);
+  }
+
   // Branch-only fix stack. Each layer loads after the previous one so wrappers
   // around fetch/KyleTools are deterministic and easy to review before merge.
   loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
@@ -49,7 +58,10 @@
       loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
         loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4', () => {
           loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
-            loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6');
+            loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6', () => {
+              loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');
+              loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7');
+            });
           });
         });
       });
