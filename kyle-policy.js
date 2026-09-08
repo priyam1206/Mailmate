@@ -45,6 +45,8 @@
   // Preserve the earlier architecture patch, then layer the UX/safety patch
   // on top so it wraps the already-guarded fetch/send behavior deterministically.
   loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
-    loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes');
+    loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
+      loadBranchFix('./mailmate-inbox-stability.js?v=1', 'mailmateInboxStability');
+    });
   });
 })();
