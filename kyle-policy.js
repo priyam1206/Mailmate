@@ -42,11 +42,12 @@
     document.head.appendChild(script);
   }
 
-  // Preserve the earlier architecture patch, then layer the UX/safety patch
-  // on top so it wraps the already-guarded fetch/send behavior deterministically.
+  // Preserve the architecture patch, then layer UX/safety, then the stable
+  // inbox/read-state model. The v2 stability layer replaces the earlier
+  // click-only pinning patch and disables the mutation-driven re-sort loop.
   loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
     loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
-      loadBranchFix('./mailmate-inbox-stability.js?v=1', 'mailmateInboxStability');
+      loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2');
     });
   });
 })();
