@@ -48,7 +48,9 @@
     loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
       loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
         loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4', () => {
-          loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5');
+          loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
+            loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6');
+          });
         });
       });
     });
