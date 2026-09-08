@@ -32,4 +32,12 @@
   }
 
   window.KylePolicy = { evaluate };
+
+  // Branch-scoped architecture fixes. Loaded separately so the safety policy
+  // remains readable and the patch can be reviewed/removed as one unit.
+  const script = document.createElement('script');
+  script.src = './kyle-main-fixes.js?v=1';
+  script.async = false;
+  script.dataset.mailmateKyleMainFixes = '1';
+  document.head.appendChild(script);
 })();
