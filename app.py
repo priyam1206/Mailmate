@@ -305,6 +305,8 @@ def index():
 
 @app.route('/dashboard.html')
 def dashboard_page():
+    if not get_user_profile():
+        return redirect('/')
     return send_from_directory(str(BASE_DIR), 'dashboard.html')
 
 
@@ -1858,6 +1860,29 @@ def _short_task_description(item):
 
 def _kyle_fast_path(message, context, selected_event_id=None):
     lower = (message or '').lower().strip()
+
+    preference = None
+    if re.search(r'\b(?:use|switch to|turn on|enable)\s+(?:the\s+)?dark\s+mode\b', lower):
+        preference = ('theme', 'dark', 'Dark mode is on.')
+    elif re.search(r'\b(?:use|switch to|turn on|enable)\s+(?:the\s+)?(?:light|white)\s+mode\b', lower):
+        preference = ('theme', 'light', 'Light mode is on.')
+    elif re.search(r'\b(?:mute|turn off|disable)\s+(?:(?:your|kyle(?:\'s)?)\s+)?(?:voice|audio|speech)\b', lower):
+        preference = ('voice', 'muted', 'Kyle voice is muted.')
+    elif re.search(r'\b(?:unmute|turn on|enable)\s+(?:(?:your|kyle(?:\'s)?)\s+)?(?:voice|audio|speech)\b', lower):
+        preference = ('voice', 'enabled', 'Kyle voice is on.')
+    elif re.search(r'\b(?:turn on|enable)\s+(?:the\s+)?developer\s+mode\b', lower):
+        preference = ('developer_mode', 'enabled', 'Developer mode is on. Diagnostics are available in Settings.')
+    elif re.search(r'\b(?:turn off|disable)\s+(?:the\s+)?developer\s+mode\b', lower):
+        preference = ('developer_mode', 'disabled', 'Developer mode is off.')
+
+    if preference:
+        key, value, reply = preference
+        return {
+            "reply": reply,
+            "voice": reply,
+            "command": {"type": "set_preference", "key": key, "value": value},
+            "handled": True,
+        }
 
     if re.search(r'\b(open|show)\s+(my\s+)?calendar\b', lower) and not re.search(r'\b(today|tomorrow|week|schedule|what|events?)\b', lower):
         return {

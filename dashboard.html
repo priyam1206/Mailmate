@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="./dashboard.css?v=48">
+  <link rel="stylesheet" href="./dashboard.css?v=49">
   <link rel="stylesheet" href="/remote-worker-ui.css?v=8">
   <link rel="stylesheet" href="/compute-ui-fix.css?v=1">
   <link rel="stylesheet" href="./mailmate-master-polish.css?v=2">
@@ -27,16 +27,13 @@
         <button class="nav-tab" type="button" data-tab="work"><i class="fas fa-diagram-project"></i><span>Work</span></button>
         <button class="nav-tab" type="button" data-tab="calendar"><i class="fas fa-calendar"></i><span>Calendar</span></button>
         <button class="nav-tab" type="button" data-tab="automations"><i class="fas fa-bolt"></i><span>Automations</span></button>
-        <button class="nav-tab" type="button" data-tab="status"><i class="fas fa-signal"></i><span>Status</span></button>
-        <span class="nav-divider"></span>
-        <button class="nav-tab" type="button" data-tab="integrations"><i class="fas fa-plug"></i><span>Integrations</span></button>
         <button class="nav-tab" type="button" data-tab="settings"><i class="fas fa-gear"></i><span>Settings</span></button>
       </nav>
-      <div class="theme-toggle-container">
-        <button class="nav-tab theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle dark mode">
-          <i class="fas fa-moon"></i><span>Dark Mode</span>
-        </button>
-      </div>
+      <button class="sidebar-profile" id="sidebarProfileBtn" type="button" aria-label="Open account settings">
+        <img id="profilePic" referrerpolicy="no-referrer" decoding="async" src="https://ui-avatars.com/api/?name=User&background=111111&color=ffffff" alt="User">
+        <span><strong id="profileName">User</strong><small id="profileEmail">Google account</small></span>
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+      </button>
     </aside>
 
     <main class="main is-overview-page">
@@ -45,10 +42,6 @@
           <p class="eyebrow">Gmail intelligence</p>
           <h1 id="pageTitle">Overview</h1>
           <p class="subtitle" id="pageSubtitle">Your inbox, distilled into what matters now.</p>
-        </div>
-        <div class="profile">
-          <span id="profileName">User</span>
-          <img id="profilePic" referrerpolicy="no-referrer" decoding="async" src="https://ui-avatars.com/api/?name=User&background=111111&color=ffffff" alt="User">
         </div>
       </header>
 
@@ -352,8 +345,14 @@
       </section>
 
       <section class="tab-panel" id="tab-settings">
-        <section class="settings-list">
-          <article><div><h2>Google profile</h2><p>Your signed-in name and profile picture are used in this workspace.</p></div><span>Current session</span></article>
+        <section class="settings-heading">
+          <p class="section-label">Workspace preferences</p>
+          <h2>Settings</h2>
+          <p>Control MailMate, Kyle, and the local developer diagnostics from one place.</p>
+        </section>
+        <section class="settings-list settings-surface">
+          <article class="settings-profile-row"><div class="settings-profile-copy"><img id="settingsProfilePic" src="https://ui-avatars.com/api/?name=User&background=111111&color=ffffff" alt="User"><div><h2 id="settingsProfileName">Google profile</h2><p id="settingsProfileEmail">Current Google session</p></div></div><span class="settings-state is-connected"><i class="fas fa-circle-check"></i> Connected</span></article>
+          <article><div><h2>Appearance</h2><p>Use the light or dark workspace theme.</p></div><label class="switch" title="Use dark mode"><input type="checkbox" id="settingDarkMode"><span></span></label></article>
           <article><div><h2>Mailbox retention</h2><p>Gmail remains the source of truth. Mailmate keeps message content transient and does not use a central mailbox database.</p></div><span id="cacheSettingsStatus">Checking</span></article>
           <article><div><h2>Kyle voice & audio</h2><p>Mute or unmute Kyle's voice responses and active audio listening.</p></div><label class="switch" title="Mute or unmute Kyle voice"><input type="checkbox" id="settingKyleVoice" checked><span></span></label></article>
           <article><div><h2>Cache policy</h2><p id="cachePolicyText">Checking cache policy...</p></div><span>Automatic</span></article>
@@ -430,6 +429,9 @@
               </div>
             </div>
           </article>
+
+          <article class="settings-developer-row"><div><h2>Developer mode</h2><p>Reveal provider connections, runtime health, context freshness, and local errors.</p></div><label class="switch" title="Toggle developer mode"><input type="checkbox" id="settingDeveloperMode"><span></span></label></article>
+          <div class="settings-developer-content" id="developerSettingsContent" hidden></div>
 
           <article class="settings-danger-row">
             <div><h2>Sign out</h2><p>Remove the local Google session. Supabase history is retained, but the dashboard cannot access it while signed out.</p></div>
@@ -530,7 +532,7 @@
   <script src="/kyle-drag.js?v=8"></script>
   <script src="./kyle.js?v=42"></script>
   <script src="./calendar-conflicts.js?v=21"></script>
-  <script src="./dashboard.js?v=41"></script>
+  <script src="./dashboard.js?v=42"></script>
   <script src="/remote-worker-ui.js?v=5"></script>
 </body>
 </html>

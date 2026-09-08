@@ -606,6 +606,10 @@
     }
     if (command.type === 'calendar_refresh') {
       window.dispatchEvent(new CustomEvent('harness:calendar-refresh'));
+      return;
+    }
+    if (command.type === 'set_preference' && command.key) {
+      window.dispatchEvent(new CustomEvent('mailmate:set-preference', { detail: command }));
     }
   }
 

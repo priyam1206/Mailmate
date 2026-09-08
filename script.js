@@ -517,8 +517,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('authTitle').textContent = 'Your inbox is ready.';
         document.getElementById('authSubtitle').textContent = `Continue as ${appState.profile.name || appState.profile.email || 'your Google account'}.`;
         googleAuthBtn.classList.add('is-authenticated');
-        document.getElementById('authDivider').hidden = true;
-        document.getElementById('demoClientBtn').hidden = true;
+        document.getElementById('authDivider')?.setAttribute('hidden', '');
+        document.getElementById('demoClientBtn')?.setAttribute('hidden', '');
         setAuthStatus('Google account connected.', 'is-success');
         return;
       }

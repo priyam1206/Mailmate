@@ -19,7 +19,7 @@ def test_automation_modal_has_backdrop_and_complete_form():
 def test_kyle_composer_assets_are_cache_bumped():
     html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
-    assert 'dashboard.css?v=48' in html
+    assert 'dashboard.css?v=49' in html
     assert 'mailmate-master-polish.css?v=2' in html
     assert 'kyle-ui.js?v=45' in html
     assert 'kyle.js?v=42' in html
@@ -33,7 +33,7 @@ def test_mail_composer_allows_clarification_without_tool_failure():
 
 def test_inbox_hides_unattached_work_and_display_only_noise():
     js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
-    assert 'dashboard.js?v=41' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    assert 'dashboard.js?v=42' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
     assert 'Safe for local AI overview' not in js
     assert 'Kyle will prepare a Work item for this email on the next sync' not in js
     assert "if (work.state === 'eligible') return '';" in js
@@ -268,3 +268,31 @@ def test_kyle_response_text_and_speech_are_synchronized():
 def test_open_action_panel_hides_transcript_overlap():
     css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
     assert 'body:has(> .kyle-action-panel.is-open)' in css
+
+
+def test_account_and_developer_controls_are_consolidated_in_settings():
+    html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+    landing = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+    assert 'id="sidebarProfileBtn"' in html
+    assert 'id="settingsProfilePic"' in html
+    assert 'id="settingDarkMode"' in html
+    assert 'id="settingDeveloperMode"' in html
+    assert 'data-tab="status"' not in html
+    assert 'data-tab="integrations"' not in html
+    assert 'mountDeveloperSettings()' in js
+    assert "name === 'status' || name === 'integrations'" in js
+    assert '.sidebar-profile' in css
+    assert '.main.is-settings-page' in css
+    assert "classList.toggle('is-settings-page', name === 'settings')" in js
+    assert 'Explore demo' not in landing
+
+
+def test_rich_email_has_dark_mode_safe_reading_surface():
+    js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+    assert 'email-rich-surface' in js
+    assert '[data-theme="dark"] .email-rich-surface' in css
+    assert 'color-scheme: light' in css

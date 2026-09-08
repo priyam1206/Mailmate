@@ -82,13 +82,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function boot() {
     hydrateReturnParams();
+    mountDeveloperSettings();
     bindEvents();
     registerStaticObjects();
     initCalendarControls();
     initAutomationControls();
-    setProfile();
     bindAutopilotSettings();
     loadWorkSettings();
+
+    const liveProfile = await hydrateAuthenticatedProfile();
+    if (!liveProfile && !state.userId) return;
+    setProfile(liveProfile || {});
 
     // Paint the last same-session snapshot immediately, then refresh network data.
     hydrateSessionSnapshot();
@@ -98,6 +102,29 @@ document.addEventListener('DOMContentLoaded', () => {
     await Promise.allSettled([inboxPromise, healthPromise, automationsPromise]);
     startCalendarAutoSync();
     startInboxAutoSync();
+  }
+
+  async function hydrateAuthenticatedProfile() {
+    try {
+      const response = await fetch(`${API_BASE}/api/user/profile?ts=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+      if (response.status === 401) {
+        ['userId', 'userName', 'userPicture', 'profileAccountId'].forEach(key => localStorage.removeItem(key));
+        window.location.replace('/');
+        return null;
+      }
+      if (!response.ok) throw new Error(`Profile returned ${response.status}`);
+      const profile = normalizeTextTree(await response.json());
+      state.userId = profile.email || profile.id || profile.sub || state.userId;
+      state.userName = profile.name || profile.email || state.userName;
+      state.userPicture = profile.picture || '';
+      return profile;
+    } catch (error) {
+      console.warn('[Mailmate] profile hydration failed:', error.message || error);
+      return null;
+    }
   }
 
   function sessionSnapshotKey() {
@@ -187,28 +214,47 @@ document.addEventListener('DOMContentLoaded', () => {
       setInboxFilter('action');
     });
     $('logoutBtn')?.addEventListener('click', logout);
+    $('sidebarProfileBtn')?.addEventListener('click', () => showTab('settings'));
 
     const themeToggleBtn = $('themeToggleBtn');
+    const darkModeToggle = $('settingDarkMode');
     function updateThemeIcon() {
-      if (document.documentElement.getAttribute('data-theme') === 'dark') {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      if (darkModeToggle) darkModeToggle.checked = dark;
+      if (!themeToggleBtn) return;
+      if (dark) {
         themeToggleBtn.innerHTML = '<i class="fas fa-sun"></i><span>Light Mode</span>';
       } else {
         themeToggleBtn.innerHTML = '<i class="fas fa-moon"></i><span>Dark Mode</span>';
       }
     }
-    if (themeToggleBtn) {
+    function setTheme(theme) {
+      const dark = theme === 'dark';
+      if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+      else document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('mailmate-theme', dark ? 'dark' : 'light');
       updateThemeIcon();
+    }
+    updateThemeIcon();
+    if (themeToggleBtn) {
       themeToggleBtn.addEventListener('click', () => {
-        if (document.documentElement.getAttribute('data-theme') === 'dark') {
-          document.documentElement.removeAttribute('data-theme');
-          localStorage.setItem('mailmate-theme', 'light');
-        } else {
-          document.documentElement.setAttribute('data-theme', 'dark');
-          localStorage.setItem('mailmate-theme', 'dark');
-        }
-        updateThemeIcon();
+        setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
       });
     }
+    darkModeToggle?.addEventListener('change', () => setTheme(darkModeToggle.checked ? 'dark' : 'light'));
+
+    window.addEventListener('mailmate:set-preference', event => {
+      const { key, value } = event.detail || {};
+      if (key === 'theme') setTheme(value === 'dark' ? 'dark' : 'light');
+      if (key === 'voice') {
+        const voiceToggle = $('settingKyleVoice');
+        if (voiceToggle) {
+          voiceToggle.checked = value !== 'muted';
+          voiceToggle.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      if (key === 'developer_mode') setDeveloperMode(value === 'enabled');
+    });
 
     window.addEventListener('harness:open-email', event => {
       const email = event.detail;
@@ -244,8 +290,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showTab(name) {
+    if (name === 'status' || name === 'integrations') {
+      name = 'settings';
+      setDeveloperMode(true);
+    }
     state.currentPage = name;
     document.querySelector('.main')?.classList.toggle('is-overview-page', name === 'overview');
+    document.querySelector('.main')?.classList.toggle('is-settings-page', name === 'settings');
     const copy = pageCopy[name] || pageCopy.overview;
     els.pageTitle.textContent = copy[0];
     els.pageSubtitle.textContent = copy[1];
@@ -311,13 +362,25 @@ document.addEventListener('DOMContentLoaded', () => {
     els.profileName.textContent = name;
     els.profilePic.alt = name;
     els.profilePic.referrerPolicy = 'no-referrer';
-    els.profilePic.crossOrigin = 'anonymous';
     els.profilePic.onerror = () => {
       els.profilePic.onerror = null;
-      els.profilePic.removeAttribute('crossorigin');
       els.profilePic.src = fallback;
     };
     els.profilePic.src = picture;
+    if ($('profileEmail')) $('profileEmail').textContent = profile.email || state.userId || 'Google account';
+
+    const settingsPicture = $('settingsProfilePic');
+    if (settingsPicture) {
+      settingsPicture.alt = name;
+      settingsPicture.referrerPolicy = 'no-referrer';
+      settingsPicture.onerror = () => {
+        settingsPicture.onerror = null;
+        settingsPicture.src = fallback;
+      };
+      settingsPicture.src = picture;
+    }
+    if ($('settingsProfileName')) $('settingsProfileName').textContent = name;
+    if ($('settingsProfileEmail')) $('settingsProfileEmail').textContent = profile.email || state.userId || 'Google account';
 
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -410,8 +473,9 @@ document.addEventListener('DOMContentLoaded', () => {
       setStep('fetch', 'active', forceRefresh ? 'Refreshing Gmail now' : 'Loading current context');
       const response = await fetch(`${API_BASE}/api/dashboard/overview?userId=${encodeURIComponent(state.userId)}${forceRefresh ? '&refresh=true' : ''}`);
       if (response.status === 401) {
-        localStorage.removeItem('userId');
-        throw new Error('Gmail session expired. Reconnect Google from the landing page.');
+        ['userId', 'userName', 'userPicture', 'profileAccountId'].forEach(key => localStorage.removeItem(key));
+        window.location.replace('/');
+        return;
       }
       if (!response.ok) throw new Error(`Dashboard returned ${response.status}`);
       setStep('fetch', 'done', 'Context loaded');
@@ -872,7 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const useRichHtml = shouldRenderRichEmailHtml(email);
     let bodyContent = '';
     if (useRichHtml) {
-      bodyContent = `<div class="email-html-content">${email.body_html}</div>`;
+      bodyContent = `<div class="email-rich-surface"><div class="email-html-content">${email.body_html}</div></div>`;
     } else if (hasFullBody) {
       bodyContent = `<div class="email-plain-content">${linkifyText(email.body || email.snippet || '')}</div>`;
     } else if (loading) {
@@ -1936,6 +2000,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const div = document.createElement('div');
     div.textContent = repairTextEncoding(value);
     return div.innerHTML;
+  }
+
+  function mountDeveloperSettings() {
+    const host = $('developerSettingsContent');
+    const statusPanel = $('tab-status');
+    const integrationsPanel = $('tab-integrations');
+    if (!host || !statusPanel || !integrationsPanel) return;
+
+    const heading = document.createElement('div');
+    heading.className = 'settings-developer-heading';
+    heading.innerHTML = '<div><p class="section-label">Developer diagnostics</p><h2>Runtime and connections</h2></div><span>Local session</span>';
+    host.appendChild(heading);
+    [...statusPanel.children, ...integrationsPanel.children].forEach(child => host.appendChild(child));
+
+    const toggle = $('settingDeveloperMode');
+    const enabled = localStorage.getItem('mailmate-developer-mode') === 'true';
+    if (toggle) {
+      toggle.checked = enabled;
+      toggle.addEventListener('change', () => setDeveloperMode(toggle.checked));
+    }
+    setDeveloperMode(enabled, false);
+  }
+
+  function setDeveloperMode(enabled, animate = true) {
+    const host = $('developerSettingsContent');
+    const toggle = $('settingDeveloperMode');
+    localStorage.setItem('mailmate-developer-mode', enabled ? 'true' : 'false');
+    if (toggle) toggle.checked = enabled;
+    if (!host) return;
+    if (enabled) {
+      host.hidden = false;
+      if (animate) requestAnimationFrame(() => host.classList.add('is-visible'));
+      else host.classList.add('is-visible');
+      renderStatus();
+      renderIntegrations();
+      return;
+    }
+    host.classList.remove('is-visible');
+    if (!animate) host.hidden = true;
+    else window.setTimeout(() => { if (!host.classList.contains('is-visible')) host.hidden = true; }, 220);
   }
 
   function repairTextEncoding(value) {

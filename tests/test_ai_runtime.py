@@ -317,3 +317,22 @@ def test_kyle_agent_plain_chat_always_returns_json(monkeypatch):
     assert response.status_code == 200
     assert response.get_json()['reply'] == 'I am here and ready.'
     assert response.get_json()['mode'] == 'semantic-agent'
+
+
+def test_dashboard_requires_google_authentication(monkeypatch):
+    monkeypatch.setattr(mailmate_app, 'get_user_profile', lambda: None)
+    response = mailmate_app.app.test_client().get('/dashboard.html')
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/')
+
+
+@pytest.mark.parametrize(('prompt', 'key', 'value'), [
+    ('turn on dark mode', 'theme', 'dark'),
+    ('switch to light mode', 'theme', 'light'),
+    ('mute your voice', 'voice', 'muted'),
+    ('enable developer mode', 'developer_mode', 'enabled'),
+])
+def test_kyle_changes_safe_local_preferences_without_an_llm(prompt, key, value):
+    result = mailmate_app._kyle_fast_path(prompt, {})
+    assert result['handled'] is True
+    assert result['command'] == {'type': 'set_preference', 'key': key, 'value': value}
