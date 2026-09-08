@@ -2331,13 +2331,23 @@ def _infer_agent_actions(message, resolved, context=None):
         attention = next((item for item in (context.get('needs_attention') or []) if str(item.get('source_message_id') or item.get('message_id') or item.get('email_id')) == reference['id']), None)
         target, has_time = _deadline_target(attention or {})
         if source and target:
-            start = target - timedelta(minutes=60) if has_time else target.replace(hour=17, minute=0, second=0, microsecond=0)
-            payload = {
-                'title': _agent_text(source.get('subject') or reference.get('label') or 'Email follow-up', 160),
-                'start': start.isoformat(),
-                'end': (start + timedelta(hours=1)).isoformat(),
-                'description': _agent_text(source.get('snippet') or '', 600),
-            }
+            if has_time:
+                start = target - timedelta(minutes=60)
+                payload = {
+                    'title': _agent_text(source.get('subject') or reference.get('label') or 'Email follow-up', 160),
+                    'start': start.isoformat(),
+                    'end': (start + timedelta(hours=1)).isoformat(),
+                    'all_day': False,
+                    'description': _agent_text(source.get('snippet') or '', 600),
+                }
+            else:
+                payload = {
+                    'title': _agent_text(source.get('subject') or reference.get('label') or 'Email follow-up', 160),
+                    'start': target.date().isoformat(),
+                    'end': (target.date() + timedelta(days=1)).isoformat(),
+                    'all_day': True,
+                    'description': _agent_text(source.get('snippet') or '', 600),
+                }
             actions.extend([
                 {'tool': 'navigation.open', 'args': {'page': 'calendar'}},
                 {'tool': 'calendar.preview_create', 'args': {'payload': payload}},

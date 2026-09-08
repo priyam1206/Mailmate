@@ -128,6 +128,20 @@ def test_calendar_deadline_parser_preserves_times_and_uses_end_of_day():
     assert (date_only.hour, date_only.minute) == (23, 59)
 
 
+def test_email_calendar_preview_without_time_is_all_day():
+    source = {'id': 'mail-1', 'subject': 'Project due', 'snippet': 'Submit by September 10.'}
+    attention = {'source_message_id': 'mail-1', 'deadline': '2026-09-10'}
+    actions = mailmate_app._infer_agent_actions(
+        'add this to my calendar',
+        [{'type': 'email', 'id': 'mail-1', 'label': 'Project due'}],
+        {'emails': [source], 'needs_attention': [attention]},
+    )
+    payload = next(action['args']['payload'] for action in actions if action['tool'] == 'calendar.preview_create')
+    assert payload['all_day'] is True
+    assert payload['start'] == '2026-09-10'
+    assert payload['end'] == '2026-09-11'
+
+
 def test_common_work_uses_one_structured_plan(monkeypatch):
     calls = []
     monkeypatch.setattr(LMStudioModel, 'work_plan', lambda self, source: calls.append(source) or {

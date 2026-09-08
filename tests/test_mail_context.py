@@ -92,6 +92,20 @@ def test_semantic_null_deadline_does_not_erase_deterministic_value():
     assert row['deadline_at'] == '2026-09-09T15:00:00+05:30'
 
 
+def test_semantic_midnight_does_not_invent_time_for_date_only_mail():
+    from services.mail_context_service import _apply_semantic, _fallback_classify_message
+    value = message(
+        subject='Project review deadline - 10 September',
+        snippet='Please submit the documentation by 10 September 2026.',
+    )
+    baseline = _fallback_classify_message(value, {'routing': 'CLOUD_ALLOWED'})
+    row = _apply_semantic(value, baseline, {
+        'work_required': True,
+        'deadline_at': '2026-09-10T00:00:00Z',
+    })
+    assert row['deadline_at'] == '2026-09-10'
+
+
 def test_context_rows_never_contain_mail_content(monkeypatch):
     monkeypatch.setenv('SUPABASE_CONTEXT_ENABLED', '0')
     service = MailContextService()

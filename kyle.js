@@ -625,11 +625,30 @@
 
   function speak(text, run, onReady = null) {
     stopSpeech(false);
-    let readyCalled = false;
+    let readyPromise = null;
     const signalReady = () => {
-      if (readyCalled) return;
-      readyCalled = true;
-      try { onReady?.(); } catch (_) {}
+      if (!readyPromise) {
+        try {
+          readyPromise = Promise.resolve(onReady?.());
+        } catch (_) {
+          readyPromise = Promise.resolve();
+        }
+      }
+      return readyPromise;
+    };
+    const beginSpeaking = async () => {
+      await signalReady();
+      if (run !== activeRun) return false;
+      await new Promise(resolve => {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(resolve));
+        else setTimeout(resolve, 0);
+      });
+      if (run !== activeRun) return false;
+      store.set(store.states.SPEAKING);
+      speakingStartedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+      smoothedSpeechEnergy = 0;
+      startSpeechAnimation(text, run);
+      return true;
     };
     if (store.muted || !text) {
       signalReady();
@@ -637,17 +656,13 @@
       return;
     }
 
-    store.set(store.states.SPEAKING);
-    speakingStartedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
-    smoothedSpeechEnergy = 0;
-    startSpeechAnimation(text, run);
     if (typeof window.Audio === 'function' && window.URL?.createObjectURL) {
-      speakWithElevenLabs(text, run, signalReady).then(played => {
-        if (!played && run === activeRun) speakWithBrowser(text, run, signalReady);
+      speakWithElevenLabs(text, run, beginSpeaking).then(played => {
+        if (!played && run === activeRun) speakWithBrowser(text, run, beginSpeaking);
       });
       return;
     }
-    speakWithBrowser(text, run, signalReady);
+    speakWithBrowser(text, run, beginSpeaking);
   }
 
   async function speakWithElevenLabs(text, run, onReady = null) {
@@ -670,8 +685,8 @@
         stopElevenAudio();
         if (run === activeRun) speakWithBrowser(text, run);
       };
+      if (!await onReady?.()) return false;
       await elevenAudio.play();
-      onReady?.();
       return true;
     } catch (error) {
       if (error?.name !== 'AbortError') {
@@ -684,9 +699,9 @@
     }
   }
 
-  function speakWithBrowser(text, run, onReady = null) {
+  async function speakWithBrowser(text, run, onReady = null) {
     if (!('speechSynthesis' in window)) {
-      onReady?.();
+      await onReady?.();
       finishSpeech(run);
       return;
     }
@@ -701,17 +716,15 @@
     utterance.volume = 1;
     chooseVoice(utterance);
 
-    utterance.onstart = () => onReady?.();
-
     utterance.onend = () => finishSpeech(run);
     utterance.onerror = event => {
       if (event.error === 'interrupted' || event.error === 'canceled') return;
       finishSpeech(run);
     };
 
+    if (!await onReady?.()) return;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
-    setTimeout(() => { if (run === activeRun) onReady?.(); }, 260);
   }
 
   function chooseVoice(target) {

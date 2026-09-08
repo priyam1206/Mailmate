@@ -13,7 +13,7 @@ from dateutil import parser as date_parser
 import requests
 
 
-CLASSIFIER_VERSION = 3
+CLASSIFIER_VERSION = 4
 RULES_VERSION = 2
 
 
@@ -258,6 +258,21 @@ def _apply_semantic(message, baseline, semantic):
     work = bool(baseline.get('work_allowed') or semantic.get('work_required')) and inbound
     attention = bool(baseline.get('attention_allowed') or semantic.get('needs_attention'))
     calendar = bool(baseline.get('calendar_allowed') or semantic.get('calendar_required'))
+    source_text = f"{message.get('subject') or ''} {message.get('snippet') or ''}"
+    explicit_clock = bool(re.search(
+        r'\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|\b\d{1,2}:\d{2}\b',
+        source_text,
+        re.I,
+    ))
+    deterministic_deadline = baseline.get('deadline_at')
+    semantic_deadline = semantic.get('deadline_at')
+    # A model-provided midnight timestamp must not invent a time when the
+    # original mail only supplied a calendar date.
+    deadline_at = (
+        deterministic_deadline
+        if deterministic_deadline and not explicit_clock
+        else semantic_deadline or deterministic_deadline
+    )
     baseline.update({
         'category': str(semantic.get('category') or ('actionable_work' if work else 'informational'))[:80],
         'importance_score': _clamp(semantic.get('priority', baseline['importance_score'])),
@@ -267,7 +282,7 @@ def _apply_semantic(message, baseline, semantic):
         'work_allowed': work, 'calendar_allowed': calendar,
         'context_type': 'work' if work else 'calendar' if calendar else 'reply' if semantic.get('requires_reply') else 'attention',
         'summary': str(semantic.get('summary') or baseline['summary'])[:500],
-        'deadline_at': semantic.get('deadline_at') or baseline.get('deadline_at'),
+        'deadline_at': deadline_at,
         'classifier_reason': str(semantic.get('reason') or '')[:500],
     })
     return baseline

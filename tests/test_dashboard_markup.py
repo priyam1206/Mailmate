@@ -19,10 +19,10 @@ def test_automation_modal_has_backdrop_and_complete_form():
 def test_kyle_composer_assets_are_cache_bumped():
     html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
 
-    assert 'dashboard.css?v=47' in html
+    assert 'dashboard.css?v=48' in html
     assert 'mailmate-master-polish.css?v=2' in html
     assert 'kyle-ui.js?v=45' in html
-    assert 'kyle.js?v=41' in html
+    assert 'kyle.js?v=42' in html
 
 
 def test_mail_composer_allows_clarification_without_tool_failure():
@@ -251,6 +251,18 @@ def test_voice_input_is_prewarmed_for_the_session():
     assert 'mic parked warm' in audio
     assert 'setTimeout(prewarmVoiceInput, 0)' in kyle
     assert "beforeunload', () => audio.cleanupMic?.(true)" in kyle
+
+
+def test_kyle_response_text_and_speech_are_synchronized():
+    js = (ROOT / 'kyle.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+
+    assert 'const beginSpeaking = async () =>' in js
+    assert 'await signalReady()' in js
+    assert 'if (!await onReady?.()) return false' in js
+    assert '.kyle-overview-mount .kyle-caption-bubble' in css
+    assert '.kyle-widget[data-state="THINKING"] .kyle-shell' in css
+    assert '.kyle-widget[data-state="SPEAKING"] .kyle-orb' in css
 
 
 def test_open_action_panel_hides_transcript_overlap():
