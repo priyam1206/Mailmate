@@ -1,0 +1,105 @@
+/* MailMate Product v9 — blob-only speech, opt-in floating transcript, motionless background polling */
+
+/* Background polling must never put the Overview back into a loading/overlay state.
+   The first-load buffer is handled by product v8. */
+body.mailmate-live-ready #tab-overview.is-loading .overview-inner::before,
+body.mailmate-live-ready #tab-overview.is-loading .overview-inner::after {
+  display: none !important;
+  content: none !important;
+}
+body.mailmate-live-ready #tab-overview.is-loading .overview-inner,
+body.mailmate-live-ready #tab-overview.is-data-loading .overview-inner,
+body.mailmate-live-ready #tab-overview.is-data-loading #overviewDataSurface,
+body.mailmate-live-ready #tab-overview.is-loading #overviewDataSurface {
+  opacity: 1 !important;
+  filter: none !important;
+  transform: none !important;
+  transition: none !important;
+}
+body.mailmate-live-ready #tab-overview .overview-arrive {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* A real content mutation is still allowed to use the tiny v8/v9 live fade. */
+body.mailmate-live-ready #tab-overview .mailmate-live-change {
+  animation: mailmateLiveChange 180ms ease both !important;
+}
+
+/* SPEAKING means orb only. This intentionally beats the canvas-expanded width rule. */
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-shell,
+body.mailmate-canvas-expanded #kyleOverviewHome #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-shell,
+body.mailmate-canvas-opening #kyleOverviewHome #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-shell {
+  width: 68px !important;
+  min-width: 68px !important;
+  max-width: 68px !important;
+  height: 68px !important;
+  min-height: 68px !important;
+  max-height: 68px !important;
+  flex: 0 0 68px !important;
+  padding: 5px !important;
+  gap: 0 !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+  transform: none !important;
+  transform-origin: center !important;
+  justify-content: center !important;
+  align-items: center !important;
+  transition: width 180ms ease, height 180ms ease, border-radius 180ms ease, box-shadow 160ms ease !important;
+}
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .prompt-input,
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-prompt-mic,
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .send-icon,
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-state-label {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  flex: 0 0 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-orb {
+  position: relative !important;
+  inset: auto !important;
+  display: grid !important;
+  width: 58px !important;
+  min-width: 58px !important;
+  height: 58px !important;
+  min-height: 58px !important;
+  flex: 0 0 58px !important;
+  margin: 0 !important;
+  opacity: 1 !important;
+  transform: none !important;
+  pointer-events: auto !important;
+}
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-caption-bubble,
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-transcript,
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-history-toggle,
+body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-result-panel {
+  display: none !important;
+}
+
+/* Floating conversation is opt-in. Overview always uses Canvas instead. */
+#kyleMount.kyle-overview-mount .kyle-transcript,
+#kyleMount.kyle-overview-mount .kyle-history-toggle {
+  display: none !important;
+}
+#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-transcript,
+#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-caption-bubble {
+  display: none !important;
+}
+#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-history-toggle:not([hidden]) {
+  display: grid !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-shell,
+  body.mailmate-live-ready #tab-overview .mailmate-live-change {
+    transition: none !important;
+    animation: none !important;
+  }
+}
