@@ -1,0 +1,75 @@
+name: Apply Work sync fix
+
+on:
+  push:
+    branches:
+      - kyle-main-architecture-fixes
+    paths:
+      - .github/workflows/apply-work-sync-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: kyle-main-architecture-fixes
+          fetch-depth: 0
+
+      - name: Patch Work sync
+        shell: python
+        run: |
+          from pathlib import Path
+
+          work = Path('services/work_agent_service.py')
+          text = work.read_text(encoding='utf-8')
+          old = '''        email_map = {str(e.get("id") or e.get("gmail_id")): e for e in emails}\n\n        new_jobs = []'''
+          new = '''        # The dashboard can emit attention references as source_message_id, message_id,\n        # or email_id depending on which analysis/cache path produced the item. Build\n        # one canonical lookup so Work does not silently drop otherwise Work-ready mail.\n        email_map = {}\n        for email in emails:\n            for candidate_id in (email.get("id"), email.get("gmail_id"), email.get("message_id")):\n                if candidate_id:\n                    email_map[str(candidate_id)] = email\n\n        new_jobs = []'''
+          if old not in text:
+              raise SystemExit('work_agent_service email_map target not found')
+          text = text.replace(old, new, 1)
+
+          old = '''                msg_id = str(item.get("source_message_id") or "")'''
+          new = '''                msg_id = str(\n                    item.get("source_message_id")\n                    or item.get("message_id")\n                    or item.get("email_id")\n                    or ""\n                )'''
+          if old not in text:
+              raise SystemExit('work_agent_service msg_id target not found')
+          text = text.replace(old, new, 1)
+          work.write_text(text, encoding='utf-8')
+
+          app = Path('app.py')
+          text = app.read_text(encoding='utf-8')
+          old = '''    if ensure and not jobs:\n        try:\n            live_payload = _build_live_dashboard(profile, force_ai=False)'''
+          new = '''    if ensure:\n        try:\n            # Always reconcile the current dashboard into Work when explicitly\n            # requested. Job IDs are deterministic, so this adds newly actionable\n            # mail without duplicating existing Work history.\n            live_payload = _build_live_dashboard(profile, force_ai=False)'''
+          if old not in text:
+              raise SystemExit('app.py ensure target not found')
+          text = text.replace(old, new, 1)
+          app.write_text(text, encoding='utf-8')
+
+          dash = Path('dashboard.js')
+          text = dash.read_text(encoding='utf-8')
+          old = '''      const res = await fetch(`${API_BASE}/api/work/jobs`);\n      if (res.ok) {\n        workJobs = normalizeTextTree(await res.json());'''
+          new = '''      // Entering Work is an explicit request to reconcile actionable Gmail into\n      // WorkJobs. This prevents an empty Work pane when Overview already shows\n      // Work-ready attention items.\n      const res = await fetch(`${API_BASE}/api/work/jobs?ensure=1&reconcile=1`, { cache: 'no-store' });\n      if (res.ok) {\n        workJobs = normalizeTextTree(await res.json());'''
+          if old not in text:
+              raise SystemExit('dashboard.js renderWork target not found')
+          text = text.replace(old, new, 1)
+          dash.write_text(text, encoding='utf-8')
+
+      - name: Validate syntax
+        run: |
+          python -m py_compile app.py services/work_agent_service.py
+          node --check dashboard.js
+
+      - name: Commit branch fix
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "Priyam-06"
+          git config user.email "trivedipriyam10@gmail.com"
+          git add app.py dashboard.js services/work_agent_service.py
+          git commit -m "fix(work): reconcile actionable Gmail into Work"
+          git push origin HEAD:kyle-main-architecture-fixes
