@@ -144,7 +144,9 @@
   background: #242018 !important;
   border-left-color: #c49a4b !important;
 }
-[data-theme="dark"] #tab-calendar .calendar-event-block[class*="ai"] {
+[data-theme="dark"] #tab-calendar .calendar-event-block.ai,
+[data-theme="dark"] #tab-calendar .calendar-event-block.event-ai,
+[data-theme="dark"] #tab-calendar .calendar-event-block.source-ai {
   background: #1e1c25 !important;
   border-left-color: #8d78b8 !important;
 }
