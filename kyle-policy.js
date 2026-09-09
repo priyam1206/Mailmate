@@ -350,7 +350,7 @@
               loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
                 loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
                 loadBranchFix('./mailmate-product-v8.js?v=2', 'mailmateProductV8', () => {
-                  loadBranchFix('./mailmate-live-diff.js?v=1', 'mailmateLiveDiff', () => {
+                  loadBranchFix('./mailmate-live-diff.js?v=2', 'mailmateLiveDiff', () => {
                     loadBranchStyle('./mailmate-product-v9.css?v=2', 'mailmate-product-v9');
                     loadBranchFix('./mailmate-product-v9.js?v=3', 'mailmateProductV9', () => {
                       loadBranchStyle('./mailmate-settings-v1.css?v=1', 'mailmate-settings-v1');
