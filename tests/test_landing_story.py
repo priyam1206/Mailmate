@@ -42,9 +42,12 @@ def test_landing_describes_real_mailmate_surfaces():
         assert phrase in html
 
 
-def test_portable_landing_patch_script_is_safe_and_scoped():
-    script = (ROOT / 'APPLY_MAILMATE_LANDING_STORY.ps1').read_text(encoding='utf-8')
-    assert 'git fetch' in script
-    assert 'git checkout $SourceRef -- @files' in script
-    assert 'git reset --hard' not in script
-    assert 'git clean' not in script
+def test_landing_has_no_legacy_team_branding():
+    html = (ROOT / 'index.html').read_text(encoding='utf-8').lower()
+    script = (ROOT / 'script.js').read_text(encoding='utf-8').lower()
+    readme = (ROOT / 'README.md').read_text(encoding='utf-8').lower()
+
+    for legacy in ('ciphersquad', 'rupayan', 'sphereofrupayan'):
+        assert legacy not in html
+        assert legacy not in script
+        assert legacy not in readme
