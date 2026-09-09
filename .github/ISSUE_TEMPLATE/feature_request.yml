@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a focused MailMate improvement
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired workflow and outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and safety considerations
+      description: Note any Gmail, Calendar, AI, storage, authentication, or write-action impact.
+    validations:
+      required: true
+
