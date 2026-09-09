@@ -1,10 +1,10 @@
-# MailMate — Team CipherSquad
+# MailMate
 
-> A privacy-first Gmail, Calendar and AI work assistant built for **Code2Create 7.0**.
+> A privacy-first Gmail, Calendar, and AI work assistant.
 
-MailMate turns an inbox into a working surface rather than another list of messages. It combines Gmail, Google Calendar, deadline detection, a context-aware assistant called **Kyle**, autonomous Work preparation, scheduled automations, voice interaction and optional local AI compute in one browser workspace.
+MailMate turns an inbox into an action-oriented workspace instead of another list of messages. It combines Gmail, Google Calendar, deadline detection, a context-aware assistant called **Kyle**, reviewable Work preparation, scheduled automations, voice interaction, and optional local AI compute in one browser workspace.
 
-The project began as a **Team CipherSquad** hackathon project. It has since gone through substantial post-hackathon engineering and stabilization while preserving the original team history and Git commit record.
+MailMate was originally prototyped during **Code2Create 7.0** and is now maintained through the **MailMateCS** organization.
 
 ---
 
@@ -15,17 +15,17 @@ MailMate is designed to answer four practical questions quickly:
 1. **What needs my attention now?**
 2. **What is coming up next?**
 3. **What work can be prepared automatically?**
-4. **What can Kyle safely do for me without hiding important context or making risky decisions silently?**
+4. **What can Kyle safely do without hiding important context or taking risky actions silently?**
 
 The current application includes:
 
-- **Overview** — time-aware priorities, upcoming events, deadlines, Work state and waiting-on-others signals.
-- **Inbox** — Gmail reading, filtering, stable priority sorting, search, context-aware actions and message-level Kyle controls.
-- **Kyle** — conversational assistant with structured Canvas answers, deterministic UI actions, email context, drafting and voice interaction.
-- **Work** — privacy-gated background preparation for actionable mail, including summaries, checklists, drafts and generated files.
-- **Calendar** — Google Calendar integration, deadline surfacing and schedule-conflict detection.
-- **Automations** — once, daily, weekly and interval jobs that can run Kyle goals and record their output as Work.
-- **Settings** — appearance, assistant, inbox, automation, privacy, storage, service and developer preferences.
+- **Overview** — time-aware priorities, upcoming events, deadlines, Work state, and waiting-on-others signals.
+- **Inbox** — Gmail reading, filtering, stable priority sorting, search, context-aware actions, and message-level Kyle controls.
+- **Kyle** — conversational assistance with structured Canvas answers, deterministic UI actions, email context, drafting, and voice interaction.
+- **Work** — privacy-gated preparation for actionable mail, including summaries, checklists, drafts, and generated files.
+- **Calendar** — Google Calendar integration, deadline surfacing, and schedule-conflict detection.
+- **Automations** — once, daily, weekly, and interval jobs that can run Kyle goals and record output as Work.
+- **Settings** — appearance, assistant, inbox, automation, privacy, storage, service, and developer preferences.
 
 ---
 
@@ -33,11 +33,11 @@ The current application includes:
 
 ### 1. The inbox remains visible
 
-MailMate does not hide authorized Gmail messages from the user just because they are irrelevant to an AI workflow. The browser display plane can render the mailbox while AI processing remains separately gated.
+MailMate does not hide authorized Gmail messages merely because they are irrelevant to an AI workflow. The browser display plane can render the mailbox while AI processing remains separately gated.
 
-### 2. Raw mailbox content is not treated as an application database
+### 2. Raw mailbox content is not an application database
 
-The design target is **zero central mailbox retention**. Raw message bodies, HTML, attachments and sensitive correspondence should remain transient. Only minimized derived state required for features such as Work, classifications, references or session continuity may be persisted.
+The design target is **zero central mailbox retention**. Raw message bodies, HTML, attachments, and sensitive correspondence should remain transient. Only minimized derived state required for features such as Work, classifications, references, or session continuity may be persisted.
 
 ### 3. AI access is narrower than display access
 
@@ -45,7 +45,7 @@ A local deterministic privacy gate filters sensitive or unnecessary material bef
 
 ### 4. Writes require stronger safety than reads
 
-Drafting, sending mail, changing calendar events and other writes are separated from ordinary analysis. Riskier or substantive actions remain reviewable, with approval/cancellation paths instead of silent execution.
+Drafting, sending mail, changing calendar events, and other writes are separated from ordinary analysis. Riskier or substantive actions remain reviewable, with approval and cancellation paths instead of silent execution.
 
 ---
 
@@ -106,7 +106,7 @@ Optional persistence
 - stable Smart/priority ordering
 - unread and important-state synchronization
 - message prefetching and thread-aware context
-- contextual **Summarize**, **Draft reply** and **Ask about this** actions
+- contextual **Summarize**, **Draft reply**, and **Ask about this** actions
 
 ### Kyle assistant
 
@@ -118,7 +118,7 @@ Current Kyle capabilities include:
 - answering questions about the current email
 - summarizing and ranking mail
 - drafting and editing replies
-- structured response Canvas with references back to email/calendar/work items
+- structured Canvas responses with references to email, calendar, and Work items
 - deterministic tool execution for supported UI actions
 - persistent in-session answer history
 - voice input and spoken responses
@@ -126,9 +126,7 @@ Current Kyle capabilities include:
 
 ### Work Agent
 
-Work converts actionable mail into reviewable preparation rather than immediately performing high-impact actions.
-
-Depending on privacy and policy state, Work can:
+Work converts actionable mail into reviewable preparation rather than immediately performing high-impact actions. Depending on privacy and policy state, Work can:
 
 - analyze an actionable request
 - build checklists
@@ -142,11 +140,11 @@ Depending on privacy and policy state, Work can:
 ### Calendar intelligence
 
 - Google Calendar event rendering
-- upcoming event/deadline surfacing
+- upcoming event and deadline surfacing
 - conflict detection
 - grouped and all-day event handling
-- time-aware Overview filtering so completed events do not remain "upcoming"
-- preview/confirmation paths before destructive calendar changes
+- time-aware Overview filtering
+- preview and confirmation paths before destructive calendar changes
 
 ### Automations
 
@@ -156,98 +154,18 @@ MailMate supports persistent scheduled Kyle goals with:
 - daily schedules
 - weekly schedules
 - interval schedules
-- enable/disable controls
-- manual Run now
+- enable and disable controls
+- manual **Run now**
 - Work records for automation output
 - natural-language automation creation from Kyle
 
 ### Voice and local compute
 
 - local Faster Whisper speech-to-text with browser fallback
-- microphone/model prewarming for lower perceived latency
-- ElevenLabs TTS when configured, with browser speech synthesis fallback
+- microphone and model prewarming for lower perceived latency
+- ElevenLabs TTS when configured
 - local LM Studio Work inference
-- optional private Tailscale route to a separate workstation running local compute
-
----
-
-## Latest Updates — 9 Sep 2026
-
-The current stabilization work focuses on making MailMate behave like a coherent product rather than a collection of independently refreshing panels.
-
-### Loading and runtime stability
-
-- Added a MailMate-native startup gate with the project logo, buffer animation and live service-loading text.
-- The dashboard is revealed only after essential Gmail, profile, Calendar and health context has settled, with a timeout escape so one optional service cannot trap the UI.
-- Reduced visible default-state → loaded-state flashing during hard refreshes.
-- Added lightweight fade/reveal behavior for arriving data instead of replacing large parts of the page abruptly.
-
-### Realtime Overview
-
-- Reworked Overview into a time-aware control center.
-- Past events are filtered out of **Upcoming** instead of remaining visible after their time has passed.
-- The hero briefing prioritizes the next relevant event/deadline and can surface a more important farther-away item when nothing nearby is significant.
-- Consolidated Overview rendering under a single owner to prevent competing refresh layers from repeatedly overwriting the same headline and causing flashes/freezes.
-
-### Inbox and mail safety
-
-- Stabilized Smart ordering so opening/reading a message does not unexpectedly reshuffle the visible inbox.
-- Improved read-state synchronization while Gmail catches up in the background.
-- Added current-email Kyle context and message-level quick actions.
-- Added safer composer/send behavior: drafts remain reviewable, cancellable send windows are supported, and longer/substantive messages can be held for manual approval.
-
-### Kyle and Canvas
-
-- Structured priority-mail results are rendered as proper Canvas rows instead of raw Markdown inside one paragraph.
-- Canvas state is now scoped to Overview and is cleared correctly when navigating elsewhere.
-- Fixed stale current-email context leaking into unrelated pages.
-- Completed action surfaces close cleanly instead of remaining stuck over the workspace.
-
-### Work and automations
-
-- Improved reconciliation between Gmail message IDs and Work records so actionable messages reliably appear in Work.
-- Added natural-language automation creation with generated Kyle goals, persistent schedules and optional immediate first runs.
-- Preserved local/Tailscale compute recovery paths for waiting Work jobs.
-
-### Settings redesign
-
-- Rebuilt Settings as separate consumer-facing cards instead of one dense technical panel.
-- Replaced the theme switch with a **System / Dark / Light** segmented control.
-- Added clearer Appearance, Kyle, Mail & Inbox, Automation, Privacy & Storage, Connected Services, Advanced and Account groupings.
-- Improved spacing, button hierarchy, responsive layout and service status presentation.
-
----
-
-## Team and Contribution History
-
-MailMate is a **group project**. Repository ownership, authorship and contribution are different things, so this section records the project history without assigning artificial percentage ownership.
-
-The summary below is qualitative and based on the visible Git history and the architecture that survived into the current application.
-
-| Contributor | Contribution history |
-| --- | --- |
-| **Rupayan Chattaraj** (`sphereofrupayan`) | Original repository owner and team coordination; early project/landing work and time/display UI updates. |
-| **Sreyanko** (`Sreyanko`) | Meaningful early dashboard and Overview frontend work, followed by integration/bug-fix commits. |
-| **Kartikay** (`kartikay633`) | Early Node/Supabase/dashboard integration work and later branding/logo updates. |
-| **Asmin Sinha** (`asminsinha`) | Initial Express backend foundation with Gmail OAuth and Gemini integration. |
-| **Priyam Trivedi** (`Priyam-06`, `priyam1206`) | Led much of the later system architecture and integration: Flask migration, Gmail workspace, Kyle runtime and tool system, Work Agent, privacy gate, Calendar intelligence, automations, voice/Whisper/TTS, local/Tailscale compute, runtime/UI stabilization, reconciliation and testing. |
-
-### Collaboration history
-
-The canonical team repository is:
-
-```text
-sphereofrupayan/CipherSquad
-```
-
-Post-hackathon stabilization continued in Priyam's fork:
-
-```text
-priyam1206/Mailmate
-branch: kyle-main-architecture-fixes
-```
-
-Those changes are intended to return to the original team repository through a **normal pull-request review**, preserving the upstream project, commit history and all contributors rather than replacing the group repository with a personal copy.
+- optional private Tailscale route to separate local compute
 
 ---
 
@@ -255,16 +173,21 @@ Those changes are intended to return to the original team repository through a *
 
 ```text
 app.py                         Flask application and API routes
-services/                      Gmail, Calendar, AI, Work, privacy and automation services
-services/agent/                bounded agent runtime, registry, models and tools
+services/                      Gmail, Calendar, AI, Work, privacy, and automation services
+services/agent/                bounded agent runtime, registry, models, and tools
 dashboard.html                 authenticated application shell
 dashboard.js                   primary dashboard behavior
-dashboard.css                  base application styling
-kyle*.js                       Kyle UI, state, tools, executor, voice and Canvas runtime
-mailmate-product-v*.js/css     product stabilization layers
-mailmate-settings-v1.*         current Settings redesign
+dashboard.css                  primary application styling
+kyle*.js                       Kyle UI, state, tools, executor, voice, and Canvas runtime
 mailmate-context.js            browser-side context references
+mailmate-objects.js            browser-side object registry
 calendar-conflicts.js          client conflict handling
+remote-worker-ui.*             remote/private compute UI
+compute-ui-fix.*               compute-state presentation fixes
+mailmate-master-polish.css     current presentation polish layer
+index.html                     landing and authentication entry page
+styles.css / landing.css       landing-page styling
+script.js / landing.js         landing-page behavior
 supabase/migrations/           optional minimized derived-context persistence
 tests/                         Python and JavaScript tests
 api.env.example                environment template
@@ -287,11 +210,11 @@ api.env.example                environment template
 
 ## Install and Run
 
-Clone the canonical team repository:
+Clone the repository:
 
 ```bash
-git clone https://github.com/sphereofrupayan/CipherSquad.git
-cd CipherSquad
+git clone https://github.com/MailMateCS/MailMate.git
+cd MailMate
 ```
 
 Create the local environment file:
@@ -300,10 +223,16 @@ Create the local environment file:
 copy api.env.example api.env
 ```
 
-Install dependencies according to `requirements.txt`, configure the required credentials in `api.env`, then start Flask:
+Install dependencies:
 
 ```bash
-py app.py
+pip install -r requirements.txt
+```
+
+Configure the required credentials in `api.env`, then start Flask:
+
+```bash
+python app.py
 ```
 
 Open:
@@ -312,13 +241,13 @@ Open:
 http://localhost:5000
 ```
 
-Choose **Continue with Google** and authorize the Gmail/Calendar permissions required by the features you want to use.
+Choose **Continue with Google** and authorize the Gmail and Calendar permissions required by the features you want to use.
 
 ---
 
 ## Environment Configuration
 
-Start from [`api.env.example`](./api.env.example). **Never commit a completed `api.env`, OAuth secret, API key, Supabase secret or model-provider credential.**
+Start from [`api.env.example`](./api.env.example). **Never commit a completed `api.env`, OAuth secret, API key, Supabase secret, model-provider credential, mailbox export, or user data.**
 
 Typical Google configuration:
 
@@ -339,7 +268,7 @@ GMAIL_FETCH_LIMIT=50
 GMAIL_QUERY=newer_than:30d
 ```
 
-See `api.env.example` for the current optional Whisper, ElevenLabs, Supabase, LM Studio and remote-compute settings.
+See `api.env.example` for optional Whisper, ElevenLabs, Supabase, LM Studio, and remote-compute settings.
 
 ---
 
@@ -347,7 +276,7 @@ See `api.env.example` for the current optional Whisper, ElevenLabs, Supabase, LM
 
 Supabase is optional and is intended only for minimized derived state, not raw mailbox storage.
 
-When enabled, the design excludes raw message bodies, HTML, attachments, links and full mailbox archives. Identity is namespaced and Row Level Security is used to scope records to the authenticated account.
+When enabled, the design excludes raw message bodies, HTML, attachments, links, and full mailbox archives. Identity is namespaced and Row Level Security is used to scope records to the authenticated account.
 
 Apply the migrations under:
 
@@ -369,18 +298,7 @@ python -m pytest -q
 
 JavaScript tests can be run with Node's test runner for the relevant files under `tests/`.
 
-The test suite includes coverage for areas such as:
-
-- Calendar conflict handling
-- Kyle runtime and guided UX
-- deletion safety
-- AI runtime/provider behavior
-- Gmail message handling
-- mail context
-- automation scheduling
-- Work state and portability
-- Whisper configuration
-- dashboard markup
+The test suite covers areas including Calendar conflict handling, Kyle runtime and guided UX, deletion safety, AI runtime/provider behavior, Gmail message handling, mail context, automation scheduling, Work state, Whisper configuration, and dashboard markup.
 
 ---
 
@@ -388,11 +306,11 @@ The test suite includes coverage for areas such as:
 
 ### Google access blocked
 
-Add the Gmail account as an OAuth test user or configure/publish the Google consent screen appropriately.
+Add the Gmail account as an OAuth test user or configure and publish the Google consent screen appropriately.
 
 ### Gmail draft/send returns 403 or insufficient permissions
 
-Reconnect through the Google auth flow so the current token contains the Gmail modify permission required for drafts/sends. Older sessions may contain read-only scopes.
+Reconnect through the Google auth flow so the current token contains the Gmail modify permission required for drafts and sends. Older sessions may contain read-only scopes.
 
 ### Kyle voice input does not start
 
@@ -404,31 +322,18 @@ If Work is configured for local/private inference, confirm LM Studio is running.
 
 ---
 
-## Contribution Workflow
-
-For continued team development:
+## Contributing
 
 1. Keep `main` reviewable and stable.
-2. Develop meaningful changes on a branch or fork.
-3. Open a pull request describing behavior, safety implications and testing.
-4. Preserve authorship and commit history when practical.
-5. Credit contributors for the work they actually performed; do not convert repository ownership into sole project authorship.
-6. Do not commit private credentials, mailbox exports or user data.
-
-This workflow lets the original team repository remain the shared project record while still allowing individual contributors to continue improving the system independently.
+2. Develop meaningful changes on a focused branch.
+3. Open a pull request describing behavior, safety implications, and testing.
+4. Preserve Git authorship and commit history.
+5. Do not commit private credentials, mailbox exports, or user data.
 
 ---
 
 ## Project Status
 
-MailMate remains an actively developed prototype. It demonstrates a practical direction for an inbox assistant that combines cloud APIs, deterministic controls and local AI while keeping sensitive data boundaries explicit.
+MailMate remains an actively developed prototype. It demonstrates an inbox assistant that combines cloud APIs, deterministic controls, and local AI while keeping sensitive-data boundaries explicit.
 
-It is **not** a production mail security product. Use test accounts/credentials where appropriate, review writes before sending, and rotate any credential that has ever been exposed outside its intended secret store.
-
----
-
-## Credits
-
-**Code2Create 7.0 — Team CipherSquad**
-
-Built collaboratively by the contributors listed above, with subsequent development preserved through Git history and pull-request review.
+It is **not** a production mail security product. Use test accounts and credentials where appropriate, review writes before sending, and rotate any credential that has ever been exposed outside its intended secret store.
