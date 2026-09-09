@@ -1,4 +1,285 @@
 (function () {
+  function installNativeBoot() {
+    if (window.__MAILMATE_NATIVE_BOOT__) return window.MailmateBoot || null;
+    window.__MAILMATE_NATIVE_BOOT__ = true;
+
+    try {
+      const savedTheme = localStorage.getItem('mailmate-theme');
+      if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    } catch (_) {}
+
+    const style = document.createElement('style');
+    style.id = 'mailmateNativeBootStyle';
+    style.textContent = `
+      body.mailmate-native-boot { overflow: hidden !important; }
+      body.mailmate-native-boot .app-shell {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        transform: translateY(5px) !important;
+      }
+      body.mailmate-app-ready .app-shell {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+        transition: opacity 300ms ease, transform 360ms cubic-bezier(.16,1,.3,1);
+      }
+      body.mailmate-native-boot #mailmateBootGate,
+      body.mailmate-native-boot #mailmateInitialLoader,
+      body.mailmate-app-ready #mailmateBootGate,
+      body.mailmate-app-ready #mailmateInitialLoader { display: none !important; }
+      #mailmateNativeBoot {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: grid;
+        place-items: center;
+        background: #f3f3f0;
+        color: #11110f;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: all;
+        transition: opacity 280ms ease, visibility 280ms ease;
+      }
+      html[data-theme="dark"] #mailmateNativeBoot {
+        background: #0c0c0b;
+        color: #f4f4f1;
+      }
+      #mailmateNativeBoot.is-leaving {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .mailmate-native-boot-inner {
+        width: min(360px, calc(100vw - 48px));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .mailmate-native-boot-brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        margin-bottom: 26px;
+        font-family: "Space Grotesk", "Plus Jakarta Sans", system-ui, sans-serif;
+        font-size: 1.08rem;
+        font-weight: 700;
+        letter-spacing: -.025em;
+      }
+      .mailmate-native-boot-logo {
+        width: 52px;
+        height: 52px;
+        object-fit: contain;
+        filter: drop-shadow(0 8px 22px rgba(0,0,0,.14));
+      }
+      .mailmate-native-buffer {
+        width: 31px;
+        height: 31px;
+        margin-bottom: 18px;
+        border-radius: 50%;
+        border: 2px solid rgba(17,17,15,.13);
+        border-top-color: currentColor;
+        animation: mailmateNativeSpin .72s linear infinite;
+      }
+      html[data-theme="dark"] .mailmate-native-buffer {
+        border-color: rgba(255,255,255,.13);
+        border-top-color: currentColor;
+      }
+      .mailmate-native-status {
+        min-height: 22px;
+        margin: 0;
+        color: #6d6d67;
+        font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+        font-size: .82rem;
+        font-weight: 500;
+        letter-spacing: -.01em;
+        opacity: 1;
+        transform: translateY(0);
+        transition: opacity 120ms ease, transform 160ms ease;
+      }
+      html[data-theme="dark"] .mailmate-native-status { color: #9c9c95; }
+      .mailmate-native-status.is-changing {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      body.mailmate-app-ready #tab-overview .overview-inner {
+        animation: mailmateNativeDataArrival 360ms cubic-bezier(.16,1,.3,1) both;
+      }
+      @keyframes mailmateNativeSpin { to { transform: rotate(360deg); } }
+      @keyframes mailmateNativeDataArrival {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #mailmateNativeBoot,
+        .mailmate-native-status,
+        body.mailmate-app-ready .app-shell,
+        body.mailmate-app-ready #tab-overview .overview-inner {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+
+    document.body?.classList.add('mailmate-native-boot');
+
+    const boot = document.createElement('div');
+    boot.id = 'mailmateNativeBoot';
+    boot.setAttribute('role', 'status');
+    boot.setAttribute('aria-live', 'polite');
+    boot.setAttribute('aria-label', 'MailMate is loading');
+    boot.innerHTML = `
+      <div class="mailmate-native-boot-inner">
+        <div class="mailmate-native-boot-brand">
+          <img class="mailmate-native-boot-logo" src="./assets/images/cs_logo.png" alt="MailMate" onerror="this.src='./assets/images/ciphersquad_logo.jpg'">
+          <span>MailMate</span>
+        </div>
+        <span class="mailmate-native-buffer" aria-hidden="true"></span>
+        <p class="mailmate-native-status" id="mailmateNativeBootStatus">Starting MailMate</p>
+      </div>
+    `;
+    document.body?.appendChild(boot);
+
+    const startedAt = performance.now();
+    const settled = { profile: false, overview: false, calendar: false, health: false };
+    let done = false;
+    let statusTimer = null;
+    let finishTimer = null;
+    let lastEssentialSettledAt = startedAt;
+
+    function setStatus(text) {
+      if (done || !text) return;
+      const node = document.getElementById('mailmateNativeBootStatus');
+      if (!node || node.textContent === text) return;
+      clearTimeout(statusTimer);
+      node.classList.add('is-changing');
+      statusTimer = setTimeout(() => {
+        node.textContent = text;
+        requestAnimationFrame(() => node.classList.remove('is-changing'));
+      }, 105);
+    }
+
+    function uiLooksSettled() {
+      const important = document.getElementById('importantCount')?.textContent?.trim();
+      const emails = document.getElementById('emailCount')?.textContent?.trim();
+      const attention = document.getElementById('attentionList')?.textContent || '';
+      const upcoming = document.getElementById('upcomingList')?.textContent || '';
+      const profile = document.getElementById('profileName')?.textContent?.trim();
+      return important && important !== '--'
+        && emails && emails !== '--'
+        && !/Loading current priorities/i.test(attention)
+        && !/Loading upcoming commitments/i.test(upcoming)
+        && profile && profile !== 'User';
+    }
+
+    function finish(reason) {
+      if (done) return;
+      done = true;
+      clearTimeout(statusTimer);
+      clearTimeout(finishTimer);
+      const statusNode = document.getElementById('mailmateNativeBootStatus');
+      if (statusNode) {
+        statusNode.textContent = reason === 'timeout' ? 'Opening workspace' : 'Ready';
+        statusNode.classList.remove('is-changing');
+      }
+      document.body?.classList.remove('mailmate-initial-loading', 'mailmate-boot-lock');
+      document.body?.classList.add('mailmate-live-ready');
+      document.getElementById('mailmateBootGate')?.remove();
+      document.getElementById('mailmateInitialLoader')?.remove();
+
+      const reveal = () => {
+        document.body?.classList.remove('mailmate-native-boot');
+        document.body?.classList.add('mailmate-app-ready');
+        const gate = document.getElementById('mailmateNativeBoot');
+        gate?.classList.add('is-leaving');
+        setTimeout(() => gate?.remove(), 320);
+      };
+      requestAnimationFrame(() => requestAnimationFrame(reveal));
+    }
+
+    function maybeFinish() {
+      if (done || !settled.profile || !settled.overview || !settled.calendar || !settled.health) return;
+      clearTimeout(finishTimer);
+      setStatus('Preparing your workspace');
+      const waitForStableUi = () => {
+        if (done) return;
+        const enoughTime = performance.now() - lastEssentialSettledAt >= 220;
+        if ((enoughTime && uiLooksSettled()) || performance.now() - lastEssentialSettledAt > 1400) {
+          const minDelay = Math.max(0, 420 - (performance.now() - startedAt));
+          finishTimer = setTimeout(() => finish('ready'), minDelay);
+          return;
+        }
+        finishTimer = setTimeout(waitForStableUi, 55);
+      };
+      waitForStableUi();
+    }
+
+    function mark(name) {
+      if (!Object.prototype.hasOwnProperty.call(settled, name)) return;
+      settled[name] = true;
+      lastEssentialSettledAt = performance.now();
+      maybeFinish();
+    }
+
+    const baseFetch = window.fetch.bind(window);
+    window.fetch = async function (input, init = {}) {
+      let url;
+      try { url = new URL(typeof input === 'string' ? input : input?.url, window.location.href); }
+      catch (_) { return baseFetch(input, init); }
+
+      const method = String(init.method || input?.method || 'GET').toUpperCase();
+      const path = url.pathname;
+      let tracked = null;
+      if (method === 'GET') {
+        if (path === '/api/user/profile') {
+          tracked = 'profile';
+          setStatus('Connecting your Google account');
+        } else if (path === '/api/dashboard/overview') {
+          tracked = 'overview';
+          setStatus('Loading Gmail context');
+        } else if (path === '/api/work/jobs') {
+          setStatus('Checking Kyle Work');
+        } else if (path === '/api/calendar/events') {
+          tracked = 'calendar';
+          setStatus('Loading your calendar');
+        } else if (path === '/api/health') {
+          tracked = 'health';
+          setStatus('Checking local services');
+        } else if (path === '/api/automations') {
+          setStatus('Loading automations');
+        }
+      }
+
+      try {
+        const response = await baseFetch(input, init);
+        if (tracked) mark(tracked);
+        return response;
+      } catch (error) {
+        if (tracked) mark(tracked);
+        throw error;
+      }
+    };
+    window.fetch.__mailmateNativeBoot = true;
+
+    // Never leave the user trapped behind the gate if one optional service stalls.
+    setTimeout(() => {
+      if (!done) {
+        setStatus('Opening workspace');
+        setTimeout(() => finish('timeout'), 180);
+      }
+    }, 10000);
+
+    const api = { setStatus, mark, finish, settled };
+    window.MailmateBoot = api;
+    return api;
+  }
+
+  installNativeBoot();
+
   const UI_TOOLS = new Set([
     'navigation.open', 'inbox.set_filter', 'inbox.open_email', 'calendar.open_event',
     'work.focus', 'ui.highlight', 'ui.scroll_to', 'ui.annotate', 'ui.toast',
@@ -12,6 +293,12 @@
 
   function evaluate(action = {}) {
     const tool = String(action.tool || '');
+    if (tool === 'automation.create') {
+      if (!action.args?.explicit_user_request) {
+        return { allowed: false, reason: 'Automation creation requires an explicit recurring request from the user.' };
+      }
+      return { allowed: true, risk: 'write', basis: 'explicit-user-automation' };
+    }
     if (UI_TOOLS.has(tool)) return { allowed: true, risk: 'ui' };
     if (WRITE_TOOLS.has(tool)) {
       if (tool === 'mail.send_draft') {
@@ -32,4 +319,50 @@
   }
 
   window.KylePolicy = { evaluate };
+
+  function loadBranchFix(src, marker, onload) {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    script.dataset[marker] = '1';
+    if (typeof onload === 'function') script.addEventListener('load', onload, { once: true });
+    document.head.appendChild(script);
+  }
+
+  function loadBranchStyle(src, marker) {
+    if (document.querySelector(`link[data-${marker}]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = src;
+    link.setAttribute(`data-${marker}`, '1');
+    document.head.appendChild(link);
+  }
+
+  // Branch-only fix stack. Each layer loads after the previous one so wrappers
+  // around fetch/KyleTools are deterministic and easy to review before merge.
+  loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
+    loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
+      loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
+        loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4', () => {
+          loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
+            loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6', () => {
+              loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');
+              loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
+                loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
+                loadBranchFix('./mailmate-product-v8.js?v=2', 'mailmateProductV8', () => {
+                  loadBranchFix('./mailmate-live-diff.js?v=2', 'mailmateLiveDiff', () => {
+                    loadBranchStyle('./mailmate-product-v9.css?v=2', 'mailmate-product-v9');
+                    loadBranchFix('./mailmate-product-v9.js?v=3', 'mailmateProductV9', () => {
+                      loadBranchStyle('./mailmate-settings-v1.css?v=1', 'mailmate-settings-v1');
+                      loadBranchFix('./mailmate-settings-v1.js?v=1', 'mailmateSettingsV1');
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
 })();

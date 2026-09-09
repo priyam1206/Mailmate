@@ -517,13 +517,25 @@ class WorkAgentService:
 
         needs_attention = overview_data.get("needs_attention") or []
         emails = overview_data.get("emails") or []
-        email_map = {str(e.get("id") or e.get("gmail_id")): e for e in emails}
+        # The dashboard can emit attention references as source_message_id, message_id,
+        # or email_id depending on which analysis/cache path produced the item. Build
+        # one canonical lookup so Work does not silently drop otherwise Work-ready mail.
+        email_map = {}
+        for email in emails:
+            for candidate_id in (email.get("id"), email.get("gmail_id"), email.get("message_id")):
+                if candidate_id:
+                    email_map[str(candidate_id)] = email
 
         new_jobs = []
         with self._lock:
             jobs = self._read_jobs()
             for item in needs_attention:
-                msg_id = str(item.get("source_message_id") or "")
+                msg_id = str(
+                    item.get("source_message_id")
+                    or item.get("message_id")
+                    or item.get("email_id")
+                    or ""
+                )
                 if not msg_id:
                     continue
                 email = email_map.get(msg_id)

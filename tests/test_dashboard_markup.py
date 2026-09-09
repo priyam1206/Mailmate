@@ -33,7 +33,7 @@ def test_mail_composer_allows_clarification_without_tool_failure():
 
 def test_inbox_hides_unattached_work_and_display_only_noise():
     js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
-    assert 'dashboard.js?v=43' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    assert 'dashboard.js?v=44' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
     assert 'Safe for local AI overview' not in js
     assert 'Kyle will prepare a Work item for this email on the next sync' not in js
     assert "if (work.state === 'eligible') return '';" in js
@@ -326,3 +326,35 @@ def test_rich_email_has_dark_mode_safe_reading_surface():
     assert 'email-rich-surface' in js
     assert '[data-theme="dark"] .email-rich-surface' in css
     assert 'color-scheme: light' in css
+
+
+def test_product_v9_history_observer_is_idempotent():
+    html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    js = (ROOT / 'mailmate-product-v9.js').read_text(encoding='utf-8')
+    policy = (ROOT / 'kyle-policy.js').read_text(encoding='utf-8')
+
+    assert 'kyle-policy.js?v=25' in html
+    assert 'if (toggle.innerHTML !== nextIcon) toggle.innerHTML = nextIcon;' in js
+    assert "toggle.getAttribute('aria-label') !== nextTitle" in js
+    assert "const mount = document.getElementById('kyleMount');" in js
+    assert 'observer.observe(mount, {' in js
+    assert 'observer.observe(document.body' not in js
+    assert 'requestAnimationFrame(() =>' in js
+    assert "mailmate-product-v9.js?v=3" in policy
+
+
+def test_product_v8_does_not_observe_its_own_attribute_writes():
+    js = (ROOT / 'mailmate-product-v8.js').read_text(encoding='utf-8')
+    policy = (ROOT / 'kyle-policy.js').read_text(encoding='utf-8')
+
+    assert "card.dataset.mailmateV8Tone !== hero.tone" in js
+    assert "observer.observe(document.body, { childList: true, subtree: true });" in js
+    assert 'attributeFilter' not in js
+    assert "mailmate-product-v8.js?v=2" in policy
+
+
+def test_dashboard_navigation_uses_a_persistent_delegated_handler():
+    js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
+
+    assert "event.target?.closest?.('nav.nav-tabs .nav-tab')" in js
+    assert 'if (tab) showTab(tab.dataset.tab);' in js
