@@ -59,7 +59,7 @@
     const loadV12 = () => {
       if (window.__MAILMATE_PRODUCT_V12__ || document.querySelector('script[data-mailmate-product-v12]')) return;
       const owner = document.createElement('script');
-      owner.src = './mailmate-product-v12.js?v=1';
+      owner.src = './mailmate-product-v12.js?v=2';
       owner.async = false;
       owner.dataset.mailmateProductV12 = '1';
       document.head.appendChild(owner);
