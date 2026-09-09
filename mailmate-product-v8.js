@@ -306,9 +306,9 @@
     const copy = card?.querySelector('.mailmate-ai-copy');
     if (!card || !copy) return;
     const hero = deriveHeadline();
-    card.dataset.mailmateV8Tone = hero.tone;
-    card.dataset.mailmateV7Tone = hero.tone;
-    card.classList.remove('is-loading');
+    if (card.dataset.mailmateV8Tone !== hero.tone) card.dataset.mailmateV8Tone = hero.tone;
+    if (card.dataset.mailmateV7Tone !== hero.tone) card.dataset.mailmateV7Tone = hero.tone;
+    if (card.classList.contains('is-loading')) card.classList.remove('is-loading');
     const html = hero.when
       ? `<span class="mailmate-headline-title">${escapeHtml(hero.title)}</span><span class="mailmate-headline-time">${escapeHtml(formatWhen(hero.when))}</span>`
       : `<span class="mailmate-headline-title">${escapeHtml(hero.title)}</span>`;
@@ -397,7 +397,7 @@
         paintHeadline();
       }, 0);
     });
-    if (document.body) observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+    if (document.body) observer.observe(document.body, { childList: true, subtree: true });
   }
 
   function boot() {

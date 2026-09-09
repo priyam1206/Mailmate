@@ -312,11 +312,15 @@
 
     const toggle = widget.querySelector('.kyle-history-toggle');
     if (toggle && !toggle.hidden) {
-      toggle.innerHTML = historyOpen && !overview
+      const nextIcon = historyOpen && !overview
         ? '<i class="fas fa-minus"></i>'
         : '<i class="fas fa-plus"></i>';
-      toggle.title = historyOpen && !overview ? 'Hide conversation' : 'Show conversation';
-      toggle.setAttribute('aria-label', toggle.title);
+      const nextTitle = historyOpen && !overview ? 'Hide conversation' : 'Show conversation';
+      if (toggle.innerHTML !== nextIcon) toggle.innerHTML = nextIcon;
+      if (toggle.title !== nextTitle) toggle.title = nextTitle;
+      if (toggle.getAttribute('aria-label') !== nextTitle) {
+        toggle.setAttribute('aria-label', nextTitle);
+      }
     }
   }
 
@@ -338,13 +342,24 @@
   }
 
   function observeKyleMount() {
-    const observer = new MutationObserver(() => {
-      installAutomationTool();
-      patchCanvasPollingMotion();
-      applyHistoryPreference();
-      if (!bootDone && currentContextReady()) maybeFinishBoot();
-    });
-    observer.observe(document.body, {
+    const mount = document.getElementById('kyleMount');
+    if (!mount) return;
+
+    let scheduled = false;
+    const applyMountState = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        installAutomationTool();
+        patchCanvasPollingMotion();
+        applyHistoryPreference();
+        if (!bootDone && currentContextReady()) maybeFinishBoot();
+      });
+    };
+
+    const observer = new MutationObserver(applyMountState);
+    observer.observe(mount, {
       childList: true,
       subtree: true,
       attributes: true,

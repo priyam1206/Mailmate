@@ -187,7 +187,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function bindEvents() {
-    els.tabs.forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
+    document.addEventListener('click', event => {
+      const tab = event.target?.closest?.('nav.nav-tabs .nav-tab');
+      if (tab) showTab(tab.dataset.tab);
+    });
     els.filters.forEach(filter => filter.addEventListener('click', () => setInboxFilter(filter.dataset.filter)));
     els.refreshBtn?.addEventListener('click', async () => {
       const btn = els.refreshBtn;
