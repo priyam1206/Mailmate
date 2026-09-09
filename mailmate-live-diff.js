@@ -49,17 +49,33 @@
     });
   }
 
-  function loadRealtimeOverview() {
-    if (window.__MAILMATE_PRODUCT_V11__ || document.querySelector('script[data-mailmate-product-v11]')) return;
+  function loadSingleOwnerOverview() {
+    if (window.__MAILMATE_PRODUCT_V12__ || document.querySelector('script[data-mailmate-product-v12]')) return;
     if (!window.__MAILMATE_PRODUCT_V9__) {
-      setTimeout(loadRealtimeOverview, 20);
+      setTimeout(loadSingleOwnerOverview, 20);
       return;
     }
-    const script = document.createElement('script');
-    script.src = './mailmate-product-v11.js?v=1';
-    script.async = false;
-    script.dataset.mailmateProductV11 = '1';
-    document.head.appendChild(script);
+
+    const loadV12 = () => {
+      if (window.__MAILMATE_PRODUCT_V12__ || document.querySelector('script[data-mailmate-product-v12]')) return;
+      const owner = document.createElement('script');
+      owner.src = './mailmate-product-v12.js?v=1';
+      owner.async = false;
+      owner.dataset.mailmateProductV12 = '1';
+      document.head.appendChild(owner);
+    };
+
+    if (window.__MAILMATE_PRODUCT_V11__) {
+      loadV12();
+      return;
+    }
+
+    const realtime = document.createElement('script');
+    realtime.src = './mailmate-product-v11.js?v=2';
+    realtime.async = false;
+    realtime.dataset.mailmateProductV11 = '1';
+    realtime.addEventListener('load', loadV12, { once: true });
+    document.head.appendChild(realtime);
   }
 
   function boot() {
@@ -67,7 +83,7 @@
     initialized = true;
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    loadRealtimeOverview();
+    loadSingleOwnerOverview();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
