@@ -49,19 +49,47 @@
     });
   }
 
+  function loadPresentationV13() {
+    if (!document.querySelector('link[data-mailmate-product-v13]')) {
+      const style = document.createElement('link');
+      style.rel = 'stylesheet';
+      style.href = './mailmate-product-v13.css?v=1';
+      style.dataset.mailmateProductV13 = '1';
+      document.head.appendChild(style);
+    }
+    if (window.__MAILMATE_PRODUCT_V13__ || document.querySelector('script[data-mailmate-product-v13]')) return;
+    const script = document.createElement('script');
+    script.src = './mailmate-product-v13.js?v=1';
+    script.async = false;
+    script.dataset.mailmateProductV13 = '1';
+    document.head.appendChild(script);
+  }
+
   function loadSingleOwnerOverview() {
-    if (window.__MAILMATE_PRODUCT_V12__ || document.querySelector('script[data-mailmate-product-v12]')) return;
+    if (window.__MAILMATE_PRODUCT_V12__) {
+      loadPresentationV13();
+      return;
+    }
+    if (document.querySelector('script[data-mailmate-product-v12]')) {
+      setTimeout(loadSingleOwnerOverview, 20);
+      return;
+    }
     if (!window.__MAILMATE_PRODUCT_V9__) {
       setTimeout(loadSingleOwnerOverview, 20);
       return;
     }
 
     const loadV12 = () => {
-      if (window.__MAILMATE_PRODUCT_V12__ || document.querySelector('script[data-mailmate-product-v12]')) return;
+      if (window.__MAILMATE_PRODUCT_V12__) {
+        loadPresentationV13();
+        return;
+      }
+      if (document.querySelector('script[data-mailmate-product-v12]')) return;
       const owner = document.createElement('script');
       owner.src = './mailmate-product-v12.js?v=2';
       owner.async = false;
       owner.dataset.mailmateProductV12 = '1';
+      owner.addEventListener('load', loadPresentationV13, { once: true });
       document.head.appendChild(owner);
     };
 
