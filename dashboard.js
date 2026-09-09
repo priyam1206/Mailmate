@@ -187,7 +187,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function bindEvents() {
-    els.tabs.forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
+    document.addEventListener('click', event => {
+      const tab = event.target?.closest?.('nav.nav-tabs .nav-tab');
+      if (tab) showTab(tab.dataset.tab);
+    });
     els.filters.forEach(filter => filter.addEventListener('click', () => setInboxFilter(filter.dataset.filter)));
     els.refreshBtn?.addEventListener('click', async () => {
       const btn = els.refreshBtn;
@@ -1331,7 +1334,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function renderWork(data) {
     try {
-      const res = await fetch(`${API_BASE}/api/work/jobs`);
+      // Entering Work is an explicit request to reconcile actionable Gmail into
+      // WorkJobs. This prevents an empty Work pane when Overview already shows
+      // Work-ready attention items.
+      const res = await fetch(`${API_BASE}/api/work/jobs?ensure=1&reconcile=1`, { cache: 'no-store' });
       if (res.ok) {
         workJobs = normalizeTextTree(await res.json());
         if (state.currentPage === 'inbox' && state.data?.emails) {

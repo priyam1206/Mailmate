@@ -1197,8 +1197,11 @@ def list_work_jobs():
     jobs = work_agent_service.list_jobs(user_id, reconcile=reconcile)
 
     ensure = str(request.args.get('ensure', '')).lower() in {'1', 'true', 'yes'}
-    if ensure and not jobs:
+    if ensure:
         try:
+            # Always reconcile the current dashboard into Work when explicitly
+            # requested. Job IDs are deterministic, so this adds newly actionable
+            # mail without duplicating existing Work history.
             live_payload = _build_live_dashboard(profile, force_ai=False)
             work_agent_service.sync_and_enqueue(user_id, live_payload)
             jobs = work_agent_service.list_jobs(user_id, reconcile=False)
