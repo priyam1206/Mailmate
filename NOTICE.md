@@ -9,5 +9,6 @@ history.
 Subsequent development is maintained through the MailMate organization while
 retaining attribution to the original contributors.
 
-This notice does not grant a software license or independently determine
-copyright ownership.
+MailMate is distributed under the Apache License, Version 2.0. See the LICENSE
+file included with this distribution. This notice preserves project provenance
+and does not independently determine copyright ownership.

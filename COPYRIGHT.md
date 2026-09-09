@@ -17,7 +17,7 @@ Git record. A summary of evidence-based contribution areas is available in
 Third-party libraries, media, and other incorporated materials remain subject
 to their respective copyright and licensing terms.
 
-This document records attribution and provenance. It does not grant a software
-license, replace any contributor agreement, or independently determine a
-disputed ownership question. MailMate currently has no explicit project-level
-open-source license.
+This document records attribution and provenance. It does not replace any
+contributor agreement or independently determine a disputed ownership
+question. MailMate is distributed under the Apache License, Version 2.0; see
+[LICENSE](LICENSE).
