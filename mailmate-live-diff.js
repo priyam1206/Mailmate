@@ -71,7 +71,7 @@
     }
 
     const realtime = document.createElement('script');
-    realtime.src = './mailmate-product-v11.js?v=2';
+    realtime.src = './mailmate-product-v11.js?v=3';
     realtime.async = false;
     realtime.dataset.mailmateProductV11 = '1';
     realtime.addEventListener('load', loadV12, { once: true });
