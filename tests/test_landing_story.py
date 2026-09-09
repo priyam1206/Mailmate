@@ -42,12 +42,17 @@ def test_landing_describes_real_mailmate_surfaces():
         assert phrase in html
 
 
-def test_landing_has_no_legacy_team_branding():
-    html = (ROOT / 'index.html').read_text(encoding='utf-8').lower()
-    script = (ROOT / 'script.js').read_text(encoding='utf-8').lower()
-    readme = (ROOT / 'README.md').read_text(encoding='utf-8').lower()
+def test_current_surfaces_have_no_legacy_team_branding():
+    surfaces = (
+        ROOT / 'README.md',
+        ROOT / 'index.html',
+        ROOT / 'script.js',
+        ROOT / 'dashboard.html',
+    )
 
-    for legacy in ('ciphersquad', 'rupayan', 'sphereofrupayan'):
-        assert legacy not in html
-        assert legacy not in script
-        assert legacy not in readme
+    for path in surfaces:
+        content = path.read_text(encoding='utf-8').lower()
+        for legacy in ('ciphersquad', 'rupayan', 'sphereofrupayan'):
+            assert legacy not in content
+
+    assert not (ROOT / 'assets' / 'images' / 'ciphersquad_logo.jpg').exists()
