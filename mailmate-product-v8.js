@@ -20,6 +20,10 @@
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
+  function legacyHeroDisabled() {
+    return Boolean(window.__MAILMATE_PRODUCT_V11__ || window.__MAILMATE_OVERVIEW_SINGLE_OWNER__);
+  }
+
   function stableJson(value) {
     try { return JSON.stringify(value); } catch (_) { return String(value || ''); }
   }
@@ -73,7 +77,7 @@
       pulse('#actionList');
       pulse('#workList');
     }
-    if (pendingChanges.size) {
+    if (pendingChanges.size && !legacyHeroDisabled()) {
       setTimeout(() => {
         takeOwnershipOfHero();
         paintHeadline();
@@ -109,10 +113,12 @@
       node.classList.add('mailmate-initial-reveal');
     });
     setTimeout(() => loader?.remove(), 260);
-    setTimeout(() => {
-      takeOwnershipOfHero();
-      paintHeadline();
-    }, 30);
+    if (!legacyHeroDisabled()) {
+      setTimeout(() => {
+        takeOwnershipOfHero();
+        paintHeadline();
+      }, 30);
+    }
   }
 
   function readBody(init) {
@@ -284,7 +290,9 @@
   }
 
   function takeOwnershipOfHero() {
-    let card = document.getElementById('mailmateAiOverview');
+    const current = document.getElementById('mailmateAiOverview');
+    if (legacyHeroDisabled()) return current;
+    let card = current;
     if (!card) return null;
     if (card.dataset.mailmateV8Owned === '1') return card;
     const clone = card.cloneNode(true);
@@ -302,6 +310,7 @@
   }
 
   function paintHeadline() {
+    if (legacyHeroDisabled()) return;
     const card = takeOwnershipOfHero() || ownedHero;
     const copy = card?.querySelector('.mailmate-ai-copy');
     if (!card || !copy) return;
@@ -393,8 +402,10 @@
         installRestoreTransition();
         installBackButton();
         syncCanvasChrome();
-        takeOwnershipOfHero();
-        paintHeadline();
+        if (!legacyHeroDisabled()) {
+          takeOwnershipOfHero();
+          paintHeadline();
+        }
       }, 0);
     });
     if (document.body) observer.observe(document.body, { childList: true, subtree: true });
@@ -406,8 +417,10 @@
     installRestoreTransition();
     installBackButton();
     syncCanvasChrome();
-    takeOwnershipOfHero();
-    paintHeadline();
+    if (!legacyHeroDisabled()) {
+      takeOwnershipOfHero();
+      paintHeadline();
+    }
     observeUi();
     window.addEventListener('resize', alignRestoreButton, { passive: true });
     window.addEventListener('pagehide', clearPersistedCanvasHistory);
