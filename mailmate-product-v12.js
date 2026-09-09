@@ -5,10 +5,9 @@
   window.__MAILMATE_PRODUCT_V12__ = true;
   window.__MAILMATE_OVERVIEW_SINGLE_OWNER__ = true;
 
-  let heroObserver = null;
-  let upcomingObserver = null;
-  let reconcileQueued = false;
   let fetchInstalled = false;
+  let refreshFrame = 0;
+  let adopted = false;
 
   function parseBody(init) {
     try { return typeof init?.body === 'string' ? JSON.parse(init.body) : null; }
@@ -34,8 +33,9 @@
       if (url.pathname === '/api/kyle/agent' && String(init.method || input?.method || 'GET').toUpperCase() === 'POST') {
         const payload = parseBody(init);
         if (payload?.uiContext?.briefingOnly) {
-          // V4's legacy AI briefing is superseded by the deterministic realtime
-          // headline. Do not spend an LLM request on a surface V11 owns.
+          // The old V4 generated briefing no longer owns the Overview headline.
+          // Return the already-rendered deterministic headline instead of spending
+          // an LLM request on text that V11 would immediately replace.
           const text = visibleHeadline() || 'Workspace ready.';
           return new Response(JSON.stringify({ reply: text, text, superseded: true }), {
             status: 200,
@@ -51,80 +51,58 @@
     window.fetch = wrapped;
   }
 
-  function adoptHero() {
+  function adoptHeroOnce() {
+    if (adopted) return document.getElementById('mailmateAiOverview');
     const current = document.getElementById('mailmateAiOverview');
     if (!current) return null;
-    if (current.dataset.mailmateV12Owned === '1') return current;
 
-    // Replacing the node detaches legacy V6/V7/V8 MutationObservers that were
-    // attached directly to the old hero. V12 + V11 are the only active owners.
+    // Clone exactly once to detach observers installed by older product layers.
+    // Never observe the replacement: V11 itself writes attributes and children,
+    // and observing those writes creates a feedback loop that can peg the UI
+    // thread and leave the boot screen stuck indefinitely.
     const clone = current.cloneNode(true);
     clone.dataset.mailmateV12Owned = '1';
     clone.dataset.mailmateV11Owned = '1';
     clone.dataset.mailmateV10Owned = '1';
     clone.dataset.mailmateV8Owned = '1';
     clone.dataset.mailmateV7Observed = '1';
+    clone.classList.remove('tone-urgent', 'tone-watch', 'tone-clear', 'is-loading', 'mailmate-quiet-update');
     current.replaceWith(clone);
-
-    heroObserver?.disconnect();
-    heroObserver = new MutationObserver(() => queueReconcile());
-    heroObserver.observe(clone, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ['class', 'data-mailmate-v7-tone', 'data-mailmate-v8-tone', 'data-mailmate-v10-tone']
-    });
+    adopted = true;
     return clone;
   }
 
-  function cleanLegacyHeroState(root) {
-    if (!root) return;
-    root.classList.remove('tone-urgent', 'tone-watch', 'tone-clear', 'is-loading', 'mailmate-quiet-update');
-  }
-
-  function reconcile() {
-    const root = adoptHero();
-    cleanLegacyHeroState(root);
+  function refreshRealtimeOverview() {
+    adoptHeroOnce();
     window.MailmateTimeAware?.refresh?.();
   }
 
-  function queueReconcile() {
-    if (reconcileQueued) return;
-    reconcileQueued = true;
-    queueMicrotask(() => {
-      reconcileQueued = false;
-      reconcile();
+  function scheduleRefresh() {
+    if (refreshFrame) return;
+    refreshFrame = requestAnimationFrame(() => {
+      refreshFrame = 0;
+      refreshRealtimeOverview();
     });
-  }
-
-  function guardUpcoming() {
-    const host = document.getElementById('upcomingList');
-    if (!host || host.dataset.mailmateV12Guarded === '1') return;
-    host.dataset.mailmateV12Guarded = '1';
-    upcomingObserver?.disconnect();
-    upcomingObserver = new MutationObserver(() => queueReconcile());
-    upcomingObserver.observe(host, { childList: true, subtree: true, characterData: true });
   }
 
   function boot() {
     installBriefingGovernor();
-    adoptHero();
-    guardUpcoming();
-    reconcile();
+    adoptHeroOnce();
+    scheduleRefresh();
 
-    window.addEventListener('harness:context', queueReconcile);
-    window.addEventListener('mailmate:context-changed', queueReconcile);
-    window.addEventListener('harness:calendar-refresh', queueReconcile);
+    // Refresh only from semantic data/context events. There are deliberately no
+    // MutationObservers here. V11 already owns clock-based refresh and its own
+    // guarded Upcoming rendering, so DOM mutations must never feed back into V12.
+    window.addEventListener('harness:context', scheduleRefresh);
+    window.addEventListener('mailmate:context-changed', scheduleRefresh);
+    window.addEventListener('harness:calendar-refresh', scheduleRefresh);
 
-    const bodyObserver = new MutationObserver(() => {
-      adoptHero();
-      guardUpcoming();
-    });
-    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('click', event => {
+      if (event.target.closest('.nav-tab[data-tab="overview"]')) scheduleRefresh();
+    }, true);
 
     window.MailmateOverviewOwner = {
-      refresh: reconcile,
+      refresh: scheduleRefresh,
       version: 12,
       owner: 'realtime'
     };
