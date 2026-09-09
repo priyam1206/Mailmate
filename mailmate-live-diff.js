@@ -49,11 +49,25 @@
     });
   }
 
+  function loadTimeAwareOverview() {
+    if (window.__MAILMATE_PRODUCT_V10__ || document.querySelector('script[data-mailmate-product-v10]')) return;
+    if (!window.__MAILMATE_PRODUCT_V9__) {
+      setTimeout(loadTimeAwareOverview, 25);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = './mailmate-product-v10.js?v=1';
+    script.async = false;
+    script.dataset.mailmateProductV10 = '1';
+    document.head.appendChild(script);
+  }
+
   function boot() {
     snapshot(false);
     initialized = true;
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    loadTimeAwareOverview();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
