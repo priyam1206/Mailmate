@@ -40,14 +40,20 @@
       .replace(/\s+-\s+TH$/i, ' – TH');
   }
 
-  function contextReady(ctx = latestContext) {
+  function activeContext() {
+    const live = window.Kyle?.store?.context;
+    if (live && typeof live === 'object') return live;
+    return latestContext && typeof latestContext === 'object' ? latestContext : {};
+  }
+
+  function contextReady(ctx = activeContext()) {
     if (!ctx || typeof ctx !== 'object') return false;
     const calendar = Array.isArray(ctx.calendarEvents) || Array.isArray(ctx.calendar_events);
     const mail = Array.isArray(ctx.emails) || Boolean(ctx.metrics);
     return calendar && mail;
   }
 
-  function calendarEvents(ctx = latestContext) {
+  function calendarEvents(ctx = activeContext()) {
     if (Array.isArray(ctx?.calendarEvents)) return ctx.calendarEvents;
     if (Array.isArray(ctx?.calendar_events)) return ctx.calendar_events;
     return [];
@@ -122,19 +128,21 @@
   }
 
   function deadlineCandidates(now) {
-    const ctx = latestContext || {};
-    const emails = Array.isArray(ctx.emails) ? ctx.emails : [];
-    const byId = new Map(emails.map(email => [String(email.id || email.gmail_id || email.message_id || ''), email]));
-    const attention = Array.isArray(ctx.needs_attention) ? ctx.needs_attention : [];
+    const ctx = activeContext();
+    // Needs Attention is unread-only by design. Reading a message must not
+    // erase an unfinished real-world deadline, so V7 preserves those here.
+    const attention = [
+      ...(Array.isArray(ctx.needs_attention) ? ctx.needs_attention : []),
+      ...(Array.isArray(ctx.resolved_attention_deadlines) ? ctx.resolved_attention_deadlines : [])
+    ];
 
     return attention.map(item => {
       const id = String(item.source_message_id || item.message_id || item.email_id || item.id || '');
-      if (id && byId.get(id)?.is_read === true) return null;
       const deadline = dateOf(item.deadline);
       if (!deadline || deadline.getTime() <= now.getTime() || deadline.getTime() > now.getTime() + 14 * DAY) return null;
       const text = `${item.subject || item.title || ''} ${item.description || item.reason || ''}`.toLowerCase();
       let importance = 50;
-      if (/\b(?:urgent|asap|action required|due today|submission|deadline|apply by|register by)\b/.test(text)) importance += 65;
+      if (/\b(?:urgent|asap|action required|due today|submission|deadline|apply by|register by|reply by)\b/.test(text)) importance += 65;
       return {
         id: id ? `deadline-${id}` : `deadline-${deadline.getTime()}`,
         source: 'deadline',
@@ -272,7 +280,11 @@
     }
 
     const signature = html.replace(/\s+/g, ' ').trim();
-    if (host.dataset.mailmateV11Signature === signature) return true;
+    const currentSignature = String(host.innerHTML || '').replace(/\s+/g, ' ').trim();
+    // Core dashboard refreshes can replace innerHTML without touching this
+    // dataset value. Compare the actual DOM too or stale, already-finished
+    // events can survive until the next full refresh.
+    if (host.dataset.mailmateV11Signature === signature && currentSignature === signature) return true;
     writingUpcoming = true;
     host.dataset.mailmateV11Signature = signature;
     host.dataset.mailmateV11Owned = '1';
@@ -292,6 +304,7 @@
   }
 
   function refresh() {
+    latestContext = window.Kyle?.store?.context || latestContext;
     if (!contextReady()) return false;
     const now = new Date();
     const hero = renderHero(now);
@@ -328,7 +341,9 @@
       queueRefresh();
     });
     window.addEventListener('mailmate:context-changed', event => {
-      latestContext = event.detail || window.Kyle?.store?.context || latestContext;
+      // Some legacy events carry partial UI context. Prefer Kyle's canonical
+      // workspace context whenever it exists.
+      latestContext = window.Kyle?.store?.context || event.detail || latestContext;
       queueRefresh();
     });
 
