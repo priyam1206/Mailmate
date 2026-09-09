@@ -21,19 +21,38 @@
     return String(item?.source_message_id || item?.message_id || item?.email_id || item?.id || '').trim();
   }
 
+  function mergeResolvedDeadlines(existing, additions) {
+    const merged = [];
+    const seen = new Set();
+    [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(additions) ? additions : [])].forEach(item => {
+      if (!item?.deadline) return;
+      const key = `${attentionId(item)}|${String(item.deadline || '')}|${String(item.subject || item.title || '')}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(item);
+    });
+    return merged;
+  }
+
   function filterReadAttention(data) {
     if (!data || !Array.isArray(data.needs_attention) || !Array.isArray(data.emails)) return data;
     const emailById = new Map(data.emails.map(email => [messageId(email), email]).filter(([id]) => id));
+    const hiddenReadDeadlines = [];
     const filtered = data.needs_attention.filter(item => {
       const id = attentionId(item);
       if (!id) return true;
       const email = emailById.get(id);
       if (!email) return true;
-      return email.is_read !== true;
+      const isRead = email.is_read === true;
+      if (isRead && item.deadline) hiddenReadDeadlines.push(item);
+      return !isRead;
     });
-    if (filtered.length === data.needs_attention.length) return data;
+    if (filtered.length === data.needs_attention.length && hiddenReadDeadlines.length === 0) return data;
     return {
       ...data,
+      // Reading a message dismisses it from Needs Attention, but it does not
+      // complete any real-world deadline contained in that message.
+      resolved_attention_deadlines: mergeResolvedDeadlines(data.resolved_attention_deadlines, hiddenReadDeadlines),
       needs_attention: filtered,
       metrics: {
         ...(data.metrics || {}),
@@ -59,6 +78,10 @@
     if (!id) return;
     const context = window.Kyle?.store?.context;
     if (context && Array.isArray(context.needs_attention)) {
+      const removed = context.needs_attention.find(item => attentionId(item) === id) || null;
+      if (removed?.deadline) {
+        context.resolved_attention_deadlines = mergeResolvedDeadlines(context.resolved_attention_deadlines, [removed]);
+      }
       context.needs_attention = context.needs_attention.filter(item => attentionId(item) !== id);
     }
   }
