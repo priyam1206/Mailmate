@@ -369,8 +369,10 @@
   function installRestoredUiLayers() {
     if (!hasFullBrowserDom()) return;
 
-    // These remain active runtime layers. Keep their existing execution order so
-    // fetch/KyleTools wrappers and later visual refinements compose deterministically.
+    // Restored compatibility/runtime stack from fa9b8d934f. This stays here as
+    // the single dashboard entry point, but only executes in a real browser DOM.
+    // Keep the existing order: later layers depend on wrappers/hooks installed
+    // by earlier ones and the v8/v9 behavior is covered by dashboard markup tests.
     loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
       loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
         loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
