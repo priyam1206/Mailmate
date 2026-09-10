@@ -341,6 +341,8 @@ def test_product_v9_history_observer_is_idempotent():
     assert 'observer.observe(document.body' not in js
     assert 'requestAnimationFrame(() =>' in js
     assert "mailmate-product-v9.js?v=3" in policy
+    assert 'function installRestoredUiLayers()' in policy
+    assert 'if (!hasFullBrowserDom()) return;' in policy
 
 
 def test_product_v8_does_not_observe_its_own_attribute_writes():
@@ -351,6 +353,7 @@ def test_product_v8_does_not_observe_its_own_attribute_writes():
     assert "observer.observe(document.body, { childList: true, subtree: true });" in js
     assert 'attributeFilter' not in js
     assert "mailmate-product-v8.js?v=2" in policy
+    assert 'installRestoredUiLayers();' in policy
 
 
 def test_dashboard_navigation_uses_a_persistent_delegated_handler():
