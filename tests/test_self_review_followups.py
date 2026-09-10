@@ -9,8 +9,16 @@ def test_repository_contract_files_exist():
     assert (ROOT / 'GOVERNANCE.md').is_file()
 
 
-def test_legacy_c2c_svg_is_removed():
-    assert not (ROOT / 'assets' / 'images' / 'logo.svg').exists()
+def test_legacy_logo_assets_and_references_are_removed():
+    images = ROOT / 'assets' / 'images'
+    assert not (images / 'logo.svg').exists()
+    assert not (images / 'cs_logo.png').exists()
+
+    for relative in ('index.html', 'dashboard.html'):
+        content = (ROOT / relative).read_text(encoding='utf-8')
+        assert 'cs_logo.png' not in content
+        assert 'logo.svg' not in content
+        assert './assets/images/mailmate_logo.jpg' in content
 
 
 def test_policy_normalizes_visible_branding_to_mailmate_asset():
