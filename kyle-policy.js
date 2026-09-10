@@ -1,15 +1,18 @@
 (function () {
-  function installNativeBoot() {
-    const hasBrowserDom = typeof document !== 'undefined'
+  function hasFullBrowserDom() {
+    return typeof window !== 'undefined'
+      && typeof document !== 'undefined'
       && typeof document.createElement === 'function'
       && document.documentElement
       && document.head
       && document.body;
+  }
 
+  function installNativeBoot() {
     // Policy is also loaded inside lightweight Node VM harnesses. In that
     // environment there is intentionally no full browser DOM, so the product
     // boot UI must be skipped while KylePolicy remains available for tests.
-    if (!hasBrowserDom || typeof window === 'undefined') return null;
+    if (!hasFullBrowserDom()) return null;
     if (window.__MAILMATE_NATIVE_BOOT__) return window.MailmateBoot || null;
     window.__MAILMATE_NATIVE_BOOT__ = true;
 
@@ -338,4 +341,62 @@
   }
 
   if (typeof window !== 'undefined') window.KylePolicy = { evaluate };
+
+  function loadBranchFix(src, marker, onload) {
+    if (!hasFullBrowserDom()) return;
+    const selector = `script[data-${marker}]`;
+    if (document.querySelector(selector)) {
+      if (typeof onload === 'function') onload();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    script.setAttribute(`data-${marker}`, '1');
+    if (typeof onload === 'function') script.addEventListener('load', onload, { once: true });
+    document.head.appendChild(script);
+  }
+
+  function loadBranchStyle(src, marker) {
+    if (!hasFullBrowserDom() || document.querySelector(`link[data-${marker}]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = src;
+    link.setAttribute(`data-${marker}`, '1');
+    document.head.appendChild(link);
+  }
+
+  function installRestoredUiLayers() {
+    if (!hasFullBrowserDom()) return;
+
+    // These remain active runtime layers. Keep their existing execution order so
+    // fetch/KyleTools wrappers and later visual refinements compose deterministically.
+    loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
+      loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
+        loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
+          loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4', () => {
+            loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
+              loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6', () => {
+                loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');
+                loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
+                  loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
+                  loadBranchFix('./mailmate-product-v8.js?v=2', 'mailmateProductV8', () => {
+                    loadBranchFix('./mailmate-live-diff.js?v=2', 'mailmateLiveDiff', () => {
+                      loadBranchStyle('./mailmate-product-v9.css?v=2', 'mailmate-product-v9');
+                      loadBranchFix('./mailmate-product-v9.js?v=3', 'mailmateProductV9', () => {
+                        loadBranchStyle('./mailmate-settings-v1.css?v=1', 'mailmate-settings-v1');
+                        loadBranchFix('./mailmate-settings-v1.js?v=1', 'mailmateSettingsV1');
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  }
+
+  installRestoredUiLayers();
 })();
