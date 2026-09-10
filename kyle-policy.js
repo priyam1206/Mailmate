@@ -345,16 +345,39 @@
   function loadBranchFix(src, marker, onload) {
     if (!hasFullBrowserDom()) return;
     const selector = `script[data-${marker}]`;
-    if (document.querySelector(selector)) {
+    const existing = document.querySelector(selector);
+
+    const continueChain = () => {
       if (typeof onload === 'function') onload();
-      return;
+    };
+
+    if (existing) {
+      const state = existing.getAttribute('data-mailmate-load-state');
+      if (state === 'loaded' || state === 'failed') {
+        continueChain();
+      } else {
+        existing.addEventListener('load', continueChain, { once: true });
+        existing.addEventListener('error', continueChain, { once: true });
+      }
+      return existing;
     }
+
     const script = document.createElement('script');
     script.src = src;
     script.async = false;
     script.setAttribute(`data-${marker}`, '1');
-    if (typeof onload === 'function') script.addEventListener('load', onload, { once: true });
+    script.setAttribute('data-mailmate-load-state', 'loading');
+    script.addEventListener('load', () => {
+      script.setAttribute('data-mailmate-load-state', 'loaded');
+      continueChain();
+    }, { once: true });
+    script.addEventListener('error', () => {
+      script.setAttribute('data-mailmate-load-state', 'failed');
+      console.warn(`[MailMate] optional UI layer failed to load: ${src}`);
+      continueChain();
+    }, { once: true });
     document.head.appendChild(script);
+    return script;
   }
 
   function loadBranchStyle(src, marker) {
@@ -363,6 +386,9 @@
     link.rel = 'stylesheet';
     link.href = src;
     link.setAttribute(`data-${marker}`, '1');
+    link.addEventListener('error', () => {
+      console.warn(`[MailMate] optional UI stylesheet failed to load: ${src}`);
+    }, { once: true });
     document.head.appendChild(link);
   }
 
