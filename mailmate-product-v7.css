@@ -1,0 +1,105 @@
+/* MailMate Product v7 — compact one-view overview and stable attention rows */
+
+/* The one-view briefing should read like a headline, not another dashboard card. */
+#summaryText {
+  display: none !important;
+}
+
+.mailmate-ai-overview {
+  min-height: 0 !important;
+  margin: 10px 0 26px !important;
+  padding: 8px 0 24px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  contain: none !important;
+}
+
+.mailmate-ai-overview .mailmate-ai-overview-head,
+.mailmate-ai-overview .mailmate-ai-meta {
+  display: none !important;
+}
+
+.mailmate-ai-overview .mailmate-ai-copy {
+  max-width: 980px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  font-family: "Space Grotesk", "Plus Jakarta Sans", system-ui, sans-serif !important;
+  font-size: clamp(1.9rem, 3.3vw, 3.25rem) !important;
+  line-height: 1.06 !important;
+  letter-spacing: -0.035em !important;
+  font-weight: 600 !important;
+  text-wrap: balance;
+  color: var(--text) !important;
+}
+
+.mailmate-ai-overview[data-mailmate-v7-tone="urgent"] .mailmate-ai-copy {
+  color: #ef6d73 !important;
+}
+.mailmate-ai-overview[data-mailmate-v7-tone="watch"] .mailmate-ai-copy {
+  color: #d99a22 !important;
+}
+.mailmate-ai-overview[data-mailmate-v7-tone="clear"] .mailmate-ai-copy {
+  color: #57aa7b !important;
+}
+.mailmate-ai-overview[data-mailmate-v7-tone="neutral"] .mailmate-ai-copy {
+  color: var(--text) !important;
+}
+
+[data-theme="dark"] .mailmate-ai-overview[data-mailmate-v7-tone="urgent"] .mailmate-ai-copy {
+  color: #f08086 !important;
+}
+[data-theme="dark"] .mailmate-ai-overview[data-mailmate-v7-tone="watch"] .mailmate-ai-copy {
+  color: #e2aa44 !important;
+}
+[data-theme="dark"] .mailmate-ai-overview[data-mailmate-v7-tone="clear"] .mailmate-ai-copy {
+  color: #76c895 !important;
+}
+
+/* Needs-attention cards must not move when hovered. Selection is enough. */
+.attention-link,
+.attention-main,
+.attention-actions {
+  transform: none !important;
+}
+.attention-link:hover,
+.attention-link:focus-visible {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  transform: none !important;
+  background: transparent !important;
+}
+.attention-main {
+  transition: background-color 130ms ease, border-color 130ms ease !important;
+}
+.attention-main:hover,
+.attention-main:focus-visible {
+  transform: none !important;
+  background: var(--surface-hover) !important;
+}
+[data-theme="dark"] .attention-main:hover,
+[data-theme="dark"] .attention-main:focus-visible {
+  background: #20201f !important;
+}
+
+.mailmate-attention-removing {
+  pointer-events: none;
+  animation: mailmateAttentionOut 160ms ease both !important;
+}
+@keyframes mailmateAttentionOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Kyle knows the active message through structured context; no duplicate subject chip. */
+#mailmateEmailContextChip,
+.mailmate-email-context-chip {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .mailmate-ai-overview .mailmate-ai-copy {
+    font-size: clamp(1.65rem, 8vw, 2.35rem) !important;
+  }
+}
