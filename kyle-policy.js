@@ -8,6 +8,21 @@
       && document.body;
   }
 
+  function normalizeBrandAssets() {
+    if (!hasFullBrowserDom()) return;
+    const mailmateLogo = './assets/images/mailmate_logo.jpg';
+
+    document.querySelectorAll('.brand img, .mailmate-native-boot-logo').forEach(image => {
+      if (image.getAttribute('src') !== mailmateLogo) image.setAttribute('src', mailmateLogo);
+      image.removeAttribute('onerror');
+    });
+
+    document.querySelectorAll('link[rel~="icon"]').forEach(icon => {
+      if (icon.getAttribute('href') !== mailmateLogo) icon.setAttribute('href', mailmateLogo);
+      icon.setAttribute('type', 'image/jpeg');
+    });
+  }
+
   function installNativeBoot() {
     // Policy is also loaded inside lightweight Node VM harnesses. In that
     // environment there is intentionally no full browser DOM, so the product
@@ -300,6 +315,7 @@
     return api;
   }
 
+  normalizeBrandAssets();
   installNativeBoot();
 
   const UI_TOOLS = new Set([
