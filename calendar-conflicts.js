@@ -26,8 +26,12 @@
     return String(event?.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   }
 
+  function sourceOf(event) {
+    return String(event?.source || 'google').trim().toLowerCase();
+  }
+
   function isBlocking(event) {
-    const source = String(event?.source || 'google').toLowerCase();
+    const source = sourceOf(event);
 
     // Derived MailMate deadline/reminder points are identified by metadata,
     // not title wording. A real timed Google event called "Deadline review"
@@ -43,9 +47,19 @@
     const firstMarker = marker(first);
     const secondMarker = marker(second);
     if (firstMarker && secondMarker && firstMarker === secondMarker) return true;
+
     const firstId = String(first?.id || '');
     const secondId = String(second?.id || '');
     if (firstId && secondId && firstId === secondId) return true;
+
+    // Two distinct Google event IDs are authoritative identities. Do not
+    // collapse separate meetings merely because their titles/times match.
+    // Fuzzy title/time matching remains available for Google <-> MailMate
+    // derived representations when a shared marker is unavailable.
+    if (firstId && secondId && firstId !== secondId && sourceOf(first) === 'google' && sourceOf(second) === 'google') {
+      return false;
+    }
+
     if (!normalizedTitle(first) || normalizedTitle(first) !== normalizedTitle(second)) return false;
     const a = interval(first);
     const b = interval(second);
@@ -57,7 +71,7 @@
   function score(event) {
     return [
       isBlocking(event) ? 1 : 0,
-      String(event?.source || 'google').toLowerCase() === 'google' ? 1 : 0,
+      sourceOf(event) === 'google' ? 1 : 0,
       event?.html_link ? 1 : 0
     ];
   }
