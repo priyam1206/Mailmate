@@ -5,25 +5,6 @@ from datetime import datetime, timezone
 
 DERIVED_SOURCES = {'ai', 'deadline', 'email', 'attention', 'work', 'virtual'}
 
-# These are point-in-time actions/reminders, not occupied time. A timestamp such
-# as "Registration Deadline · 8:00 AM" marks the latest time to act; it should
-# not clash with a class/lab/meeting that happens to span the same clock time.
-NON_BLOCKING_TITLE_PATTERNS = (
-    r'\bdeadline\b',
-    r'\bdue\s+(?:date|today|tomorrow|by)\b',
-    r'\blast\s+date\b',
-    r'\bregister(?:ation)?\s+(?:deadline|closes?|ends?|by)\b',
-    r'\bapplications?\s+(?:close|closes|deadline)\b',
-    r'\bapply\s+by\b',
-    r'\bsubmissions?\s+(?:deadline|close|closes|due)\b',
-    r'\bsubmit\s+by\b',
-    r'\bpayment\s+due\b',
-    r'\brenew\s+by\b',
-    r'\brsvp\s+by\b',
-    r'\b(?:form|portal|window)\s+closes?\b',
-    r'\breminder\b',
-)
-
 
 def _parse_datetime(value):
     if not value or len(str(value)) <= 10:
@@ -52,22 +33,24 @@ def _normalized_title(event):
     return re.sub(r'[^a-z0-9]+', ' ', str(event.get('title') or '')).strip().lower()
 
 
+def _source(event):
+    return str(event.get('source') or 'google').strip().lower()
+
+
 def _valid_interval(event):
     start = _parse_datetime(event.get('start'))
     end = _parse_datetime(event.get('end'))
     return (start, end) if start and end and start < end else (None, None)
 
 
-def _looks_like_nonblocking_point(event):
-    if event.get('blocking') is False:
-        return True
-    title = str(event.get('title') or '')
-    return any(re.search(pattern, title, re.I) for pattern in NON_BLOCKING_TITLE_PATTERNS)
-
-
 def is_blocking_event(event):
-    source = str(event.get('source') or 'google').strip().lower()
+    source = _source(event)
     start, end = _valid_interval(event)
+
+    # MailMate-derived deadline/reminder points are metadata-identified and do
+    # not occupy calendar time. Do not infer this from a human event title:
+    # real Google events named "Deadline review" or "Reminder: dentist" can
+    # still be genuine blocking appointments.
     if source in DERIVED_SOURCES:
         return False
     if source != 'google' or event.get('all_day') or not start or not end:
@@ -76,7 +59,7 @@ def is_blocking_event(event):
         return False
     if event.get('transparency') == 'transparent':
         return False
-    if _looks_like_nonblocking_point(event):
+    if event.get('blocking') is False:
         return False
     return True
 
@@ -85,9 +68,24 @@ def _same_logical_event(first, second):
     first_marker, second_marker = _marker(first), _marker(second)
     if first_marker and second_marker and first_marker == second_marker:
         return True
+
     first_id, second_id = str(first.get('id') or ''), str(second.get('id') or '')
     if first_id and second_id and first_id == second_id:
         return True
+
+    # Distinct Google IDs identify distinct calendar objects. They must not be
+    # collapsed just because a user created two meetings with the same title
+    # and nearly identical times. Keep fuzzy title/time matching for
+    # Google <-> MailMate derived representations that lack a shared marker.
+    if (
+        first_id
+        and second_id
+        and first_id != second_id
+        and _source(first) == 'google'
+        and _source(second) == 'google'
+    ):
+        return False
+
     if not _normalized_title(first) or _normalized_title(first) != _normalized_title(second):
         return False
     first_start, first_end = _valid_interval(first)
@@ -104,7 +102,7 @@ def _same_logical_event(first, second):
 def _canonical_score(event):
     return (
         1 if is_blocking_event(event) else 0,
-        1 if str(event.get('source') or 'google').lower() == 'google' else 0,
+        1 if _source(event) == 'google' else 0,
         1 if event.get('html_link') else 0,
     )
 

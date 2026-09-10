@@ -1,11 +1,41 @@
 (function () {
+  function hasFullBrowserDom() {
+    return typeof window !== 'undefined'
+      && typeof document !== 'undefined'
+      && typeof document.createElement === 'function'
+      && document.documentElement
+      && document.head
+      && document.body;
+  }
+
+  function normalizeBrandAssets() {
+    if (!hasFullBrowserDom()) return;
+    const mailmateLogo = './assets/images/mailmate_logo.jpg';
+
+    document.querySelectorAll('.brand img, .mailmate-native-boot-logo').forEach(image => {
+      if (image.getAttribute('src') !== mailmateLogo) image.setAttribute('src', mailmateLogo);
+      image.removeAttribute('onerror');
+    });
+
+    document.querySelectorAll('link[rel~="icon"]').forEach(icon => {
+      if (icon.getAttribute('href') !== mailmateLogo) icon.setAttribute('href', mailmateLogo);
+      icon.setAttribute('type', 'image/jpeg');
+    });
+  }
+
   function installNativeBoot() {
+    // Policy is also loaded inside lightweight Node VM harnesses. In that
+    // environment there is intentionally no full browser DOM, so the product
+    // boot UI must be skipped while KylePolicy remains available for tests.
+    if (!hasFullBrowserDom()) return null;
     if (window.__MAILMATE_NATIVE_BOOT__) return window.MailmateBoot || null;
     window.__MAILMATE_NATIVE_BOOT__ = true;
 
     try {
       const savedTheme = localStorage.getItem('mailmate-theme');
-      if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      const prefersDark = typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
         document.documentElement.setAttribute('data-theme', 'dark');
       }
     } catch (_) {}
@@ -124,8 +154,7 @@
       }
     `;
     document.head.appendChild(style);
-
-    document.body?.classList.add('mailmate-native-boot');
+    document.body.classList.add('mailmate-native-boot');
 
     const boot = document.createElement('div');
     boot.id = 'mailmateNativeBoot';
@@ -135,16 +164,23 @@
     boot.innerHTML = `
       <div class="mailmate-native-boot-inner">
         <div class="mailmate-native-boot-brand">
-          <img class="mailmate-native-boot-logo" src="./assets/images/cs_logo.png" alt="MailMate" onerror="this.src='./assets/images/ciphersquad_logo.jpg'">
+          <img class="mailmate-native-boot-logo" src="./assets/images/mailmate_logo.jpg" alt="MailMate">
           <span>MailMate</span>
         </div>
         <span class="mailmate-native-buffer" aria-hidden="true"></span>
         <p class="mailmate-native-status" id="mailmateNativeBootStatus">Starting MailMate</p>
       </div>
     `;
-    document.body?.appendChild(boot);
+    document.body.appendChild(boot);
 
-    const startedAt = performance.now();
+    const now = () => (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+    const raf = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : callback => setTimeout(callback, 0);
+
+    const startedAt = now();
     const settled = { profile: false, overview: false, calendar: false, health: false };
     let done = false;
     let statusTimer = null;
@@ -159,7 +195,7 @@
       node.classList.add('is-changing');
       statusTimer = setTimeout(() => {
         node.textContent = text;
-        requestAnimationFrame(() => node.classList.remove('is-changing'));
+        raf(() => node.classList.remove('is-changing'));
       }, 105);
     }
 
@@ -186,30 +222,30 @@
         statusNode.textContent = reason === 'timeout' ? 'Opening workspace' : 'Ready';
         statusNode.classList.remove('is-changing');
       }
-      document.body?.classList.remove('mailmate-initial-loading', 'mailmate-boot-lock');
-      document.body?.classList.add('mailmate-live-ready');
+      document.body.classList.remove('mailmate-initial-loading', 'mailmate-boot-lock');
+      document.body.classList.add('mailmate-live-ready');
       document.getElementById('mailmateBootGate')?.remove();
       document.getElementById('mailmateInitialLoader')?.remove();
 
       const reveal = () => {
-        document.body?.classList.remove('mailmate-native-boot');
-        document.body?.classList.add('mailmate-app-ready');
+        document.body.classList.remove('mailmate-native-boot');
+        document.body.classList.add('mailmate-app-ready');
         const gate = document.getElementById('mailmateNativeBoot');
         gate?.classList.add('is-leaving');
         setTimeout(() => gate?.remove(), 320);
       };
-      requestAnimationFrame(() => requestAnimationFrame(reveal));
+      raf(() => raf(reveal));
     }
 
     function maybeFinish() {
-      if (done || !settled.profile || !settled.overview || !settled.calendar || !settled.health) return;
+      if (done || !Object.values(settled).every(Boolean)) return;
       clearTimeout(finishTimer);
       setStatus('Preparing your workspace');
       const waitForStableUi = () => {
         if (done) return;
-        const enoughTime = performance.now() - lastEssentialSettledAt >= 220;
-        if ((enoughTime && uiLooksSettled()) || performance.now() - lastEssentialSettledAt > 1400) {
-          const minDelay = Math.max(0, 420 - (performance.now() - startedAt));
+        const age = now() - lastEssentialSettledAt;
+        if ((age >= 220 && uiLooksSettled()) || age > 1400) {
+          const minDelay = Math.max(0, 420 - (now() - startedAt));
           finishTimer = setTimeout(() => finish('ready'), minDelay);
           return;
         }
@@ -221,51 +257,52 @@
     function mark(name) {
       if (!Object.prototype.hasOwnProperty.call(settled, name)) return;
       settled[name] = true;
-      lastEssentialSettledAt = performance.now();
+      lastEssentialSettledAt = now();
       maybeFinish();
     }
 
-    const baseFetch = window.fetch.bind(window);
-    window.fetch = async function (input, init = {}) {
-      let url;
-      try { url = new URL(typeof input === 'string' ? input : input?.url, window.location.href); }
-      catch (_) { return baseFetch(input, init); }
+    if (typeof window.fetch === 'function' && !window.fetch.__mailmateNativeBoot) {
+      const baseFetch = window.fetch.bind(window);
+      window.fetch = async function (input, init = {}) {
+        let url;
+        try { url = new URL(typeof input === 'string' ? input : input?.url, window.location.href); }
+        catch (_) { return baseFetch(input, init); }
 
-      const method = String(init.method || input?.method || 'GET').toUpperCase();
-      const path = url.pathname;
-      let tracked = null;
-      if (method === 'GET') {
-        if (path === '/api/user/profile') {
-          tracked = 'profile';
-          setStatus('Connecting your Google account');
-        } else if (path === '/api/dashboard/overview') {
-          tracked = 'overview';
-          setStatus('Loading Gmail context');
-        } else if (path === '/api/work/jobs') {
-          setStatus('Checking Kyle Work');
-        } else if (path === '/api/calendar/events') {
-          tracked = 'calendar';
-          setStatus('Loading your calendar');
-        } else if (path === '/api/health') {
-          tracked = 'health';
-          setStatus('Checking local services');
-        } else if (path === '/api/automations') {
-          setStatus('Loading automations');
+        const method = String(init.method || input?.method || 'GET').toUpperCase();
+        const path = url.pathname;
+        let tracked = null;
+        if (method === 'GET') {
+          if (path === '/api/user/profile') {
+            tracked = 'profile';
+            setStatus('Connecting your Google account');
+          } else if (path === '/api/dashboard/overview') {
+            tracked = 'overview';
+            setStatus('Loading Gmail context');
+          } else if (path === '/api/work/jobs') {
+            setStatus('Checking Kyle Work');
+          } else if (path === '/api/calendar/events') {
+            tracked = 'calendar';
+            setStatus('Loading your calendar');
+          } else if (path === '/api/health') {
+            tracked = 'health';
+            setStatus('Checking local services');
+          } else if (path === '/api/automations') {
+            setStatus('Loading automations');
+          }
         }
-      }
 
-      try {
-        const response = await baseFetch(input, init);
-        if (tracked) mark(tracked);
-        return response;
-      } catch (error) {
-        if (tracked) mark(tracked);
-        throw error;
-      }
-    };
-    window.fetch.__mailmateNativeBoot = true;
+        try {
+          const response = await baseFetch(input, init);
+          if (tracked) mark(tracked);
+          return response;
+        } catch (error) {
+          if (tracked) mark(tracked);
+          throw error;
+        }
+      };
+      window.fetch.__mailmateNativeBoot = true;
+    }
 
-    // Never leave the user trapped behind the gate if one optional service stalls.
     setTimeout(() => {
       if (!done) {
         setStatus('Opening workspace');
@@ -278,6 +315,7 @@
     return api;
   }
 
+  normalizeBrandAssets();
   installNativeBoot();
 
   const UI_TOOLS = new Set([
@@ -318,43 +356,103 @@
     return { allowed: false, reason: 'Tool is not in Kyle policy.' };
   }
 
-  window.KylePolicy = { evaluate };
+  if (typeof window !== 'undefined') window.KylePolicy = { evaluate };
 
   function loadBranchFix(src, marker, onload) {
+    if (!hasFullBrowserDom()) return;
+    const selector = `script[data-${marker}]`;
+    const existing = document.querySelector(selector);
+
+    const continueChain = () => {
+      if (typeof onload === 'function') onload();
+    };
+
+    if (existing) {
+      const state = existing.getAttribute('data-mailmate-load-state');
+      if (state === 'loaded' || state === 'failed') {
+        continueChain();
+      } else {
+        let settled = false;
+        let fallbackTimer;
+        const settle = nextState => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(fallbackTimer);
+          existing.removeEventListener('load', handleLoad);
+          existing.removeEventListener('error', handleError);
+          existing.setAttribute('data-mailmate-load-state', nextState);
+          if (nextState === 'failed') {
+            console.warn(`[MailMate] optional UI layer did not settle in time: ${src}`);
+          }
+          continueChain();
+        };
+        const handleLoad = () => settle('loaded');
+        const handleError = () => settle('failed');
+
+        if (existing.readyState === 'loaded' || existing.readyState === 'complete') {
+          settle('loaded');
+        } else {
+          existing.addEventListener('load', handleLoad, { once: true });
+          existing.addEventListener('error', handleError, { once: true });
+          fallbackTimer = setTimeout(() => settle('failed'), 2000);
+        }
+      }
+      return existing;
+    }
+
     const script = document.createElement('script');
     script.src = src;
     script.async = false;
-    script.dataset[marker] = '1';
-    if (typeof onload === 'function') script.addEventListener('load', onload, { once: true });
+    script.setAttribute(`data-${marker}`, '1');
+    script.setAttribute('data-mailmate-load-state', 'loading');
+    script.addEventListener('load', () => {
+      script.setAttribute('data-mailmate-load-state', 'loaded');
+      continueChain();
+    }, { once: true });
+    script.addEventListener('error', () => {
+      script.setAttribute('data-mailmate-load-state', 'failed');
+      console.warn(`[MailMate] optional UI layer failed to load: ${src}`);
+      continueChain();
+    }, { once: true });
     document.head.appendChild(script);
+    return script;
   }
 
   function loadBranchStyle(src, marker) {
-    if (document.querySelector(`link[data-${marker}]`)) return;
+    if (!hasFullBrowserDom() || document.querySelector(`link[data-${marker}]`)) return;
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = src;
     link.setAttribute(`data-${marker}`, '1');
+    link.addEventListener('error', () => {
+      console.warn(`[MailMate] optional UI stylesheet failed to load: ${src}`);
+    }, { once: true });
     document.head.appendChild(link);
   }
 
-  // Branch-only fix stack. Each layer loads after the previous one so wrappers
-  // around fetch/KyleTools are deterministic and easy to review before merge.
-  loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
-    loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
-      loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
-        loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4', () => {
-          loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
-            loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6', () => {
-              loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');
-              loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
-                loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
-                loadBranchFix('./mailmate-product-v8.js?v=2', 'mailmateProductV8', () => {
-                  loadBranchFix('./mailmate-live-diff.js?v=2', 'mailmateLiveDiff', () => {
-                    loadBranchStyle('./mailmate-product-v9.css?v=2', 'mailmate-product-v9');
-                    loadBranchFix('./mailmate-product-v9.js?v=3', 'mailmateProductV9', () => {
-                      loadBranchStyle('./mailmate-settings-v1.css?v=1', 'mailmate-settings-v1');
-                      loadBranchFix('./mailmate-settings-v1.js?v=1', 'mailmateSettingsV1');
+  function installRestoredUiLayers() {
+    if (!hasFullBrowserDom()) return;
+
+    // Restored compatibility/runtime stack from fa9b8d934f. This stays here as
+    // the single dashboard entry point, but only executes in a real browser DOM.
+    // Keep the existing order: later layers depend on wrappers/hooks installed
+    // by earlier ones and the v8/v9 behavior is covered by dashboard markup tests.
+    loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
+      loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
+        loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
+          loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4', () => {
+            loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
+              loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6', () => {
+                loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');
+                loadBranchFix('./mailmate-product-v7.js?v=1', 'mailmateProductV7', () => {
+                  loadBranchStyle('./mailmate-product-v8.css?v=1', 'mailmate-product-v8');
+                  loadBranchFix('./mailmate-product-v8.js?v=2', 'mailmateProductV8', () => {
+                    loadBranchFix('./mailmate-live-diff.js?v=2', 'mailmateLiveDiff', () => {
+                      loadBranchStyle('./mailmate-product-v9.css?v=2', 'mailmate-product-v9');
+                      loadBranchFix('./mailmate-product-v9.js?v=3', 'mailmateProductV9', () => {
+                        loadBranchStyle('./mailmate-settings-v1.css?v=1', 'mailmate-settings-v1');
+                        loadBranchFix('./mailmate-settings-v1.js?v=1', 'mailmateSettingsV1');
+                      });
                     });
                   });
                 });
@@ -364,5 +462,7 @@
         });
       });
     });
-  });
+  }
+
+  installRestoredUiLayers();
 })();

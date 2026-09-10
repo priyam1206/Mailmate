@@ -69,6 +69,42 @@ def test_two_real_overlapping_google_events_create_one_pair():
     assert {item['id'] for item in annotated if item['conflict']} == {'a', 'b'}
 
 
+def test_distinct_same_title_google_events_are_not_deduplicated():
+    annotated, pairs = pairs_for(
+        event('standup-a', title='Standup'),
+        event('standup-b', title='Standup'),
+    )
+    assert len(annotated) == 2
+    assert pairs == [{'a': 'standup-a', 'b': 'standup-b', 'overlapMinutes': 60.0}]
+    assert {item['id'] for item in annotated if item['conflict']} == {'standup-a', 'standup-b'}
+
+
+def test_explicit_blocking_google_deadline_title_still_conflicts():
+    annotated, pairs = pairs_for(
+        event('deadline-review', title='Deadline review', blocking=True),
+        event('meeting', start='2026-09-08T10:30:00+05:30', end='2026-09-08T11:30:00+05:30'),
+    )
+    assert len(pairs) == 1
+    assert {item['id'] for item in annotated if item['conflict']} == {'deadline-review', 'meeting'}
+
+
+def test_explicit_blocking_google_reminder_title_still_conflicts():
+    _, pairs = pairs_for(
+        event('dentist', title='Reminder: dentist appointment', blocking=True),
+        event('standup', start='2026-09-08T10:30:00+05:30', end='2026-09-08T11:30:00+05:30'),
+    )
+    assert len(pairs) == 1
+
+
+def test_explicit_nonblocking_google_event_remains_nonblocking():
+    annotated, pairs = pairs_for(
+        event('placeholder', title='Focus placeholder', blocking=False),
+        event('meeting', start='2026-09-08T10:30:00+05:30', end='2026-09-08T11:30:00+05:30'),
+    )
+    assert pairs == []
+    assert next(item for item in annotated if item['id'] == 'placeholder')['blocking'] is False
+
+
 def test_duplicate_google_and_ai_representations_do_not_conflict():
     annotated, pairs = pairs_for(
         event('google-a', title='Project review', agent_harness={'agent_harness_marker': 'mailmate-7'}),

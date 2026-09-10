@@ -3,45 +3,36 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CipherSquad • Code2Create 7.0</title>
-  <link rel="icon" type="image/png" href="./assets/images/cs_logo.png">
+  <title>MailMate</title>
+  <link rel="icon" type="image/jpeg" href="./assets/images/mailmate_logo.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css?v=3">
   <link rel="stylesheet" href="./landing.css?v=2">
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="./script.js?v=3" defer></script>
+  <script src="./script.js?v=4" defer></script>
   <script src="./landing.js?v=2" defer></script>
 </head>
 <body class="landing-v2">
-  <h1 class="sr-only">MailMate - Code2Create 7.0 Portal</h1>
+  <h1 class="sr-only">MailMate</h1>
 
-  <!-- Ambient floating sakura sparks -->
   <div id="particles" aria-hidden="true"></div>
 
-  <!-- Top-Left Collaboration Badge: Our Logo ✕ Their Logo (No Text) -->
   <header class="top-collab-badge" id="topCollabBadge">
-    <div class="mini-lockup" title="CipherSquad ✕ Code2Create 7.0">
-      <img src="./assets/images/cs_logo.png" alt="CipherSquad Logo" class="badge-logo cs-badge">
-      <span class="badge-x" aria-hidden="true">✕</span>
-      <img src="./assets/images/logo.svg" alt="Code2Create Logo" class="badge-logo c2c-badge">
+    <div class="mini-lockup" title="MailMate">
+      <img src="./assets/images/mailmate_logo.jpg" alt="MailMate logo" class="badge-logo cs-badge">
     </div>
   </header>
 
-  <!-- Fullscreen Interactive Canvas for Tubelight Glitching Dot Logo -->
   <canvas class="dot-logo" id="dotLogo" aria-hidden="true"></canvas>
-  <div class="hero-identity" aria-label="Mailmate by Ciphersquad">
-    <h1>Mailmate</h1>
-    <p>Built by Ciphersquad &middot; Code2Create 7.0</p>
+  <div class="hero-identity" aria-label="MailMate">
+    <h1>MailMate</h1>
+    <p>Private inbox intelligence</p>
   </div>
 
-  <!-- Subtle Scroll Indicator -->
   <div class="scroll-prompt" id="scrollPrompt">
     <span class="prompt-text">Scroll to explore</span>
-    <div class="mouse-icon" aria-hidden="true">
-      <div class="mouse-wheel"></div>
-    </div>
+    <div class="mouse-icon" aria-hidden="true"><div class="mouse-wheel"></div></div>
   </div>
 
   <div class="landing-story" id="landingStory" aria-label="About MailMate">
@@ -58,21 +49,20 @@
           </ul>
         </div>
         <div class="inbox-visual story-reveal story-reveal-late" aria-label="Example intelligent inbox">
-          <header><span>INBOX / LIVE</span><small>20 recent messages</small></header>
-          <article class="mail-row mail-row-hot"><i></i><div><small>NEEDS ATTENTION</small><strong>Operating Systems submission</strong><p>Deadline detected. A reply or action is likely required.</p></div><time>Now</time></article>
-          <article class="mail-row"><i></i><div><small>CONTEXT</small><strong>Lab exam details</strong><p>Useful academic update. Visible without creating unnecessary Work.</p></div><time>12m</time></article>
-          <article class="mail-row mail-row-quiet"><i></i><div><small>INFORMATION</small><strong>Weekly newsletter</strong><p>Readable when you need it, kept out of the action queue.</p></div><time>1h</time></article>
+          <header><span>INBOX / LIVE</span><small>Recent messages</small></header>
+          <article class="mail-row mail-row-hot"><i></i><div><small>NEEDS ATTENTION</small><strong>Submission deadline</strong><p>A nearby deadline and action request were detected.</p></div><time>Now</time></article>
+          <article class="mail-row"><i></i><div><small>CONTEXT</small><strong>Schedule update</strong><p>Useful context stays visible without becoming unnecessary Work.</p></div><time>12m</time></article>
+          <article class="mail-row mail-row-quiet"><i></i><div><small>INFORMATION</small><strong>Weekly update</strong><p>Readable when needed and kept out of the action queue.</p></div><time>1h</time></article>
           <footer><span>Gmail remains the source of truth</span><span class="live-signal"><i></i> Updated</span></footer>
         </div>
       </div>
     </section>
-
     <section class="story-page story-page-kyle" data-story-page="2" aria-labelledby="kyleStoryTitle">
       <div class="story-shell story-grid story-grid-reverse">
         <div class="kyle-visual story-reveal" aria-hidden="true">
           <div class="kyle-cloud"><span></span><span></span><span></span></div>
           <div class="kyle-question"><small>YOU</small><p>What should I handle first today?</p></div>
-          <div class="kyle-answer"><small>KYLE / OVERVIEW</small><strong>Start with the OS submission.</strong><p>It has the nearest deadline. The lab update matters next; the rest of the inbox can wait.</p><div><span>Open email</span><span>Draft reply</span><span>Show schedule</span></div></div>
+          <div class="kyle-answer"><small>KYLE / OVERVIEW</small><strong>Start with the nearest actionable deadline.</strong><p>Kyle can rank the inbox, connect calendar context, and prepare the next step.</p><div><span>Open email</span><span>Draft reply</span><span>Show schedule</span></div></div>
         </div>
         <div class="story-copy story-reveal story-reveal-late">
           <p class="story-index">02 / KYLE</p>
@@ -92,8 +82,8 @@
         </div>
         <ol class="work-flow story-reveal story-reveal-late">
           <li class="is-done"><span>01</span><small>DETECT</small><strong>Find the actual request</strong><p>Separate actionable mail from useful context and noise.</p></li>
-          <li class="is-done"><span>02</span><small>PLAN</small><strong>Gather what matters</strong><p>Resolve Gmail, Calendar and existing Work state.</p></li>
-          <li class="is-live"><span>03</span><small>PREPARE</small><strong>Build the result</strong><p>Show progress while drafts, files and next steps are prepared.</p></li>
+          <li class="is-done"><span>02</span><small>PLAN</small><strong>Gather what matters</strong><p>Resolve Gmail, Calendar, and existing Work state.</p></li>
+          <li class="is-live"><span>03</span><small>PREPARE</small><strong>Build the result</strong><p>Show progress while drafts, files, and next steps are prepared.</p></li>
           <li><span>04</span><small>APPROVE</small><strong>Keep human control</strong><p>Review risky actions before anything leaves your account.</p></li>
         </ol>
       </div>
@@ -104,7 +94,7 @@
         <div class="story-copy story-reveal">
           <p class="story-index">04 / CONTEXT</p>
           <h2 id="contextStoryTitle">Useful continuity, not a second mailbox.</h2>
-          <p class="story-lede">Gmail remains authoritative. MailMate keeps compact, user-scoped context for the interface, Kyle, Work and Calendar, avoiding a full inbox reprocess on every visit.</p>
+          <p class="story-lede">Gmail remains authoritative. MailMate keeps compact, user-scoped context for the interface, Kyle, Work, and Calendar, avoiding a full inbox reprocess on every visit.</p>
           <p class="story-note">Provider separation keeps interactive intelligence and local Work execution on their intended paths.</p>
         </div>
         <div class="context-visual story-reveal story-reveal-late" aria-label="MailMate context architecture">
@@ -123,10 +113,10 @@
         <div class="story-copy story-copy-center story-reveal">
           <p class="story-index">05 / SYSTEM</p>
           <h2 id="systemStoryTitle">One calm workspace. Multiple intelligence layers.</h2>
-          <p class="story-lede">Google services, Gemini, local Work compute, speech and durable state meet in one observable system built by Ciphersquad.</p>
+          <p class="story-lede">Google services, Gemini, local Work compute, speech, and durable state meet in one observable MailMate system.</p>
         </div>
         <div class="system-map story-reveal story-reveal-late" aria-label="MailMate system components">
-          <div class="system-core"><img src="./assets/images/cs_logo.png" alt=""><strong>MAILMATE</strong><small>CIPHERSQUAD</small></div>
+          <div class="system-core"><img src="./assets/images/mailmate_logo.jpg" alt=""><strong>MAILMATE</strong><small>PRIVATE AI WORKSPACE</small></div>
           <span style="--slot:0">Gmail</span><span style="--slot:1">Calendar</span><span style="--slot:2">Gemini</span><span style="--slot:3">Kyle</span><span style="--slot:4">Work Agent</span><span style="--slot:5">Supabase</span>
         </div>
         <p class="final-line story-reveal">Connect when you are ready. Authentication remains within reach at the top right.</p>
@@ -143,27 +133,15 @@
     <button type="button" data-story-target="5" aria-label="System"><span>05</span><b>System</b></button>
   </nav>
 
-  <!-- Google Auth Login Section (Revealed on Scroll with Glassmorphism) -->
-  <section class="auth-container" id="authContainer" aria-label="Participant Authentication">
+  <section class="auth-container" id="authContainer" aria-label="Google authentication">
     <div class="auth-card" id="authCard">
-      <!-- Card Glow Accent -->
       <div class="card-glow" aria-hidden="true"></div>
-
-      <!-- Mini Dual Branding -->
-      <div class="auth-brand">
-        <img src="./assets/images/cs_logo.png" alt="CipherSquad" class="auth-mini-logo cs-mini">
-        <span class="auth-mini-x" aria-hidden="true">✕</span>
-        <img src="./assets/images/logo.svg" alt="Code2Create 7.0" class="auth-mini-logo c2c-mini">
-      </div>
-
-      <!-- Header Content -->
+      <div class="auth-brand"><img src="./assets/images/mailmate_logo.jpg" alt="MailMate" class="auth-mini-logo cs-mini"></div>
       <div class="auth-header">
         <div class="auth-badge">MEET KYLE</div>
         <h2 class="auth-title" id="authTitle">Connect your inbox.</h2>
-        <p class="auth-subtitle" id="authSubtitle">Kyle finds what matters, prepares the work and keeps you in control. Gmail stays the source of truth.</p>
+        <p class="auth-subtitle" id="authSubtitle">Kyle finds what matters, prepares the work, and keeps you in control. Gmail stays the source of truth.</p>
       </div>
-
-      <!-- Google Sign In Button -->
       <div class="auth-actions">
         <button class="google-auth-btn" id="googleAuthBtn" type="button">
           <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -175,94 +153,11 @@
           <span class="btn-text" id="btnText">Continue with Google</span>
           <div class="btn-spinner" id="btnSpinner" aria-hidden="true"></div>
         </button>
-
         <div class="auth-status-msg" id="authStatusMsg" aria-live="polite"></div>
-
       </div>
     </div>
   </section>
 
-  <main class="mail-app" id="mailApp" aria-label="Mailmate Email Client">
-    <aside class="mail-sidebar">
-      <div class="profile-panel">
-        <img class="profile-photo" id="profilePhoto" src="./assets/images/cs_logo.png" alt="Signed-in profile">
-        <div>
-          <p class="profile-kicker">Signed in as</p>
-          <h2 id="profileName">Google User</h2>
-          <p id="profileEmail">Connected Workspace</p>
-        </div>
-      </div>
-
-      <nav class="mail-nav" aria-label="Mailbox folders">
-        <button class="mail-nav-item is-active" type="button">Inbox <span id="inboxCount">0</span></button>
-        <button class="mail-nav-item" type="button">Flagged <span>3</span></button>
-        <button class="mail-nav-item" type="button">Actions <span id="actionCount">4</span></button>
-      </nav>
-
-      <button class="sign-out-btn" id="signOutBtn" type="button">Disconnect Google</button>
-    </aside>
-
-    <section class="inbox-panel" aria-label="Inbox messages">
-      <div class="panel-header">
-        <div>
-          <p class="section-kicker">Live Gmail</p>
-          <h2>Inbox</h2>
-        </div>
-        <button class="refresh-btn" id="refreshInboxBtn" type="button">Refresh</button>
-      </div>
-      <div class="message-list" id="messageList"></div>
-    </section>
-
-    <section class="thread-panel" aria-label="Selected email thread">
-      <div class="panel-header">
-        <div>
-          <p class="section-kicker">Selected Thread</p>
-          <h2 id="threadTitle">Client Portal v2</h2>
-        </div>
-        <span class="risk-pill" id="riskPill">High Risk</span>
-      </div>
-      <article class="thread-content" id="threadContent"></article>
-    </section>
-
-    <aside class="agent-panel" aria-label="Agent insights">
-      <div class="panel-header">
-        <div>
-          <p class="section-kicker">MailMate</p>
-          <h2>Insights</h2>
-        </div>
-        <span class="live-dot">Live</span>
-      </div>
-
-      <div class="insight-grid">
-        <div class="metric-card"><strong>3</strong><span>Tasks</span></div>
-        <div class="metric-card"><strong>2</strong><span>Dependencies</span></div>
-        <div class="metric-card danger"><strong>1</strong><span>Blocker</span></div>
-        <div class="metric-card warn"><strong>1</strong><span>Deadline Risk</span></div>
-      </div>
-
-      <div class="dependency-graph" id="dependencyGraph">
-        <div class="graph-node danger">Schema Approval<br><span>Sreyanko</span></div>
-        <div class="graph-edge"></div>
-        <div class="graph-node warn">Backend Deployment<br><span>Kartikay</span></div>
-        <div class="graph-edge"></div>
-        <div class="graph-node warn">Frontend Integration<br><span>Priyam</span></div>
-        <div class="graph-edge"></div>
-        <div class="graph-node">Client Demo<br><span>Wednesday</span></div>
-      </div>
-
-      <div class="actions-panel">
-        <h3>Proposed Actions</h3>
-        <label><input type="checkbox" checked> Remind Sreyanko</label>
-        <label><input type="checkbox" checked> Create approval task</label>
-        <label><input type="checkbox" checked> Notify Kartikay</label>
-        <label><input type="checkbox" checked> Draft response</label>
-        <button class="approve-btn" id="approveActionsBtn" type="button">Approve & Execute</button>
-        <p class="approval-status" id="approvalStatus">Awaiting human approval</p>
-      </div>
-    </aside>
-  </main>
-
-  <!-- Scroll spacer that enables scroll/swipe gestures -->
   <div class="scroll-spacer" aria-hidden="true"></div>
 </body>
 </html>

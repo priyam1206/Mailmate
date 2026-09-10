@@ -38,6 +38,31 @@ const overlapping = CalendarConflicts.annotate([
   event('b', { start: '2026-09-08T10:30:00+05:30', end: '2026-09-08T11:30:00+05:30' })
 ]);
 assert.deepEqual(overlapping.pairs, [{ a: 'a', b: 'b', overlapMinutes: 30 }]);
+
+// Distinct real Google events remain separate even when a user gives them the
+// same title and schedule. Their different Google IDs are authoritative.
+const sameTitleOverlap = CalendarConflicts.annotate([
+  event('standup-a', { title: 'Standup' }),
+  event('standup-b', { title: 'Standup' })
+]);
+assert.equal(sameTitleOverlap.events.length, 2);
+assert.deepEqual(sameTitleOverlap.pairs, [{ a: 'standup-a', b: 'standup-b', overlapMinutes: 60 }]);
+
+// Human Google events remain blocking even when their title contains words
+// that MailMate uses for derived deadline/reminder points.
+assert.equal(pairCount([
+  event('deadline-review', { title: 'Deadline review', blocking: true }),
+  event('meeting', { start: '2026-09-08T10:30:00+05:30', end: '2026-09-08T11:30:00+05:30' })
+]), 1);
+assert.equal(pairCount([
+  event('dentist', { title: 'Reminder: dentist appointment', blocking: true }),
+  event('standup', { start: '2026-09-08T10:30:00+05:30', end: '2026-09-08T11:30:00+05:30' })
+]), 1);
+assert.equal(pairCount([
+  event('nonblocking', { title: 'Focus placeholder', blocking: false }),
+  event('meeting', { start: '2026-09-08T10:30:00+05:30', end: '2026-09-08T11:30:00+05:30' })
+]), 0);
+
 assert.equal(pairCount([
   event('google-a', { title: 'Project review', agent_harness: { agent_harness_marker: 'mailmate-7' } }),
   event('ai-a', { title: 'Project review', source: 'ai', marker: 'mailmate-7' })

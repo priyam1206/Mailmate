@@ -4,21 +4,6 @@
   if (root) root.CalendarConflicts = api;
 })(typeof window !== 'undefined' ? window : globalThis, function () {
   const DERIVED_SOURCES = new Set(['ai', 'deadline', 'email', 'attention', 'work', 'virtual']);
-  const NON_BLOCKING_TITLE_PATTERNS = [
-    /\bdeadline\b/i,
-    /\bdue\s+(?:date|today|tomorrow|by)\b/i,
-    /\blast\s+date\b/i,
-    /\bregister(?:ation)?\s+(?:deadline|closes?|ends?|by)\b/i,
-    /\bapplications?\s+(?:close|closes|deadline)\b/i,
-    /\bapply\s+by\b/i,
-    /\bsubmissions?\s+(?:deadline|close|closes|due)\b/i,
-    /\bsubmit\s+by\b/i,
-    /\bpayment\s+due\b/i,
-    /\brenew\s+by\b/i,
-    /\brsvp\s+by\b/i,
-    /\b(?:form|portal|window)\s+closes?\b/i,
-    /\breminder\b/i
-  ];
 
   function parseDate(value) {
     if (!value || String(value).length <= 10) return null;
@@ -41,18 +26,20 @@
     return String(event?.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   }
 
-  function looksLikeNonBlockingPoint(event) {
-    if (event?.blocking === false) return true;
-    const title = String(event?.title || '');
-    return NON_BLOCKING_TITLE_PATTERNS.some(pattern => pattern.test(title));
+  function sourceOf(event) {
+    return String(event?.source || 'google').trim().toLowerCase();
   }
 
   function isBlocking(event) {
-    const source = String(event?.source || 'google').toLowerCase();
+    const source = sourceOf(event);
+
+    // Derived MailMate deadline/reminder points are identified by metadata,
+    // not title wording. A real timed Google event called "Deadline review"
+    // or "Reminder: dentist" must still be allowed to conflict normally.
     if (DERIVED_SOURCES.has(source)) return false;
     if (source !== 'google' || event?.all_day || !interval(event)) return false;
     if (event?.status === 'cancelled' || event?.cancelled === true || event?.transparency === 'transparent') return false;
-    if (looksLikeNonBlockingPoint(event)) return false;
+    if (event?.blocking === false) return false;
     return true;
   }
 
@@ -60,9 +47,19 @@
     const firstMarker = marker(first);
     const secondMarker = marker(second);
     if (firstMarker && secondMarker && firstMarker === secondMarker) return true;
+
     const firstId = String(first?.id || '');
     const secondId = String(second?.id || '');
     if (firstId && secondId && firstId === secondId) return true;
+
+    // Two distinct Google event IDs are authoritative identities. Do not
+    // collapse separate meetings merely because their titles/times match.
+    // Fuzzy title/time matching remains available for Google <-> MailMate
+    // derived representations when a shared marker is unavailable.
+    if (firstId && secondId && firstId !== secondId && sourceOf(first) === 'google' && sourceOf(second) === 'google') {
+      return false;
+    }
+
     if (!normalizedTitle(first) || normalizedTitle(first) !== normalizedTitle(second)) return false;
     const a = interval(first);
     const b = interval(second);
@@ -74,7 +71,7 @@
   function score(event) {
     return [
       isBlocking(event) ? 1 : 0,
-      String(event?.source || 'google').toLowerCase() === 'google' ? 1 : 0,
+      sourceOf(event) === 'google' ? 1 : 0,
       event?.html_link ? 1 : 0
     ];
   }
