@@ -6,19 +6,6 @@
     'researching', 'generating', 'drafting_reply', 'creating_files',
     'verifying', 'preparing', 'working'
   ]);
-  const MAILMATE_LOGO = './assets/images/mailmate_logo.jpg';
-
-  function normalizeBrandAssets() {
-    document.querySelectorAll('.brand img, .mailmate-native-boot-logo').forEach(image => {
-      if (image.getAttribute('src') !== MAILMATE_LOGO) image.setAttribute('src', MAILMATE_LOGO);
-      image.removeAttribute('onerror');
-    });
-
-    document.querySelectorAll('link[rel~="icon"]').forEach(icon => {
-      if (icon.getAttribute('href') !== MAILMATE_LOGO) icon.setAttribute('href', MAILMATE_LOGO);
-      icon.setAttribute('type', 'image/jpeg');
-    });
-  }
 
   async function json(url) {
     const r = await fetch(url, { cache: 'no-store' });
@@ -105,13 +92,9 @@
   }
 
   function start() {
-    normalizeBrandAssets();
     refreshCompactCompute();
     setInterval(refreshCompactCompute, 4000);
-    window.addEventListener('focus', () => {
-      normalizeBrandAssets();
-      refreshCompactCompute();
-    });
+    window.addEventListener('focus', refreshCompactCompute);
     window.addEventListener('mailmate:work-refresh', refreshCompactCompute);
   }
 
