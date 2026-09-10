@@ -10,7 +10,7 @@
 
   function normalizeBrandAssets() {
     if (!hasFullBrowserDom()) return;
-    const mailmateLogo = './assets/images/mailmate_logo.jpg';
+    const mailmateLogo = './assets/images/mailmate_logo.png';
 
     document.querySelectorAll('.brand img, .mailmate-native-boot-logo').forEach(image => {
       if (image.getAttribute('src') !== mailmateLogo) image.setAttribute('src', mailmateLogo);
@@ -19,7 +19,7 @@
 
     document.querySelectorAll('link[rel~="icon"]').forEach(icon => {
       if (icon.getAttribute('href') !== mailmateLogo) icon.setAttribute('href', mailmateLogo);
-      icon.setAttribute('type', 'image/jpeg');
+      icon.setAttribute('type', 'image/png');
     });
   }
 
@@ -91,19 +91,20 @@
       }
       .mailmate-native-boot-brand {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 11px;
-        margin-bottom: 26px;
+        gap: 14px;
+        margin-bottom: 28px;
         font-family: "Space Grotesk", "Plus Jakarta Sans", system-ui, sans-serif;
-        font-size: 1.08rem;
+        font-size: 1.55rem;
         font-weight: 700;
-        letter-spacing: -.025em;
+        letter-spacing: 0;
       }
       .mailmate-native-boot-logo {
-        width: 52px;
-        height: 52px;
+        width: 116px;
+        height: 108px;
         object-fit: contain;
-        filter: drop-shadow(0 8px 22px rgba(0,0,0,.14));
+        filter: drop-shadow(0 12px 30px rgba(0,0,0,.2));
       }
       .mailmate-native-buffer {
         width: 31px;
@@ -164,7 +165,7 @@
     boot.innerHTML = `
       <div class="mailmate-native-boot-inner">
         <div class="mailmate-native-boot-brand">
-          <img class="mailmate-native-boot-logo" src="./assets/images/mailmate_logo.jpg" alt="MailMate">
+          <img class="mailmate-native-boot-logo" src="./assets/images/mailmate_logo.png" alt="MailMate">
           <span>MailMate</span>
         </div>
         <span class="mailmate-native-buffer" aria-hidden="true"></span>

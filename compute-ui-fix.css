@@ -47,24 +47,25 @@
 
 /* MailMate brand mark. Do not substitute the legacy Code2Create SVG. */
 .mailmate-native-boot-logo {
-  content: url('./assets/images/mailmate_logo.jpg') !important;
-  width: 78px !important;
-  height: 78px !important;
+  content: url('./assets/images/mailmate_logo.png') !important;
+  width: 116px !important;
+  height: 108px !important;
   object-fit: contain !important;
   background: transparent !important;
   filter: none !important;
 }
 
 .mailmate-native-boot-brand {
-  gap: 16px !important;
-  margin-bottom: 30px !important;
-  font-size: 1.35rem !important;
+  flex-direction: column !important;
+  gap: 14px !important;
+  margin-bottom: 28px !important;
+  font-size: 1.55rem !important;
   font-weight: 700 !important;
-  letter-spacing: -.03em !important;
+  letter-spacing: 0 !important;
 }
 
 .brand img {
-  content: url('./assets/images/mailmate_logo.jpg') !important;
+  content: url('./assets/images/mailmate_logo.png') !important;
   width: 40px !important;
   height: 40px !important;
   object-fit: contain !important;

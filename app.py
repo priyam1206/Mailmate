@@ -363,7 +363,7 @@ def health():
             "dashboard.html": (BASE_DIR / "dashboard.html").is_file(),
             "dashboard.css": (BASE_DIR / "dashboard.css").is_file(),
             "dashboard.js": (BASE_DIR / "dashboard.js").is_file(),
-            "mailmate_logo.jpg": (BASE_DIR / "assets" / "images" / "mailmate_logo.jpg").is_file()
+            "mailmate_logo.png": (BASE_DIR / "assets" / "images" / "mailmate_logo.png").is_file()
         },
         "projectRoot": str(BASE_DIR),
         "message": "Flask Backend Running!"

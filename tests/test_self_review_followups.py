@@ -13,9 +13,10 @@ def test_legacy_logo_assets_and_references_are_removed():
     images = ROOT / 'assets' / 'images'
     assert not (images / 'logo.svg').exists()
     assert not (images / 'cs_logo.png').exists()
+    assert not (images / 'mailmate_logo.jpg').exists()
 
     app = (ROOT / 'app.py').read_text(encoding='utf-8')
-    assert '"mailmate_logo.jpg":' in app
+    assert '"mailmate_logo.png":' in app
     assert '"cs_logo.png":' not in app
     assert '"logo.svg":' not in app
 
@@ -23,13 +24,15 @@ def test_legacy_logo_assets_and_references_are_removed():
         content = (ROOT / relative).read_text(encoding='utf-8')
         assert 'cs_logo.png' not in content
         assert 'logo.svg' not in content
-        assert './assets/images/mailmate_logo.jpg' in content
+        assert './assets/images/mailmate_logo.png' in content
 
 
 def test_policy_normalizes_visible_branding_to_mailmate_asset():
     policy = (ROOT / 'kyle-policy.js').read_text(encoding='utf-8')
     assert "function normalizeBrandAssets()" in policy
-    assert "const mailmateLogo = './assets/images/mailmate_logo.jpg';" in policy
+    assert "const mailmateLogo = './assets/images/mailmate_logo.png';" in policy
+    assert 'flex-direction: column;' in policy
+    assert 'width: 116px;' in policy
     assert "document.querySelectorAll('link[rel~=\"icon\"]')" in policy
     assert 'normalizeBrandAssets();' in policy
 

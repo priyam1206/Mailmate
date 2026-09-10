@@ -333,7 +333,7 @@ def test_product_v9_history_observer_is_idempotent():
     js = (ROOT / 'mailmate-product-v9.js').read_text(encoding='utf-8')
     policy = (ROOT / 'kyle-policy.js').read_text(encoding='utf-8')
 
-    assert 'kyle-policy.js?v=26' in html
+    assert 'kyle-policy.js?v=27' in html
     assert 'if (toggle.innerHTML !== nextIcon) toggle.innerHTML = nextIcon;' in js
     assert "toggle.getAttribute('aria-label') !== nextTitle" in js
     assert "const mount = document.getElementById('kyleMount');" in js
