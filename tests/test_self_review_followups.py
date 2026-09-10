@@ -14,6 +14,11 @@ def test_legacy_logo_assets_and_references_are_removed():
     assert not (images / 'logo.svg').exists()
     assert not (images / 'cs_logo.png').exists()
 
+    app = (ROOT / 'app.py').read_text(encoding='utf-8')
+    assert '"mailmate_logo.jpg":' in app
+    assert '"cs_logo.png":' not in app
+    assert '"logo.svg":' not in app
+
     for relative in ('index.html', 'dashboard.html'):
         content = (ROOT / relative).read_text(encoding='utf-8')
         assert 'cs_logo.png' not in content
