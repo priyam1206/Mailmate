@@ -33,6 +33,10 @@ def _normalized_title(event):
     return re.sub(r'[^a-z0-9]+', ' ', str(event.get('title') or '')).strip().lower()
 
 
+def _source(event):
+    return str(event.get('source') or 'google').strip().lower()
+
+
 def _valid_interval(event):
     start = _parse_datetime(event.get('start'))
     end = _parse_datetime(event.get('end'))
@@ -40,7 +44,7 @@ def _valid_interval(event):
 
 
 def is_blocking_event(event):
-    source = str(event.get('source') or 'google').strip().lower()
+    source = _source(event)
     start, end = _valid_interval(event)
 
     # MailMate-derived deadline/reminder points are metadata-identified and do
@@ -64,9 +68,24 @@ def _same_logical_event(first, second):
     first_marker, second_marker = _marker(first), _marker(second)
     if first_marker and second_marker and first_marker == second_marker:
         return True
+
     first_id, second_id = str(first.get('id') or ''), str(second.get('id') or '')
     if first_id and second_id and first_id == second_id:
         return True
+
+    # Distinct Google IDs identify distinct calendar objects. They must not be
+    # collapsed just because a user created two meetings with the same title
+    # and nearly identical times. Keep fuzzy title/time matching for
+    # Google <-> MailMate derived representations that lack a shared marker.
+    if (
+        first_id
+        and second_id
+        and first_id != second_id
+        and _source(first) == 'google'
+        and _source(second) == 'google'
+    ):
+        return False
+
     if not _normalized_title(first) or _normalized_title(first) != _normalized_title(second):
         return False
     first_start, first_end = _valid_interval(first)
@@ -83,7 +102,7 @@ def _same_logical_event(first, second):
 def _canonical_score(event):
     return (
         1 if is_blocking_event(event) else 0,
-        1 if str(event.get('source') or 'google').lower() == 'google' else 0,
+        1 if _source(event) == 'google' else 0,
         1 if event.get('html_link') else 0,
     )
 
