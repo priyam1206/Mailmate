@@ -45,9 +45,9 @@
   background: #fffbeb !important;
 }
 
-/* MailMate brand mark: use the transparent SVG everywhere the boot gate/sidebar expose the logo. */
+/* MailMate brand mark. Do not substitute the legacy Code2Create SVG. */
 .mailmate-native-boot-logo {
-  content: url('./assets/images/logo.svg') !important;
+  content: url('./assets/images/mailmate_logo.jpg') !important;
   width: 78px !important;
   height: 78px !important;
   object-fit: contain !important;
@@ -64,7 +64,7 @@
 }
 
 .brand img {
-  content: url('./assets/images/logo.svg') !important;
+  content: url('./assets/images/mailmate_logo.jpg') !important;
   width: 40px !important;
   height: 40px !important;
   object-fit: contain !important;
