@@ -69,6 +69,16 @@ def test_two_real_overlapping_google_events_create_one_pair():
     assert {item['id'] for item in annotated if item['conflict']} == {'a', 'b'}
 
 
+def test_distinct_same_title_google_events_are_not_deduplicated():
+    annotated, pairs = pairs_for(
+        event('standup-a', title='Standup'),
+        event('standup-b', title='Standup'),
+    )
+    assert len(annotated) == 2
+    assert pairs == [{'a': 'standup-a', 'b': 'standup-b', 'overlapMinutes': 60.0}]
+    assert {item['id'] for item in annotated if item['conflict']} == {'standup-a', 'standup-b'}
+
+
 def test_explicit_blocking_google_deadline_title_still_conflicts():
     annotated, pairs = pairs_for(
         event('deadline-review', title='Deadline review', blocking=True),
