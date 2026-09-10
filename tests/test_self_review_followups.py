@@ -32,9 +32,19 @@ def test_policy_normalizes_visible_branding_to_mailmate_asset():
 def test_restored_loader_waits_for_existing_scripts_and_survives_failures():
     policy = (ROOT / 'kyle-policy.js').read_text(encoding='utf-8')
     assert "data-mailmate-load-state" in policy
-    assert "existing.addEventListener('load', continueChain" in policy
-    assert "existing.addEventListener('error', continueChain" in policy
+    assert "existing.readyState === 'loaded' || existing.readyState === 'complete'" in policy
+    assert "existing.addEventListener('load', handleLoad" in policy
+    assert "existing.addEventListener('error', handleError" in policy
+    assert "fallbackTimer = setTimeout(() => settle('failed'), 2000)" in policy
+    assert "if (settled) return;" in policy
     assert "optional UI layer failed to load" in policy
     assert "continueChain();" in policy
     assert "mailmate-product-v8.js?v=2" in policy
     assert "mailmate-product-v9.js?v=3" in policy
+
+
+def test_overview_deduper_preserves_distinct_google_event_ids():
+    dashboard = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
+    assert "itemId && existingId && itemId !== existingId" in dashboard
+    assert "String(item.source || 'google').toLowerCase() === 'google'" in dashboard
+    assert "String(existing.source || 'google').toLowerCase() === 'google'" in dashboard

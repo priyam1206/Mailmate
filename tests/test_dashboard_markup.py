@@ -33,7 +33,7 @@ def test_mail_composer_allows_clarification_without_tool_failure():
 
 def test_inbox_hides_unattached_work_and_display_only_noise():
     js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
-    assert 'dashboard.js?v=44' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    assert 'dashboard.js?v=45' in (ROOT / 'dashboard.html').read_text(encoding='utf-8')
     assert 'Safe for local AI overview' not in js
     assert 'Kyle will prepare a Work item for this email on the next sync' not in js
     assert "if (work.state === 'eligible') return '';" in js
@@ -333,7 +333,7 @@ def test_product_v9_history_observer_is_idempotent():
     js = (ROOT / 'mailmate-product-v9.js').read_text(encoding='utf-8')
     policy = (ROOT / 'kyle-policy.js').read_text(encoding='utf-8')
 
-    assert 'kyle-policy.js?v=25' in html
+    assert 'kyle-policy.js?v=26' in html
     assert 'if (toggle.innerHTML !== nextIcon) toggle.innerHTML = nextIcon;' in js
     assert "toggle.getAttribute('aria-label') !== nextTitle" in js
     assert "const mount = document.getElementById('kyleMount');" in js

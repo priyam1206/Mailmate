@@ -2206,6 +2206,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const duplicateIndex = result.findIndex(existing => {
         const existingMarker = existing.agent_harness?.agent_harness_marker || existing.marker || '';
         if (marker && existingMarker && marker === existingMarker) return true;
+        const itemId = String(item.id || '').trim();
+        const existingId = String(existing.id || '').trim();
+        if (itemId && existingId && itemId === existingId) return true;
+        if (itemId && existingId && itemId !== existingId
+          && String(item.source || 'google').toLowerCase() === 'google'
+          && String(existing.source || 'google').toLowerCase() === 'google') {
+          return false;
+        }
         if (Math.abs((existing.parsedStart?.getTime?.() || 0) - start) > 15 * 60 * 1000) return false;
         const other = words(existing.title);
         const shared = [...tokens].filter(token => other.has(token)).length;

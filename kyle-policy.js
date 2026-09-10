@@ -372,8 +372,30 @@
       if (state === 'loaded' || state === 'failed') {
         continueChain();
       } else {
-        existing.addEventListener('load', continueChain, { once: true });
-        existing.addEventListener('error', continueChain, { once: true });
+        let settled = false;
+        let fallbackTimer;
+        const settle = nextState => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(fallbackTimer);
+          existing.removeEventListener('load', handleLoad);
+          existing.removeEventListener('error', handleError);
+          existing.setAttribute('data-mailmate-load-state', nextState);
+          if (nextState === 'failed') {
+            console.warn(`[MailMate] optional UI layer did not settle in time: ${src}`);
+          }
+          continueChain();
+        };
+        const handleLoad = () => settle('loaded');
+        const handleError = () => settle('failed');
+
+        if (existing.readyState === 'loaded' || existing.readyState === 'complete') {
+          settle('loaded');
+        } else {
+          existing.addEventListener('load', handleLoad, { once: true });
+          existing.addEventListener('error', handleError, { once: true });
+          fallbackTimer = setTimeout(() => settle('failed'), 2000);
+        }
       }
       return existing;
     }
