@@ -39,6 +39,15 @@ const overlapping = CalendarConflicts.annotate([
 ]);
 assert.deepEqual(overlapping.pairs, [{ a: 'a', b: 'b', overlapMinutes: 30 }]);
 
+// Distinct real Google events remain separate even when a user gives them the
+// same title and schedule. Their different Google IDs are authoritative.
+const sameTitleOverlap = CalendarConflicts.annotate([
+  event('standup-a', { title: 'Standup' }),
+  event('standup-b', { title: 'Standup' })
+]);
+assert.equal(sameTitleOverlap.events.length, 2);
+assert.deepEqual(sameTitleOverlap.pairs, [{ a: 'standup-a', b: 'standup-b', overlapMinutes: 60 }]);
+
 // Human Google events remain blocking even when their title contains words
 // that MailMate uses for derived deadline/reminder points.
 assert.equal(pairCount([
