@@ -11,7 +11,6 @@
   const STARTUP_KEY = 'mailmate-startup-page';
   const INBOX_VIEW_KEY = 'mailmate-default-inbox-view';
   const LAST_PAGE_KEY = 'mailmate-last-page';
-  const mediaDark = window.matchMedia?.('(prefers-color-scheme: dark)');
 
   function read(key, fallback) {
     try {
@@ -28,21 +27,21 @@
 
   function themeMode() {
     const explicit = read(THEME_MODE_KEY, '');
-    if (['system', 'dark', 'light'].includes(explicit)) return explicit;
+    if (explicit === 'dark' || explicit === 'light') return explicit;
+    if (explicit === 'system') return 'dark';
     const legacy = read('mailmate-theme', '');
     if (legacy === 'dark' || legacy === 'light') return legacy;
-    return 'system';
+    return 'dark';
   }
 
   function applyTheme(mode = themeMode()) {
     write(THEME_MODE_KEY, mode);
-    const dark = mode === 'dark' || (mode === 'system' && Boolean(mediaDark?.matches));
+    const dark = mode !== 'light';
     if (dark) document.documentElement.setAttribute('data-theme', 'dark');
     else document.documentElement.removeAttribute('data-theme');
 
     try {
-      if (mode === 'system') localStorage.removeItem('mailmate-theme');
-      else localStorage.setItem('mailmate-theme', mode);
+      localStorage.setItem('mailmate-theme', dark ? 'dark' : 'light');
     } catch (_) {}
 
     const legacy = document.getElementById('settingDarkMode');
@@ -203,7 +202,7 @@
         [THEME_MODE_KEY, DENSITY_KEY, FONT_KEY, MOTION_KEY, STARTUP_KEY, INBOX_VIEW_KEY, LAST_PAGE_KEY, 'mailmate-theme'].forEach(key => {
           try { localStorage.removeItem(key); } catch (_) {}
         });
-        applyTheme('system');
+        applyTheme('dark');
         applyVisualPreferences();
         syncAllSettings();
       }
@@ -275,8 +274,8 @@
     grid.className = 'settings-modern-grid';
 
     const appearanceCard = createCard('Appearance', 'Tune how MailMate looks and moves.', 'settings-card-appearance');
-    appearanceCard.appendChild(createChoiceRow('Theme', 'Follow your device or choose a fixed theme.', [
-      { value: 'system', label: 'System' }, { value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }
+    appearanceCard.appendChild(createChoiceRow('Theme', 'Choose the workspace theme.', [
+      { value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }
     ], 'setting-theme'));
     appearanceCard.appendChild(createChoiceRow('Density', 'Adjust spacing across the workspace.', [
       { value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }
@@ -339,7 +338,7 @@
       advancedCard.appendChild(developer);
     }
     if (developerContent) advancedCard.appendChild(developerContent);
-    advancedCard.appendChild(createActionRow('Reset interface preferences', 'Restore System theme, comfortable spacing, default text and Overview startup.', 'Reset UI', 'reset-ui'));
+    advancedCard.appendChild(createActionRow('Reset interface preferences', 'Restore Dark theme, comfortable spacing, default text and Overview startup.', 'Reset UI', 'reset-ui'));
 
     const accountCard = createCard('Account', 'Your active Google session.', 'settings-card-account settings-modern-card-wide');
     if (profile) accountCard.appendChild(profile);
@@ -383,9 +382,6 @@
     applyStartupPageOnce();
   }
 
-  mediaDark?.addEventListener?.('change', () => {
-    if (themeMode() === 'system') applyTheme('system');
-  });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();

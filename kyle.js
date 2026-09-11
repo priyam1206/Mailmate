@@ -398,6 +398,7 @@
       return;
     }
 
+    const selectedEmail = window.AgentMail?.getSelectedEmail?.() || null;
     const resolution = window.KyleReferents?.resolvePrompt(cleanPrompt) || {
       hasReference: false,
       references: [],
@@ -406,7 +407,8 @@
 
     const hasExplicitMailRecipient = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(cleanPrompt)
       && /\b(send|email|mail|compose|write)\b/i.test(cleanPrompt);
-    if (resolution.unresolved && !hasExplicitMailRecipient) {
+    const refersToOpenEmail = Boolean(selectedEmail) && /\b(?:this|current|selected|open)\s+(?:email|mail|message|thread)\b/i.test(cleanPrompt);
+    if (resolution.unresolved && !hasExplicitMailRecipient && !refersToOpenEmail) {
       const clarification = resolution.clarification || 'Which item do you mean? Select it and ask me again.';
       store.addMessage('kyle', clarification);
       ui.setLiveText(clarification, 5200);
@@ -417,7 +419,6 @@
     try {
       store.set(store.states.THINKING);
       const activeDraft = window.KyleUi?.active?.getActiveDraft?.() || null;
-      const selectedEmail = window.AgentMail?.getSelectedEmail?.() || null;
       // Composer intent must represent a WRITE/SEND action, not a read-only
       // mention of the word "mail". This keeps commands such as
       // "show me the most recent mail" on the Inbox guidance path.
@@ -584,6 +585,10 @@
       if (useOverviewCanvas) {
         window.KyleCanvas?.prepare?.({ canvas: data.canvas, reply, text: reply, prompt: cleanPrompt });
         await window.KyleCanvas?.reveal?.();
+      }
+
+      if (data.mode === 'mail_summary' || (selectedEmail && /\bsummari[sz]e\b/i.test(cleanPrompt))) {
+        window.MailmateInboxSummary?.render?.(reply);
       }
 
       store.addMessage('kyle', reply);

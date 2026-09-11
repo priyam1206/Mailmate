@@ -66,3 +66,47 @@ def test_clock_questions_use_local_deterministic_reply():
     assert reply
     assert 'on ' in reply
     assert app_module._kyle_clock_reply('show my inbox') is None
+
+
+def test_summarize_email_strips_boilerplate_and_does_not_repeat_sender(monkeypatch):
+    email = {
+        'id': 'msg-summary-1',
+        'sender': 'Manager <boss@example.com>',
+        'subject': 'Quarterly Budget Approval',
+        'body': 'Dear Priyam,\n\nPlease review and approve the attached Q3 budget allocation before end of week.\n\nBest regards,\nBoss',
+        'date': 'Wed, 05 Aug 2026 10:00:00 +0530',
+    }
+    # Test fallback when LLM is unavailable
+    monkeypatch.setattr(app_module, 'chat_with_kyle', lambda _prompt: 'Gemini is temporarily unavailable')
+    result = app_module._handle_mail_intent(
+        'Summarize this email',
+        None,
+        email,
+        [email],
+        {'name': 'Priyam'},
+    )
+    assert result['mode'] == 'mail_summary'
+    reply = result['reply']
+    assert not reply.startswith("From boss@example.com")
+    assert not reply.startswith("Summary of 'Quarterly Budget Approval'")
+    assert 'Please review and approve the attached Q3 budget allocation' in reply
+
+
+def test_deadline_relativity_anchors_to_sent_date():
+    from services.ai_service import _deadline
+    # Email sent on August 5, mentions tomorrow (August 6). Since current date is after Aug 6, it must be marked passed.
+    dl = _deadline("Please submit the report by tomorrow.", base_date="2026-08-05T10:00:00")
+    assert "passed" in dl
+    assert dl != "tomorrow"
+
+
+def test_privacy_and_terms_routes_serve_valid_pages():
+    client = app_module.app.test_client()
+    for route in ('/privacy', '/privacy.html', '/terms', '/terms.html'):
+        res = client.get(route)
+        assert res.status_code == 200, f"Route {route} failed with {res.status_code}"
+    privacy_res = client.get('/privacy')
+    assert 'Google API Services User Data Policy' in privacy_res.get_data(as_text=True)
+    assert 'Limited Use' in privacy_res.get_data(as_text=True)
+    assert 'AES-256-GCM' in privacy_res.get_data(as_text=True)
+

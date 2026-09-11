@@ -1,4 +1,4 @@
-﻿.kyle-compute-banner.mailmate-compute-compact {
+.kyle-compute-banner.mailmate-compute-compact {
   margin: 0 0 10px !important;
   padding: 8px 11px !important;
   min-height: 0 !important;
@@ -52,6 +52,10 @@
   height: 108px !important;
   object-fit: contain !important;
   background: transparent !important;
+  filter: brightness(0) !important;
+}
+
+html[data-theme="dark"] .mailmate-native-boot-logo {
   filter: none !important;
 }
 

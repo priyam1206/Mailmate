@@ -39,7 +39,7 @@ from email.utils import parseaddr
 from services.whisper_service import whisper_service
 from services.google_service import get_auth_url, handle_callback, get_user_profile, get_gmail_threads, get_gmail_history_id, get_gmail_thread_changes, get_gmail_message_ids, get_gmail_message, mark_gmail_message_read, mark_gmail_message_important, trash_gmail_message, get_gmail_permissions, GmailInsufficientPermissionError, send_gmail_direct, send_gmail_draft, find_sent_message_by_rfc_id
 from services.calendar_service import list_events as calendar_list_events, create_event as calendar_create_event, update_event as calendar_update_event, delete_event as calendar_delete_event, find_event as calendar_find_event, access_status as calendar_access_status, upsert_ai_deadline_event as calendar_upsert_ai_deadline
-from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply
+from services.ai_service import get_dashboard_overview, chat_with_kyle, generate_kyle_agent_reply, _deadline
 from services.work_agent_service import work_agent_service
 from services.privacy_gate import PrivacyGate
 from services.system_context_service import system_context_service
@@ -343,6 +343,18 @@ def dashboard_page():
     if not get_user_profile():
         return redirect('/')
     return send_from_directory(str(BASE_DIR), 'dashboard.html')
+
+
+@app.route('/privacy')
+@app.route('/privacy.html')
+def privacy_page():
+    return send_from_directory(str(BASE_DIR), 'privacy.html')
+
+
+@app.route('/terms')
+@app.route('/terms.html')
+def terms_page():
+    return send_from_directory(str(BASE_DIR), 'terms.html')
 
 
 @app.route('/assets/<path:filename>')
@@ -846,16 +858,27 @@ def _deadline_target(item):
         return None, False
 
     now = datetime.now(APP_TZ)
+    item_date = (item or {}).get('date') or (item or {}).get('timestamp') or (item or {}).get('sent_at')
+    ref_time = None
+    if item_date:
+        try:
+            parsed_ref = date_parser.parse(str(item_date), fuzzy=True)
+            if parsed_ref.tzinfo is None:
+                parsed_ref = parsed_ref.replace(tzinfo=APP_TZ)
+            ref_time = parsed_ref.astimezone(APP_TZ)
+        except Exception:
+            ref_time = None
+    ref_now = ref_time or now
     lower = raw.lower()
 
     within = re.search(r'within\s+(\d+)\s*(minutes?|mins?|hours?|hrs?)', lower)
     if within:
         amount = int(within.group(1))
         minutes = amount * 60 if within.group(2).startswith(('hour', 'hr')) else amount
-        return now + timedelta(minutes=minutes), True
+        return ref_now + timedelta(minutes=minutes), True
 
     if 'tomorrow' in lower:
-        target = (now + timedelta(days=1)).replace(hour=23, minute=59, second=0, microsecond=0)
+        target = (ref_now + timedelta(days=1)).replace(hour=23, minute=59, second=0, microsecond=0)
         clock = _parse_clock(raw)
         if clock:
             target = target.replace(hour=clock[0], minute=clock[1])
@@ -863,7 +886,7 @@ def _deadline_target(item):
         return target, False
 
     if 'today' in lower or 'tonight' in lower:
-        target = now.replace(hour=23, minute=59, second=0, microsecond=0)
+        target = ref_now.replace(hour=23, minute=59, second=0, microsecond=0)
         clock = _parse_clock(raw)
         if clock:
             target = target.replace(hour=clock[0], minute=clock[1])
@@ -871,7 +894,7 @@ def _deadline_target(item):
         return target, False
 
     try:
-        parsed = date_parser.parse(raw, fuzzy=True, default=now)
+        parsed = date_parser.parse(raw, fuzzy=True, default=ref_now)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=APP_TZ)
         else:
@@ -2599,8 +2622,10 @@ def _substantive_mail_body(body):
 def _mail_body_fallback(recipient_name, intent, user_name, reply=False):
     first_name = str(recipient_name or 'there').split()[0]
     request = re.sub(r'\s+', ' ', str(intent or '')).strip().rstrip('.!?')
+    if re.search(r'^(?:draft\s+(?:a\s+)?reply|reply\s+to|write\s+(?:a\s+)?reply)', request, re.I):
+        request = ''
     if reply:
-        message = f"Thank you for your message. {request[:1].upper() + request[1:] if request else 'I have noted the request and will follow up shortly'}."
+        message = f"Thank you for your message. {request[:1].upper() + request[1:] + '.' if request else 'I have reviewed your note and am following up on this now.'}"
     else:
         message = request[:1].upper() + request[1:] if request else 'I wanted to share a quick update with you.'
         message = message.rstrip('.') + '.'
@@ -2641,10 +2666,82 @@ def _kyle_clock_reply(message):
     return f"It's {hour}:{now.strftime('%M %p')} on {now.strftime('%A, %B')} {now.day}."
 
 
+def _clean_email_body_substance(text):
+    """Extract actual core body text, stripping greetings, headers, and signatures."""
+    if not text:
+        return ""
+    lines = [line.strip() for line in str(text).splitlines()]
+    clean_lines = []
+    greeting_re = re.compile(r'^(?:hi|hello|dear|hey|good\s+(?:morning|afternoon|evening))\b[^\n,.:]*[,.:]?', re.I)
+    signoff_re = re.compile(r'^(?:best|regards|best regards|warm regards|thanks|thank you|sincerely|cheers|yours truly|kind regards|respectfully|sent from my|sent from mail)[,\s]*$', re.I)
+    quote_re = re.compile(r'^(?:on\s+.*wrote:|from:\s+.*|to:\s+.*|subject:\s+.*|date:\s+.*|---+original message---+)', re.I)
+
+    for line in lines:
+        if not line:
+            continue
+        if quote_re.match(line):
+            break
+        if signoff_re.match(line):
+            break
+        if greeting_re.match(line) and len(clean_lines) == 0:
+            continue
+        clean_lines.append(line)
+
+    body = ' '.join(clean_lines).strip()
+    return re.sub(r'\s+', ' ', body)
+
+
 def _handle_mail_intent(message, active_draft, selected_email, context_emails, user_profile):
     lower = message.lower().strip()
     user_name = user_profile.get('name') or 'Priyam'
     sorted_context = sorted(context_emails or [], key=_email_timestamp, reverse=True)
+
+    # Case 0: Summarize email intent
+    is_single_email_summarize = bool(selected_email) or bool(re.search(r'\b(?:this|the|selected|open|that)\s+(?:email|mail|message)\b', lower))
+    if is_single_email_summarize and re.search(r'\b(summari[sz]e|summary|explain\s+this|what\s+does\s+(?:this|it)\s+say|what\s+is\s+this\s+about)\b', lower) and (selected_email or sorted_context):
+        target = selected_email or sorted_context[0]
+        target_id = target.get('id') or target.get('gmail_id')
+        t_sub = target.get('subject') or 'No subject'
+        t_from = target.get('sender') or 'Unknown sender'
+        t_body = str(target.get('body') or '').strip()
+        t_snippet = str(target.get('snippet') or '').strip()
+        if target_id and (not t_body or t_body == t_snippet):
+            try:
+                full_msg = get_gmail_message(target_id)
+                if full_msg and full_msg.get('body'):
+                    t_body = full_msg['body']
+                    if not target.get('date') and full_msg.get('date'):
+                        target['date'] = full_msg['date']
+            except Exception:
+                pass
+        t_body = (t_body or t_snippet)[:4000]
+        t_date = target.get('date') or target.get('timestamp') or ''
+        clean_substance = _clean_email_body_substance(t_body)
+        now_tz = datetime.now(APP_TZ)
+        today_str = now_tz.strftime("%A, %B %d, %Y")
+
+        prompt = (
+            f"You are Kyle, summarizing an email for {user_name}.\n"
+            f"Current Date Today: {today_str}\n"
+            f"Email Sent Date: {t_date}\n"
+            f"Email Subject: {t_sub}\n"
+            f"Email Body:\n{clean_substance or t_body}\n\n"
+            f"STRICT INSTRUCTIONS:\n"
+            f"1. Provide a direct, concise 2-3 sentence executive summary focusing strictly on what the email is communicating, key requirements, decisions, and action items.\n"
+            f"2. DO NOT waste words repeating who sent the email or the subject line (do NOT start with 'From ...', 'This email from ...', or 'Regarding ...'). The user already sees this.\n"
+            f"3. DATE RELATIVITY: Interpret any relative timeframes in the email (e.g. 'tomorrow', 'today', 'tonight', 'yesterday', day names) relative to the Email Sent Date ({t_date}). If that date is in the past compared to Current Date Today ({today_str}), explicitly state that the date or deadline has already passed. Never describe a past date as 'tomorrow' or 'upcoming'.\n"
+            f"4. Deliver immediately actionable information."
+        )
+        summary = chat_with_kyle(prompt).strip()
+        if not summary or any(err in summary.lower() for err in ['temporarily unavailable', 'not configured', 'quota exceeded', 'kyle is temporarily', 'gemini is temporarily', 'error:']):
+            deadline = _deadline(t_body, base_date=t_date)
+            deadline_str = f" Key deadline: {deadline}." if deadline else ""
+            summary = f"{clean_substance[:320] or t_snippet or 'No email body available.'}.{deadline_str}"
+        return {
+            'reply': summary,
+            'actions': [],
+            'mode': 'mail_summary'
+        }
 
     # Case 1: Active draft editing or sending in contextual composer
     if active_draft and active_draft.get('body'):
@@ -2695,8 +2792,15 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
         name_match = re.search(r'\breply\s+to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z]+(?:\s+[A-Za-z]+)*?)(?:\s+(?:saying|that|to\s+say|\.|$))', lower)
         if not name_match:
             name_match = re.search(r'\breply\s+to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[A-Za-z]+(?:\s+[A-Za-z]+)*)\b', lower)
-        if name_match and name_match.group(1).lower() not in {'this', 'that', 'the', 'it', 'me'}:
-            target_name = name_match.group(1).strip()
+        if name_match:
+            raw_cand = name_match.group(1).strip()
+            cand_lower = raw_cand.lower()
+            if cand_lower in {'this', 'that', 'the', 'it', 'me', 'this email', 'the email', 'current email', 'selected email', 'this message', 'the message', 'this thread', 'the thread'}:
+                target_name = None
+            elif re.match(r'^(?:this|that|the|current|selected)\s+(?:email|mail|message|thread)$', cand_lower):
+                target_name = None
+            else:
+                target_name = raw_cand
 
         target_contact = None
         thread_id = None
@@ -2733,12 +2837,14 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
                     'actions': [],
                     'mode': 'recipient_required',
                 }
-        elif selected_email:
-            s_name, s_addr = parseaddr(selected_email.get('sender') or '')
-            target_contact = {'name': s_name or 'Sender', 'email': s_addr, 'full': selected_email.get('sender') or ''}
-            thread_id = selected_email.get('threadId') or selected_email.get('thread_id') or selected_email.get('id')
-            in_reply_to = selected_email.get('rfc_message_id') or None
-            thread_subject = selected_email.get('subject') or thread_subject
+        elif selected_email or sorted_context:
+            target_source = selected_email or sorted_context[0]
+            s_name, s_addr = parseaddr(target_source.get('sender') or '')
+            target_contact = {'name': s_name or 'Sender', 'email': s_addr, 'full': target_source.get('sender') or ''}
+            thread_id = target_source.get('threadId') or target_source.get('thread_id') or target_source.get('id')
+            in_reply_to = target_source.get('rfc_message_id') or None
+            thread_subject = target_source.get('subject') or thread_subject
+            selected_email = target_source
 
         if target_contact:
             saying_m = re.search(r'\b(?:saying|that|to\s+say)\s+(.*)$', message, re.I)
@@ -2747,18 +2853,20 @@ def _handle_mail_intent(message, active_draft, selected_email, context_emails, u
             clean_sub = f"Re: {thread_subject}" if not thread_subject.lower().startswith('re:') else thread_subject
             recipient_display = target_contact['name']
             first_name = recipient_display.split()[0] if recipient_display else 'there'
+            email_body = str((selected_email or {}).get('body') or (selected_email or {}).get('snippet') or '').strip()[:4000]
 
             prompt = (
                 f"You are Kyle, an AI assistant drafting a polite email reply from {user_name}.\n"
                 f"Recipient: {recipient_display} <{target_contact['email']}>\n"
                 f"Subject: {clean_sub}\n"
-                f"Instruction: {user_saying}\n\n"
-                f"Write a complete, concise and natural reply. Turn the instruction into polished prose rather than repeating command wording. "
+                + (f"Original Email Content:\n{email_body}\n\n" if email_body else "")
+                + f"Instruction: {user_saying}\n\n"
+                f"Write a complete, concise and natural reply addressing the content of the original email. Turn the instruction into polished prose rather than repeating command wording. "
                 f"Use 2-5 useful sentences, greeting ('Hi {first_name},'), and sign-off ('Regards,\n{user_name}').\n"
                 f"Return ONLY the email body text."
             )
             body = chat_with_kyle(prompt).strip()
-            if not _substantive_mail_body(body):
+            if not _substantive_mail_body(body) or 'temporarily unavailable' in body or 'Gemini is not configured' in body:
                 body = _mail_body_fallback(recipient_display, user_saying, user_name, reply=True)
             body = _normalize_generated_mail_body(body, recipient_display, user_name)
 
@@ -2907,6 +3015,26 @@ def kyle_agent_endpoint():
             if k not in merged_context:
                 merged_context[k] = v
 
+    if selected_email and not any(item.get('type') == 'email' for item in resolved):
+        email_id = str(selected_email.get('id') or selected_email.get('gmail_id') or '')
+        if email_id:
+            resolved.append({
+                'type': 'email',
+                'id': email_id,
+                'label': _agent_text(selected_email.get('subject') or 'Selected email', 180),
+                'metadata': {
+                    'sender': selected_email.get('sender') or '',
+                    'subject': selected_email.get('subject') or '',
+                    'thread_id': selected_email.get('thread_id') or selected_email.get('threadId') or ''
+                }
+            })
+    elif not selected_email:
+        email_ref = next((item for item in resolved if item.get('type') == 'email'), None)
+        if email_ref:
+            e_id = str(email_ref.get('id') or '')
+            ctx_emails = (merged_context.get('emails') or []) if isinstance(merged_context, dict) else []
+            selected_email = next((e for e in ctx_emails if str(e.get('id') or e.get('gmail_id') or '') == e_id), None)
+
     # Resolve recent email or sender query into exact reference if not yet resolved
     if not any(item.get('type') == 'email' for item in resolved):
         lower_msg = message.lower()
@@ -2973,7 +3101,7 @@ def kyle_agent_endpoint():
 
     # Mail commands have a deterministic recipient/action path. Resolve them
     # before any semantic planning so explicit sends never depend on LM Studio.
-    if active_draft or re.search(r'\b(email|mail|reply|draft|compose|send)\b', message, re.I):
+    if active_draft or re.search(r'\b(email|mail|reply|draft|compose|send|summari[sz]e|summary)\b', message, re.I):
         mail_intent_res = _handle_mail_intent(
             message=message,
             active_draft=active_draft,

@@ -1,11 +1,11 @@
 (function () {
-  const REFERENCE_PATTERN = /\b(this one|that one|the selected one|the open one|this|that|it|these|those)\b/ig;
+  const REFERENCE_PATTERN = /\b(this one|that one|the selected one|the open one|this email|the email|current email|open email|selected email|this message|the message|this thread|the thread|this|that|it|these|those)\b/ig;
 
   function expectedType(prompt) {
     const text = String(prompt || '').toLowerCase();
     if (/\bemail\s+for\s+(this|that|the)\s+event\b/.test(text)) return 'calendar-event';
     if (/\b(add|put|save)\s+(this|that|it)\s+(to|on)\s+(my\s+)?calendar\b/.test(text)) return 'email';
-    if (/\b(reply|email|message|sender|archive|star|unread|inbox)\b/.test(text)) return 'email';
+    if (/\b(reply|email|message|sender|archive|star|unread|inbox|summari[sz]e|summary|draft)\b/.test(text)) return 'email';
     if (/\b(calendar|event|meeting|schedule|reschedule|move|appointment)\b/.test(text)) return 'calendar-event';
     if (/\b(task|work item|action item|blocker)\b/.test(text)) return 'work-item';
     return null;
@@ -73,9 +73,13 @@
     const text = String(prompt || '').trim();
     const mentions = [...text.matchAll(REFERENCE_PATTERN)].map(match => match[0].toLowerCase());
     const hasRelationalReference = /\b(next email|email below|one below|one above|previous email|email above|red event|clashing event|conflicting event|email i just opened|message i just opened|last thing (?:you )?created|event after|meeting after|email from|message from)\b/i.test(text);
-    const hasReference = mentions.length > 0 || hasRelationalReference;
-    const type = expectedType(text);
     const context = window.MailmateContext?.snapshot?.() || {};
+    const hasImplicitInboxRef = mentions.length === 0 && !hasRelationalReference
+      && Boolean(context.selected?.type === 'email' || context.open?.type === 'email')
+      && /\b(reply|draft|summari[sz]e|summary|explain)\b/i.test(text);
+    if (hasImplicitInboxRef) mentions.push('this email');
+    const hasReference = mentions.length > 0 || hasRelationalReference;
+    const type = expectedType(text) || (hasImplicitInboxRef ? 'email' : null);
     const relation = hasRelationalReference ? relationalCandidate(text, type, context) : null;
 
     if (!hasReference) {
@@ -124,6 +128,9 @@
           break;
         }
         if (candidates.length > 1) return clarification(type, context, candidates);
+      }
+      if (!found && resolved.length > 0) {
+        found = resolved[0];
       }
       if (!found) return clarification(type, context, []);
       resolved.push(found);

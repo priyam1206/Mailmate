@@ -36,6 +36,8 @@
 
   function topMailIntent(message) {
     const text = normalize(message).toLowerCase();
+    if (/\b(?:this|that|selected|open|current)\s+(?:email|mail|message|thread)\b/i.test(text)) return false;
+    if (/\bsummari[sz]e\b/i.test(text)) return false;
     if (!/\b(?:email|emails|mail|mails|messages)\b/.test(text)) return false;
     return /\b(?:top|important|priority|urgent|most important|what matters|worth reading|need attention)\b/.test(text)
       || /\b(?:show|tell|give|list)\b.*\b(?:important|priority|top)\b/.test(text);
@@ -296,7 +298,7 @@
         });
       }
 
-      if (topMailIntent(message)) {
+      if (topMailIntent(message) && !body?.selectedEmail && !body?.resolvedReferences?.length) {
         return jsonResponse(topMailPayload(message, body));
       }
 

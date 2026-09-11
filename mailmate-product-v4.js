@@ -11,6 +11,7 @@
   let lastBriefFingerprint = '';
   let sendCountdownGeneration = 0;
   const fullEmailCache = new Map();
+  let currentEmailForPrompt = null;
 
   function esc(value) {
     return String(value ?? '')
@@ -64,9 +65,9 @@
 
   function referencesCurrentEmail(message) {
     const text = normalize(message).toLowerCase();
-    return /\b(this|current|open|selected)\s+(?:email|mail|message|thread)\b/.test(text)
-      || /\b(?:reply|respond|draft|summari[sz]e|explain)\b.*\b(?:this|current|email|mail|message|thread)\b/.test(text)
-      || /\bwhat\s+(?:does|is)\s+this\b/.test(text);
+    return /\b(this|the|current|open|selected)\s+(?:email|mail|message|thread)\b/.test(text)
+      || /\b(?:reply|respond|draft|summari[sz]e|explain)\b/i.test(text)
+      || /\bwhat\s+(?:does|is)\s+(?:this|it)\b/.test(text);
   }
 
   function installCurrentEmailAgentBridge() {
@@ -88,15 +89,45 @@
       if (!payload || payload?.uiContext?.briefingOnly) return priorFetch(input, init);
 
       const ref = activeEmailReference();
-      if (!ref || !referencesCurrentEmail(payload.message)) return priorFetch(input, init);
+      if (!referencesCurrentEmail(payload.message)) return priorFetch(input, init);
 
-      const email = await getFullEmail(ref.id);
+      let email = currentEmailForPrompt || (ref ? await getFullEmail(ref.id) : null);
+      currentEmailForPrompt = null;
+
+      // Read directly from the on-screen email detail view if present
+      const screenDetail = document.querySelector('#emailDetail, #tab-inbox .email-detail');
+      if (screenDetail) {
+        const screenBody = screenDetail.querySelector('.email-body')?.innerText?.trim() || '';
+        const screenSubject = screenDetail.querySelector('header h2')?.innerText?.trim() || '';
+        const screenSender = screenDetail.querySelector('.email-detail-meta span')?.innerText?.trim() || '';
+        const screenDate = screenDetail.querySelector('.email-detail-meta time')?.innerText?.trim() || '';
+
+        if (!email && screenBody) {
+          email = {
+            id: ref?.id || 'screen-open-email',
+            subject: screenSubject || 'Email',
+            sender: screenSender || 'Sender',
+            body: screenBody,
+            snippet: screenBody.slice(0, 240),
+            date: screenDate
+          };
+        } else if (email && screenBody) {
+          email.body = screenBody;
+          if (screenSubject && (!email.subject || email.subject === 'No subject')) {
+            email.subject = screenSubject;
+          }
+          if (screenSender && !email.sender) {
+            email.sender = screenSender;
+          }
+        }
+      }
+
       if (!email) return priorFetch(input, init);
 
       const reference = {
         type: 'email',
-        id: String(email.id || email.gmail_id || ref.id),
-        label: email.subject || ref.label || 'Current email',
+        id: String(email.id || email.gmail_id || ref?.id || ''),
+        label: email.subject || ref?.label || 'Current email',
         page: 'inbox',
         metadata: {
           sender: email.sender || email.from,
@@ -142,6 +173,12 @@
     input.value = prompt;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }
+
+  async function promptKyleAboutCurrentEmail(prompt) {
+    const ref = activeEmailReference();
+    if (ref) await getFullEmail(ref.id);
+    promptKyle(prompt);
   }
 
   function updateKyleEmailContext() {
@@ -200,8 +237,40 @@
       <button type="button" data-kyle-mail-action="ask">Ask about this</button>`;
     header.appendChild(bar);
 
-    bar.querySelector('[data-kyle-mail-action="summary"]')?.addEventListener('click', () => promptKyle('Summarize this email and tell me what matters.'));
-    bar.querySelector('[data-kyle-mail-action="reply"]')?.addEventListener('click', () => promptKyle('Draft a reply to this email. Use the thread context, but do not send it. Leave the mini composer open for my approval.'));
+  function renderInboxEmailSummary(summaryText) {
+    const header = document.querySelector('#tab-inbox .email-detail-header');
+    if (!header || !summaryText) return;
+    let card = header.querySelector('.mailmate-email-summary-card');
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'mailmate-email-summary-card';
+      header.appendChild(card);
+    }
+    card.innerHTML = `
+      <div class="mailmate-email-summary-title">
+        <i class="fas fa-sparkles"></i> <strong>Executive Summary</strong>
+      </div>
+      <p class="mailmate-email-summary-body">${esc(summaryText)}</p>
+    `;
+  }
+  window.MailmateInboxSummary = { render: renderInboxEmailSummary };
+
+    bar.querySelector('[data-kyle-mail-action="summary"]')?.addEventListener('click', async () => {
+      const btn = bar.querySelector('[data-kyle-mail-action="summary"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Summarizing...';
+      }
+      try {
+        await promptKyleAboutCurrentEmail('Summarize this email.');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = 'Summarize';
+        }
+      }
+    });
+    bar.querySelector('[data-kyle-mail-action="reply"]')?.addEventListener('click', () => promptKyleAboutCurrentEmail('Draft a reply to this email. Use the thread context, but do not send it. Leave the mini composer open for my approval.'));
     bar.querySelector('[data-kyle-mail-action="ask"]')?.addEventListener('click', () => {
       updateKyleEmailContext();
       const input = document.querySelector('.prompt-input');

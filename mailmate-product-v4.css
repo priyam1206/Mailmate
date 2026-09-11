@@ -157,6 +157,44 @@
   border-color: var(--line-strong);
 }
 
+/* ---- Email Executive Summary Card ---- */
+.mailmate-email-summary-card {
+  width: 100%;
+  margin-top: 14px;
+  padding: 14px 18px;
+  background: var(--surface-strong, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.12));
+  border-left: 4px solid var(--accent, #6366f1) !important;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  animation: mailmateSummaryFadeIn 220ms ease;
+}
+
+.mailmate-email-summary-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent, #6366f1);
+  margin-bottom: 8px;
+}
+
+.mailmate-email-summary-body {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text);
+  margin: 0;
+}
+
+@keyframes mailmateSummaryFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
 /* ---- Auto-send cancellation / approval ---- */
 .mailmate-cancel-autosend {
   display: inline-flex;

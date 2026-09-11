@@ -104,6 +104,9 @@
         width: 116px;
         height: 108px;
         object-fit: contain;
+        filter: brightness(0) drop-shadow(0 12px 30px rgba(0,0,0,.08));
+      }
+      html[data-theme="dark"] .mailmate-native-boot-logo {
         filter: drop-shadow(0 12px 30px rgba(0,0,0,.2));
       }
       .mailmate-native-buffer {
@@ -419,7 +422,7 @@
     loadBranchFix('./kyle-main-fixes.js?v=2', 'mailmateKyleMainFixes', () => {
       loadBranchFix('./mailmate-ux-fixes.js?v=1', 'mailmateUxFixes', () => {
         loadBranchFix('./mailmate-inbox-stability-v2.js?v=1', 'mailmateInboxStabilityV2', () => {
-          loadBranchFix('./mailmate-product-v4.js?v=1', 'mailmateProductV4', () => {
+          loadBranchFix('./mailmate-product-v4.js?v=2', 'mailmateProductV4', () => {
             loadBranchFix('./mailmate-product-v5.js?v=1', 'mailmateProductV5', () => {
               loadBranchFix('./mailmate-product-v6.js?v=1', 'mailmateProductV6', () => {
                 loadBranchStyle('./mailmate-product-v7.css?v=1', 'mailmate-product-v7');

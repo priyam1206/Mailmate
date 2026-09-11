@@ -49,12 +49,13 @@ def _app_timezone():
         return timezone(timedelta(hours=5, minutes=30))
 
 
-def _extract_deadline_at(text):
+def _extract_deadline_at(text, base_time=None):
     """Extract an explicit due date without relying on an LLM."""
     value = re.sub(r'\s+', ' ', str(text or '')).strip()
     if not value:
         return None
     now = datetime.now(_app_timezone())
+    ref_time = base_time or now
     lower = value.lower()
     relative = re.search(r'\bwithin\s+(\d+)\s*(minutes?|mins?|hours?|hrs?|days?)\b', lower)
     if relative:
@@ -63,7 +64,7 @@ def _extract_deadline_at(text):
         delta = timedelta(days=amount) if unit.startswith('day') else timedelta(
             minutes=amount * 60 if unit.startswith(('hour', 'hr')) else amount
         )
-        return (now + delta).replace(second=0, microsecond=0).isoformat()
+        return (ref_time + delta).replace(second=0, microsecond=0).isoformat()
 
     clock = r'(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?'
     month = r'(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)'
@@ -78,9 +79,9 @@ def _extract_deadline_at(text):
     if match:
         phrase = re.sub(r'(\d)(?:st|nd|rd|th)\b', r'\1', match.group(0), flags=re.I)
         try:
-            parsed = date_parser.parse(phrase, fuzzy=True, dayfirst=bool(re.match(r'^\d', phrase)), default=now)
+            parsed = date_parser.parse(phrase, fuzzy=True, dayfirst=bool(re.match(r'^\d', phrase)), default=ref_time)
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=now.tzinfo)
+                parsed = parsed.replace(tzinfo=ref_time.tzinfo)
             has_time = bool(re.search(r'\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|\b\d{1,2}:\d{2}\b', phrase, re.I))
             return parsed.replace(second=0, microsecond=0).isoformat() if has_time else parsed.date().isoformat()
         except (TypeError, ValueError, OverflowError):
@@ -88,7 +89,7 @@ def _extract_deadline_at(text):
 
     for word, days in (('tomorrow', 1), ('today', 0), ('tonight', 0)):
         if re.search(rf'\b{word}\b', lower):
-            target = now + timedelta(days=days)
+            target = ref_time + timedelta(days=days)
             return target.date().isoformat()
     return None
 
@@ -106,7 +107,28 @@ def _fallback_classify_message(message, gate=None):
     money_claim = _contains(r'\b(prize|lottery|jackpot|casino|gambling|bet|crypto giveaway|claim reward)\b', text)
     credential_request = _contains(r'\b(password|otp|one[- ]time password|verify your account|login immediately|credentials?)\b', text)
     suspicious_link = _contains(r'https?://(?:\d{1,3}\.){3}\d{1,3}|\b(bit\.ly|tinyurl\.com|t\.co)/', text)
-    deadline_at = _extract_deadline_at(text)
+    raw_date = message.get('date') or message.get('timestamp') or message.get('internal_date') or ''
+    base_time = None
+    if raw_date:
+        try:
+            parsed_base = date_parser.parse(str(raw_date), fuzzy=True)
+            if parsed_base.tzinfo is None:
+                parsed_base = parsed_base.replace(tzinfo=_app_timezone())
+            base_time = parsed_base.astimezone(_app_timezone())
+        except Exception:
+            base_time = None
+    deadline_at = _extract_deadline_at(text, base_time=base_time)
+    now_tz = datetime.now(_app_timezone())
+    deadline_in_past = False
+    if deadline_at:
+        try:
+            d_parsed = date_parser.parse(str(deadline_at), fuzzy=True)
+            if d_parsed.tzinfo is None:
+                d_parsed = d_parsed.replace(tzinfo=_app_timezone())
+            if d_parsed < now_tz:
+                deadline_in_past = True
+        except Exception:
+            pass
     action_signal = _contains(r'\b(action required|please|can you|could you|reply|respond|review|approve|confirm(?:ation)?|verify|complete|submit(?:ted)?|submission|assignment|send|provide|include|required files?|meeting|schedule|note that|inform you|writing to inform)\b', text)
     deadline_signal = bool(deadline_at) or _contains(r'\b(due|deadline|today|tonight|tomorrow|within \d+ (?:minutes?|hours?|days?)|next month|take place|scheduled for|will be held)\b', text)
     work_object = _contains(r'\b(assignment|submission|deliverable|project|report|documents?|files?|spreadsheet|presentation|proposal|code|repository|email|reply|response|confirmation|attendance|participation|reserved place|required action)\b', text)

@@ -1,17 +1,16 @@
 /* MailMate Product v13 — presentation ownership and settings polish */
 
 /* Canvas chrome exists only while the Overview canvas is actually active. */
-#kyleCanvasBack {
-  display: none !important;
-}
-
-#tab-overview.kyle-canvas-active #kyleCanvasBack {
-  display: inline-flex !important;
-}
-
+#kyleCanvasBack[hidden],
 body:not(:has(.nav-tab[data-tab="overview"].active)) #kyleCanvasBack,
 body:not(:has(.nav-tab[data-tab="overview"].active)) #kyleCanvasRestore {
   display: none !important;
+}
+
+body.mailmate-canvas-expanded #kyleCanvasBack:not([hidden]),
+#tab-overview.kyle-canvas-active #kyleCanvasBack:not([hidden]),
+body:has(#tab-overview.kyle-canvas-active) #kyleCanvasBack:not([hidden]) {
+  display: inline-flex !important;
 }
 
 /* Current-email affordances are Inbox-only UI, even if the last opened email is

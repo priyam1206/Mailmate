@@ -16,6 +16,7 @@ def test_tts_uses_server_key_and_george_voice(monkeypatch):
     captured = {}
     monkeypatch.setenv('ELEVENLABS_API_KEY', 'sk_test_secret')
     monkeypatch.setenv('ELEVENLABS_VOICE_ID', 'JBFqnCBsd6RMkjVDRZzb')
+    monkeypatch.setenv('ELEVENLABS_MODEL_ID', 'eleven_flash_v2_5')
     monkeypatch.setattr(elevenlabs.requests, 'post', lambda url, **kwargs: captured.update({'url': url, **kwargs}) or Response())
     content, mime = elevenlabs.synthesize('Hello from Kyle')
     assert content == b'audio'

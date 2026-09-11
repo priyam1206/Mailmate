@@ -1,4 +1,4 @@
-﻿import datetime
+import datetime
 import hashlib
 import json
 import os
@@ -92,19 +92,59 @@ def _gemini_completion(
     return "".join(str(part.get("text") or "") for part in parts).strip()
 
 
+from datetime import timedelta
+from dateutil import parser as date_parser
+
+
 def _latest(thread: Dict[str, Any]) -> Dict[str, Any]:
     messages = thread.get("messages") or []
     return messages[-1] if messages else thread
 
 
-def _deadline(text: str) -> str:
+def _deadline(text: str, base_date=None) -> str:
+    ref_dt = None
+    if base_date:
+        if isinstance(base_date, (datetime.datetime, datetime.date)):
+            ref_dt = base_date if isinstance(base_date, datetime.datetime) else datetime.datetime.combine(base_date, datetime.time.min)
+        else:
+            try:
+                ref_dt = date_parser.parse(str(base_date), fuzzy=True)
+            except Exception:
+                ref_dt = None
+    now = datetime.datetime.now()
+
     within = re.search(r"\bwithin\s+(\d+)\s*hours?\b", text, re.I)
     if within:
+        if ref_dt:
+            target_dt = ref_dt + timedelta(hours=int(within.group(1)))
+            if target_dt < now:
+                return f"within {within.group(1)} hours of sent date (passed {target_dt.strftime('%b %d')})"
         return f"within {within.group(1)} hours"
+
     if re.search(r"\btomorrow\b", text, re.I):
+        if ref_dt:
+            target_dt = ref_dt + timedelta(days=1)
+            if target_dt.date() < now.date():
+                return f"{target_dt.strftime('%b %d')} (passed)"
+            elif target_dt.date() == now.date():
+                return "today"
+            elif target_dt.date() == (now + timedelta(days=1)).date():
+                return "tomorrow"
+            else:
+                return target_dt.strftime('%b %d')
         return "tomorrow"
+
     if re.search(r"\b(today|tonight)\b", text, re.I):
+        if ref_dt:
+            target_dt = ref_dt
+            if target_dt.date() < now.date():
+                return f"{target_dt.strftime('%b %d')} (passed)"
+            elif target_dt.date() == now.date():
+                return "today"
+            else:
+                return target_dt.strftime('%b %d')
         return "today"
+
     month = r"(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
     clock = r"(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?"
     patterns = [
@@ -115,7 +155,14 @@ def _deadline(text: str) -> str:
     for pattern in patterns:
         match = re.search(pattern, text, re.I)
         if match:
-            return re.sub(r"\s+", " ", match.group(1)).strip()
+            found_str = re.sub(r"\s+", " ", match.group(1)).strip()
+            try:
+                parsed = date_parser.parse(found_str, fuzzy=True, default=ref_dt or now)
+                if parsed.date() < now.date():
+                    return f"{found_str} (passed)"
+            except Exception:
+                pass
+            return found_str
     return ""
 
 
@@ -168,12 +215,14 @@ def _heuristic_overview(threads: List[Dict[str, Any]]) -> Dict[str, Any]:
                 action_text = "Reply with the requested details."
             else:
                 action_text = "Review this request."
+            msg_date = str(latest.get("timestamp") or latest.get("date") or "")
             needs.append({
                 "subject": subject[:180],
                 "description": action_text,
                 "owner": "me",
                 "source_message_id": message_id,
-                "deadline": scores.get("deadline_at") or _deadline(combined),
+                "deadline": scores.get("deadline_at") or _deadline(combined, base_date=msg_date),
+                "date": msg_date,
             })
 
     return {
@@ -325,15 +374,61 @@ def create_event(title: str, start_time: str, end_time: str):
         return f"Error: {exc}"
 
 
+def _local_fallback_reply(message: str, ctx: Dict[str, Any]) -> str:
+    lower = str(message or "").lower()
+    mail = ctx.get("mail") or {}
+    active_work = int(ctx.get("active_work_count") or mail.get("active_work_count") or 0)
+    waiting_work = int(ctx.get("waiting_approval_count") or mail.get("waiting_approval_count") or 0)
+
+    if re.search(r"\b(draft|drafts|work tab|prepared|waiting for review|ready for review|what.*prepared)\b", lower):
+        if active_work + waiting_work == 0:
+            return "There are no prepared Work items waiting for review right now."
+        if waiting_work:
+            return f"You have {waiting_work} item{'s' if waiting_work != 1 else ''} ready for review in Work."
+        return f"Kyle is currently working on {active_work} item{'s' if active_work != 1 else ''}."
+
+    cal = ctx.get("calendar") or {}
+    conflicts = int(cal.get("conflict_count") or 0)
+    if re.search(r"\b(calendar|schedule|meeting|meetings|event|events|clash|conflict)\b", lower):
+        if conflicts:
+            return f"You have {conflicts} schedule conflict{'s' if conflicts != 1 else ''} on your calendar."
+        next_ev = cal.get("next_event")
+        if next_ev:
+            return f"Your schedule is clear of conflicts. Next up is {next_ev}."
+        return "Your calendar has no overlapping commitments."
+
+    if re.search(r"\b(email|emails|mail|inbox|summary|summarize|what matters|attention|unread|important)\b", lower):
+        attention = int(mail.get("attention_count") or len(mail.get("needs_attention") or []))
+        unread = int(mail.get("unread_count") or 0)
+        if attention:
+            return f"You have {attention} item{'s' if attention != 1 else ''} requiring attention in your workspace."
+        if unread:
+            return f"Your inbox has {unread} unread message{'s' if unread != 1 else ''}, and all priorities are clear."
+        return "Your inbox is clear and up to date."
+
+    return "I am monitoring your inbox and schedule. Everything is running smoothly."
+
+
 def chat_with_kyle(message):
     prompt = (
         "You are Kyle, Mailmate's concise assistant. "
         f"Timezone Asia/Kolkata. Time: {datetime.datetime.now().isoformat()}. User: {message}"
     )
     try:
-        return _gemini_completion(prompt, max_input_tokens=800, max_output_tokens=150)
+        return _gemini_completion(prompt, max_input_tokens=6000, max_output_tokens=400)
     except Exception as exc:
-        return f"Kyle is temporarily unavailable: {exc}"
+        sub_match = re.search(r"Subject:\s*(.*?)(?:\n|$)", message)
+        from_match = re.search(r"From:\s*(.*?)(?:\n|$)", message)
+        body_match = re.search(r"Email Body:\s*\n([\s\S]*?)(?:\n\n[A-Z]|$)", message)
+        if sub_match or body_match:
+            sub = sub_match.group(1).strip() if sub_match else ""
+            body_text = body_match.group(1).strip() if body_match else ""
+            clean_body = re.sub(r"^(?:dear|hi|hello|hey|good morning|good afternoon)\s+[^,.\n]+[,.\n]\s*", "", body_text, flags=re.I).strip()
+            clean_body = re.sub(r"(?im)^(?:best regards|best|regards|thanks|thank you|sincerely)[\s\S]*$", "", clean_body).strip()
+            sentences = [s.strip() for s in re.split(r"[.\n\r]+", clean_body) if len(s.strip()) > 15]
+            core = sentences[0] if sentences else (clean_body[:240] or sub)
+            return core
+        return "I am with you. How can I help with your mail or schedule?"
 
 
 def generate_kyle_agent_reply(message, compact_context):
@@ -360,4 +455,5 @@ User: {message}
     try:
         return _gemini_completion(prompt, max_input_tokens=800, max_output_tokens=150)
     except Exception:
-        return "I can still operate Mailmate, but Gemini is temporarily unavailable."
+        return _local_fallback_reply(message, ctx)
+

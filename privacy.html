@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - MailMate</title>
+  <link rel="icon" type="image/png" href="./assets/images/mailmate_logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    :root {
+      --bg: #090a0f;
+      --card-bg: rgba(18, 21, 31, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover: rgba(255, 255, 255, 0.12);
+      --text: #f0f2f8;
+      --text-muted: #8e95ab;
+      --accent: #4f80ff;
+      --accent-glow: rgba(79, 128, 255, 0.25);
+      --accent-green: #34d399;
+      --accent-warn: #fbbf24;
+      --font-heading: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(79, 128, 255, 0.15), transparent 70%),
+        radial-gradient(circle at 90% 40%, rgba(52, 211, 153, 0.05), transparent 40%);
+      background-attachment: fixed;
+      color: var(--text);
+      font-family: var(--font-body);
+      line-height: 1.7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .nav-bar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(9, 10, 15, 0.8);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 24px;
+    }
+
+    .nav-container {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: #fff;
+      font-family: var(--font-heading);
+      font-weight: 700;
+      font-size: 1.25rem;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+    }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .back-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: var(--accent);
+      transform: translateX(-2px);
+    }
+
+    .main-content {
+      max-width: 900px;
+      margin: 40px auto 80px;
+      padding: 0 24px;
+      flex: 1;
+    }
+
+    .policy-header {
+      margin-bottom: 40px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 24px;
+    }
+
+    .policy-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(79, 128, 255, 0.12);
+      border: 1px solid rgba(79, 128, 255, 0.3);
+      color: #7ba6ff;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-family: var(--font-heading);
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+
+    .effective-date {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .highlight-card {
+      background: linear-gradient(135deg, rgba(79, 128, 255, 0.12), rgba(52, 211, 153, 0.06));
+      border: 1px solid rgba(79, 128, 255, 0.35);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 40px;
+    }
+
+    .highlight-card h3 {
+      font-family: var(--font-heading);
+      color: #fff;
+      font-size: 1.25rem;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .highlight-card h3 i {
+      color: var(--accent);
+    }
+
+    .policy-section {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 32px;
+      margin-bottom: 24px;
+      backdrop-filter: blur(12px);
+    }
+
+    .policy-section h2 {
+      font-family: var(--font-heading);
+      font-size: 1.45rem;
+      color: #fff;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .policy-section h2 .sec-icon {
+      color: var(--accent);
+      font-size: 1.15rem;
+    }
+
+    .policy-section p {
+      margin-bottom: 16px;
+      color: #d1d5e5;
+    }
+
+    .policy-section p:last-child {
+      margin-bottom: 0;
+    }
+
+    .policy-section ul {
+      margin: 16px 0 16px 24px;
+      color: #d1d5e5;
+    }
+
+    .policy-section li {
+      margin-bottom: 8px;
+    }
+
+    .badge-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: #93c5fd;
+    }
+
+    .footer {
+      border-top: 1px solid var(--card-border);
+      background: rgba(9, 10, 15, 0.95);
+      padding: 32px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-top: 12px;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 640px) {
+      h1 { font-size: 2rem; }
+      .policy-section { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav-bar">
+    <div class="nav-container">
+      <a href="/" class="brand-link">
+        <img src="./assets/images/mailmate_logo.png" alt="MailMate Logo" class="brand-logo">
+        <span>MailMate</span>
+      </a>
+      <a href="/" class="back-btn"><i class="fas fa-arrow-left"></i> Home</a>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <header class="policy-header">
+      <div class="policy-badge"><i class="fas fa-shield-alt"></i> Transparency & Data Protection</div>
+      <h1>Privacy Policy</h1>
+      <div class="effective-date">Effective Date: September 12, 2026 &bull; Version 2.0</div>
+    </header>
+
+    <!-- Google Limited Use Prominent Disclosure -->
+    <div class="highlight-card">
+      <h3><i class="fab fa-google"></i> Google API Services User Data Policy Compliance</h3>
+      <p>
+        MailMate's use and transfer to any other app of information received from Google APIs adheres to the 
+        <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener"><strong>Google API Services User Data Policy</strong></a>, 
+        including the <strong>Limited Use</strong> requirements.
+      </p>
+      <p style="margin-top: 10px; font-size: 0.95rem; color: #cbd5e1;">
+        We specifically guarantee that Google workspace data is never sold, never used for advertising, never used to train generalized AI models, and never viewed by humans without explicit consent.
+      </p>
+    </div>
+
+    <!-- 1. Introduction -->
+    <section class="policy-section">
+      <h2><i class="fas fa-info-circle sec-icon"></i> 1. Introduction</h2>
+      <p>
+        MailMate ("we", "our", or "us") provides an intelligent email productivity assistant designed to help users manage their inboxes, identify key action items, organize deadlines, and draft replies safely. We take your privacy and personal data security with the utmost seriousness.
+      </p>
+      <p>
+        This Privacy Policy explains how MailMate collects, processes, and protects your information when you use our web application and connect your Google account via OAuth 2.0.
+      </p>
+    </section>
+
+    <!-- 2. Data We Access from Google -->
+    <section class="policy-section">
+      <h2><i class="fas fa-key sec-icon"></i> 2. Google User Data We Access</h2>
+      <p>
+        When you connect MailMate with your Google account, we request explicit, granular permissions through Google OAuth. We only access the data required to provide email intelligence and scheduling features:
+      </p>
+      <ul>
+        <li><span class="badge-pill">.../auth/gmail.readonly</span> & <span class="badge-pill">.../auth/gmail.modify</span>: Used to retrieve recent email headers, senders, dates, snippets, read states, and labels so you can view, triage, and organize your inbox.</li>
+        <li><span class="badge-pill">.../auth/gmail.compose</span>: Used to prepare and save email drafts that you can review, edit, and choose to send.</li>
+        <li><span class="badge-pill">.../auth/calendar.events</span>: Used to detect deadlines mentioned in your correspondence and synchronize them to your Google Calendar at your direction.</li>
+        <li><span class="badge-pill">.../auth/userinfo.email</span> & <span class="badge-pill">.../auth/userinfo.profile</span>: Used to identify your account session and display your avatar and name in the workspace.</li>
+      </ul>
+    </section>
+
+    <!-- 3. How We Process Email Data: Ephemeral & In-Memory -->
+    <section class="policy-section">
+      <h2><i class="fas fa-memory sec-icon"></i> 3. Ephemeral, In-Memory Processing</h2>
+      <p>
+        MailMate implements an ephemeral, zero-hoarding architecture for your raw mailbox content:
+      </p>
+      <ul>
+        <li><strong>Volatile RAM Only:</strong> Raw email bodies, full message trees, and email attachments are retrieved directly from the Gmail API into transient process RAM while you are actively using MailMate.</li>
+        <li><strong>No Raw Mail Storage:</strong> We do NOT write, store, or copy raw email contents, full bodies, or personal correspondence onto permanent database tables or public storage buckets.</li>
+        <li><strong>Authenticated Encryption at Rest:</strong> Minimal operational state (such as OAuth refresh tokens and lightweight synchronization checkpoints) is strictly protected using industry-standard authenticated encryption (AES-256-GCM).</li>
+      </ul>
+    </section>
+
+    <!-- 4. Strict Limits on Use of Google User Data -->
+    <section class="policy-section">
+      <h2><i class="fas fa-ban sec-icon"></i> 4. Strict Limits on Google User Data (Limited Use)</h2>
+      <p>In accordance with Google's Limited Use requirements:</p>
+      <ul>
+        <li><strong>No Sale of User Data:</strong> MailMate will never sell, lease, rent, or trade your Google data, email content, or personal identifiers to third parties or data brokers.</li>
+        <li><strong>No Advertising or Retargeting:</strong> We do not use, transfer, or analyze your email content or personal data to serve advertisements, display targeted ads, or build user marketing profiles.</li>
+        <li><strong>No Generalized AI Model Training:</strong> We do not use your email data or Google API data to train, retrain, fine-tune, or improve generalized or foundation machine learning or AI models. Any AI interaction (such as summarizing an email via Kyle) processes the text solely to provide the immediate response requested by you.</li>
+        <li><strong>No Human Inspection:</strong> No employee, contractor, or human at MailMate reads your emails. Human access is strictly prohibited unless: (a) you have provided explicit, affirmative written consent for technical support; (b) required to investigate security anomalies; or (c) required by applicable law.</li>
+      </ul>
+    </section>
+
+    <!-- 5. Privacy Gate & Content Protection -->
+    <section class="policy-section">
+      <h2><i class="fas fa-shield-halved sec-icon"></i> 5. Privacy Gate & Sensitive Data Protection</h2>
+      <p>
+        MailMate includes an automated, local <strong>Privacy Gate</strong> that inspects email metadata for sensitive contents (including one-time passwords, financial account numbers, tax identifiers, or health records). Emails flagged as containing sensitive personal credentials are automatically shielded and prevented from being dispatched to cloud AI endpoints.
+      </p>
+    </section>
+
+    <!-- 6. Data Retention & Revocation of Access -->
+    <section class="policy-section">
+      <h2><i class="fas fa-trash-can sec-icon"></i> 6. Data Retention, Disconnection & Deletion</h2>
+      <p>You maintain complete control over your data at all times:</p>
+      <ul>
+        <li><strong>Instant Logout:</strong> Clicking "Logout" in MailMate immediately terminates your active session and clears in-memory mailbox snapshots.</li>
+        <li><strong>Google Account Permissions:</strong> You can revoke MailMate's access to your Google account at any time directly through <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Third-Party Account Permissions</a>.</li>
+        <li><strong>Complete Deletion Request:</strong> If you wish to delete all associated synchronization metadata, encrypted tokens, or cache records, you can submit a deletion request to <a href="mailto:support@mailmate.app">support@mailmate.app</a> or click disconnect in your settings. All encrypted tokens and derived metadata will be deleted within 48 hours.</li>
+      </ul>
+    </section>
+
+    <!-- 7. Security Standards -->
+    <section class="policy-section">
+      <h2><i class="fas fa-lock sec-icon"></i> 7. Security Standards & Safeguards</h2>
+      <p>
+        MailMate uses technical and organizational measures to safeguard your information against unauthorized access, modification, disclosure, or destruction. All data transmitted between your browser and our servers is encrypted using modern TLS 1.3 encryption. OAuth credentials and tokens are secured via AES-256-GCM authenticated encryption.
+      </p>
+    </section>
+
+    <!-- 8. Updates to this Policy -->
+    <section class="policy-section">
+      <h2><i class="fas fa-history sec-icon"></i> 8. Changes to this Privacy Policy</h2>
+      <p>
+        We may update this Privacy Policy from time to time to reflect changes in our service or applicable legal requirements. The updated policy will always be published with a revised effective date on this page.
+      </p>
+    </section>
+
+    <!-- 9. Contact Us -->
+    <section class="policy-section">
+      <h2><i class="fas fa-envelope sec-icon"></i> 9. Contact Us</h2>
+      <p>
+        If you have any questions, concerns, or requests regarding this Privacy Policy or our compliance with the Google API Services User Data Policy, please contact our Data Protection team at:
+      </p>
+      <p>
+        <strong>Email:</strong> <a href="mailto:support@mailmate.app">support@mailmate.app</a><br>
+        <strong>Service:</strong> MailMate Private Inbox Intelligence
+      </p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div>&copy; 2026 MailMate. All rights reserved.</div>
+    <div class="footer-links">
+      <a href="/">Home</a>
+      <span>&bull;</span>
+      <a href="/privacy">Privacy Policy</a>
+      <span>&bull;</span>
+      <a href="/terms">Terms of Service</a>
+    </div>
+  </footer>
+</body>
+</html>

@@ -361,3 +361,38 @@ def test_dashboard_navigation_uses_a_persistent_delegated_handler():
 
     assert "event.target?.closest?.('nav.nav-tabs .nav-tab')" in js
     assert 'if (tab) showTab(tab.dataset.tab);' in js
+
+
+def test_needs_attention_dismissal_and_filter_badges_and_email_analytics():
+    html = (ROOT / 'dashboard.html').read_text(encoding='utf-8')
+    js = (ROOT / 'dashboard.js').read_text(encoding='utf-8')
+    css = (ROOT / 'dashboard.css').read_text(encoding='utf-8')
+
+    # Needs Attention completion & dismissal
+    assert 'btn-complete-task' in js
+    assert 'btn-ignore-task' in js
+    assert 'btn-complete-task' in css
+    assert 'btn-ignore-task' in css
+    assert 'mailmate_dismissed_attention_ids' in js
+    assert 'dismissAttentionItem' in js
+
+    # Filter tab badge only on unread and sidebar inbox pill
+    assert 'id="badgeFilterUnread"' in html
+    assert 'id="navInboxBadge"' in html
+    assert 'badgeFilterAll' not in html
+    assert 'badgeFilterImportant' not in html
+    assert 'updateFilterBadges' in js
+    assert '.filter-count-badge' in css
+    assert '.nav-badge-pill' in css
+
+    # Overview email analytics chart & breakdown
+    assert 'id="emailAnalyticsSection"' in html
+    assert 'id="analyticsDonutSvg"' in html
+    assert 'id="donutSegmentsGroup"' in html
+    assert 'id="donutTotalCount"' in html
+    assert 'id="analyticsBreakdownList"' in html
+    assert 'renderOverviewEmailAnalytics' in js
+    assert '.email-analytics-section' in css
+    assert '.donut-segment' in css
+    assert '.breakdown-row' in css
+

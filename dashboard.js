@@ -157,8 +157,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function bindEvents() {
     document.addEventListener('click', event => {
+      const brand = event.target?.closest?.('.brand');
+      if (brand) {
+        window.KyleCanvas?.restore?.();
+        showTab('overview');
+        return;
+      }
       const tab = event.target?.closest?.('nav.nav-tabs .nav-tab');
       if (tab) showTab(tab.dataset.tab);
+    });
+    document.querySelector('.brand')?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        window.KyleCanvas?.restore?.();
+        showTab('overview');
+      }
     });
     els.filters.forEach(filter => filter.addEventListener('click', () => setInboxFilter(filter.dataset.filter)));
     els.refreshBtn?.addEventListener('click', async () => {
@@ -625,10 +638,185 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const DISMISSED_ATTENTION_STORAGE_KEY = 'mailmate_dismissed_attention_ids';
+
+  function getDismissedAttentionIds() {
+    try {
+      const stored = localStorage.getItem(DISMISSED_ATTENTION_STORAGE_KEY);
+      return new Set(stored ? JSON.parse(stored) : []);
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function dismissAttentionItem(sourceId) {
+    if (!sourceId) return;
+    try {
+      const dismissed = getDismissedAttentionIds();
+      dismissed.add(String(sourceId));
+      localStorage.setItem(DISMISSED_ATTENTION_STORAGE_KEY, JSON.stringify([...dismissed]));
+    } catch (_) {}
+  }
+
+  function updateFilterBadges(emails) {
+    emails = emails || [];
+    let unreadCount = 0;
+
+    for (const email of emails) {
+      if (email.is_read === false) unreadCount++;
+    }
+
+    const unreadBadge = $('badgeFilterUnread');
+    if (unreadBadge) {
+      if (unreadCount > 0) {
+        unreadBadge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+        unreadBadge.style.display = 'inline-flex';
+      } else {
+        unreadBadge.textContent = '0';
+        unreadBadge.style.display = 'none';
+      }
+    }
+
+    const navInboxBadge = $('navInboxBadge');
+    if (navInboxBadge) {
+      if (unreadCount > 0) {
+        navInboxBadge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+        navInboxBadge.style.display = 'inline-flex';
+      } else {
+        navInboxBadge.style.display = 'none';
+      }
+    }
+  }
+
+  function renderOverviewEmailAnalytics(emails) {
+    emails = emails || [];
+    const total = emails.length;
+    const totalBadge = $('analyticsTotalBadge');
+    const donutCount = $('donutTotalCount');
+    const segmentsGroup = $('donutSegmentsGroup');
+    const breakdownList = $('analyticsBreakdownList');
+
+    if (totalBadge) totalBadge.textContent = `${total} email${total === 1 ? '' : 's'} analysed`;
+    if (donutCount) donutCount.textContent = String(total);
+
+    if (!segmentsGroup || !breakdownList) return;
+
+    if (total === 0) {
+      segmentsGroup.innerHTML = '';
+      breakdownList.innerHTML = '<p class="overview-empty-copy" style="padding:12px 0;">No correspondence to analyze yet.</p>';
+      return;
+    }
+
+    const counts = {
+      action: 0,
+      important: 0,
+      unread: 0,
+      general: 0,
+      phishing: 0
+    };
+
+    for (const email of emails) {
+      if (isSuspiciousEmail(email)) {
+        counts.phishing++;
+        continue;
+      }
+      const context = email.context_scores || {};
+      const isAction = Boolean(context.attention_allowed || context.requires_reply || context.work_allowed || context.calendar_allowed);
+      if (isAction) {
+        counts.action++;
+      } else if (isImportant(email)) {
+        counts.important++;
+      } else if (email.is_read === false) {
+        counts.unread++;
+      } else {
+        counts.general++;
+      }
+    }
+
+    const categories = [
+      { key: 'action', label: 'Action Required', count: counts.action, color: '#f59e0b', filter: 'action' },
+      { key: 'important', label: 'Important Priorities', count: counts.important, color: '#8b5cf6', filter: 'important' },
+      { key: 'unread', label: 'Unread Messages', count: counts.unread, color: '#3b82f6', filter: 'unread' },
+      { key: 'general', label: 'Read & Handled', count: counts.general, color: '#10b981', filter: 'all' },
+      { key: 'phishing', label: 'Suspicious / Phishing', count: counts.phishing, color: '#ef4444', filter: 'phishing' }
+    ];
+
+    const activeCategories = categories.filter(c => c.count > 0);
+    const C = 2 * Math.PI * 70;
+    let accumulatedOffset = 0;
+    let svgSegmentsHtml = '';
+    const gap = activeCategories.length > 1 ? 4 : 0;
+
+    activeCategories.forEach(cat => {
+      const proportion = cat.count / total;
+      const arcLength = proportion * C;
+      const strokeLength = Math.max(0.1, arcLength - gap);
+      const percent = Math.round(proportion * 100);
+
+      svgSegmentsHtml += `
+        <circle class="donut-segment"
+          cx="100" cy="100" r="70"
+          stroke="${cat.color}"
+          stroke-dasharray="${strokeLength.toFixed(2)} ${(C - strokeLength).toFixed(2)}"
+          stroke-dashoffset="-${accumulatedOffset.toFixed(2)}"
+          data-filter="${cat.filter}"
+          data-category="${cat.key}">
+          <title>${escapeHtml(cat.label)}: ${cat.count} (${percent}%)</title>
+        </circle>
+      `;
+      accumulatedOffset += arcLength;
+    });
+
+    segmentsGroup.innerHTML = svgSegmentsHtml;
+
+    breakdownList.innerHTML = categories.map(cat => {
+      const percent = total > 0 ? Math.round((cat.count / total) * 100) : 0;
+      return `
+        <div class="breakdown-row" role="button" tabindex="0" data-filter="${cat.filter}" title="Filter inbox by ${escapeHtml(cat.label)}">
+          <div class="breakdown-label">
+            <span class="breakdown-color-dot" style="background:${cat.color};"></span>
+            <span>${escapeHtml(cat.label)}</span>
+          </div>
+          <div class="breakdown-bar-track">
+            <div class="breakdown-bar-fill" style="width:${percent}%;background:${cat.color};"></div>
+          </div>
+          <div class="breakdown-stats">
+            <strong>${cat.count}</strong> <small>(${percent}%)</small>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const navigateToFilter = filterKey => {
+      showTab('inbox');
+      setInboxFilter(filterKey);
+    };
+
+    segmentsGroup.querySelectorAll('.donut-segment').forEach(seg => {
+      seg.addEventListener('click', () => navigateToFilter(seg.dataset.filter));
+    });
+
+    breakdownList.querySelectorAll('.breakdown-row').forEach(row => {
+      const filterKey = row.dataset.filter;
+      row.addEventListener('click', () => navigateToFilter(filterKey));
+      row.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          navigateToFilter(filterKey);
+        }
+      });
+    });
+  }
+
   function renderDashboard(data) {
     const metrics = data.metrics || {};
     els.emailCount.textContent = metrics.emails ?? 0;
-    const attention = data.needs_attention || [];
+    const allAttention = data.needs_attention || [];
+    const dismissedAttention = getDismissedAttentionIds();
+    const attention = allAttention.filter(item => {
+      const id = attentionSourceId(item);
+      return !id || !dismissedAttention.has(id);
+    });
     const waiting = data.waiting_on_others || [];
     els.importantCount.textContent = attention.length;
     els.attentionBadge.textContent = `${attention.length} item${attention.length === 1 ? '' : 's'}`;
@@ -638,12 +826,29 @@ document.addEventListener('DOMContentLoaded', () => {
       ? attention.slice(0, 5).map((item, index) => {
           const title = decodeHtml(item.subject || item.title || conciseActionTitle(item.description || item.reason) || 'Your task');
           const description = decodeHtml(item.description || item.reason || 'Needs follow-up');
-          const sourceId = attentionSourceId(item);
+          const sourceId = attentionSourceId(item) || `attention-${index}`;
           const email = (data.emails || []).find(candidate => String(emailKey(candidate)) === sourceId) || {};
           const context = email.context_scores || {};
           const meta = [context.requires_reply ? 'Reply requested' : item.deadline ? 'Deadline' : 'Review requested', senderName(email.sender || item.sender || ''), item.deadline ? humanWhen(item.deadline) : formatDate(email.date || email.timestamp)].filter(Boolean).join(' · ');
           const secondary = context.work_allowed ? '<button type="button" data-attention-action="work">Open Work</button>' : context.requires_reply ? '<button type="button" data-attention-action="draft">Draft reply</button>' : item.deadline ? '<button type="button" data-attention-action="calendar">View calendar</button>' : '';
-          return `<li class="attention-link" data-source-id="${escapeHtml(sourceId)}" data-kyle-type="email" data-kyle-id="${escapeHtml(sourceId || `attention-${index}`)}" data-kyle-label="${escapeHtml(title)}"><button class="attention-main" type="button"><span class="priority-dot" aria-hidden="true"></span><span><strong>${escapeHtml(title)}</strong><span class="attention-description">${escapeHtml(description)}</span><small>${escapeHtml(meta)}</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></button><div class="attention-actions"><button type="button" data-attention-action="email">Open email</button>${secondary}</div></li>`;
+          return `
+            <li class="attention-link" data-source-id="${escapeHtml(sourceId)}" data-kyle-type="email" data-kyle-id="${escapeHtml(sourceId || `attention-${index}`)}" data-kyle-label="${escapeHtml(title)}">
+              <button class="attention-main" type="button">
+                <span class="priority-dot" aria-hidden="true"></span>
+                <span>
+                  <strong>${escapeHtml(title)}</strong>
+                  <span class="attention-description">${escapeHtml(description)}</span>
+                  <small>${escapeHtml(meta)}</small>
+                </span>
+                <i class="fas fa-arrow-right" aria-hidden="true"></i>
+              </button>
+              <div class="attention-actions">
+                <button type="button" data-attention-action="email">Open email</button>
+                ${secondary}
+                <button type="button" class="btn-complete-task" data-attention-action="complete" title="Mark this task completed"><i class="fas fa-check"></i> Done</button>
+                <button type="button" class="btn-ignore-task" data-attention-action="ignore" title="Ignore for now"><i class="fas fa-eye-slash"></i> Ignore</button>
+              </div>
+            </li>`;
         }).join('')
       : '<li class="overview-empty"><strong>Inbox clear</strong><span>Nothing needs your attention right now.</span></li>';
 
@@ -661,10 +866,10 @@ document.addEventListener('DOMContentLoaded', () => {
     els.attentionList.querySelectorAll('[data-kyle-id]')
       .forEach(element => {
         window.MailmateObjects?.register({
-        type: element.dataset.kyleType,
-        id: element.dataset.kyleId,
-        label: element.dataset.kyleLabel,
-        page: 'overview'
+          type: element.dataset.kyleType,
+          id: element.dataset.kyleId,
+          label: element.dataset.kyleLabel,
+          page: 'overview'
         }, element);
         element.querySelector('.attention-main')?.addEventListener('click', () => openSourceEmail(element.dataset.sourceId));
         element.querySelectorAll('[data-attention-action]').forEach(button => button.addEventListener('click', event => {
@@ -674,11 +879,23 @@ document.addEventListener('DOMContentLoaded', () => {
           if (action === 'calendar') return showTab('calendar');
           if (action === 'work') { const job = workJobs.find(candidate => String(candidate.source?.message_id || '') === element.dataset.sourceId); if (job) selectedJobId = job.id; return showTab('work'); }
           if (action === 'draft') return window.Kyle?.handlePrompt?.(`Draft a reply to ${element.dataset.kyleLabel}`);
+          if (action === 'complete' || action === 'ignore') {
+            dismissAttentionItem(element.dataset.sourceId);
+            window.KyleTools?.execute?.([{ tool: 'ui.toast', args: { message: action === 'complete' ? 'Task marked as completed' : 'Item dismissed' } }]);
+            element.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
+            element.style.opacity = '0';
+            element.style.transform = 'translateX(20px)';
+            setTimeout(() => {
+              renderDashboard(state.data || { emails: [], needs_attention: [], waiting_on_others: [], metrics: {} });
+            }, 230);
+            return;
+          }
         }));
       });
     els.waitingList.querySelectorAll('[data-source-id]').forEach(element => element.querySelector('button')?.addEventListener('click', () => openSourceEmail(element.dataset.sourceId)));
 
     renderUpcomingFromContext();
+    renderOverviewEmailAnalytics(data.emails || []);
 
     renderEmails(data.emails || []);
     renderWork(data);
@@ -842,8 +1059,22 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   }
 
+  function isSuspiciousEmail(email) {
+    if (!email) return false;
+    const labels = Array.isArray(email.labels) ? email.labels : [];
+    if (labels.includes('SPAM') || labels.includes('TRASH')) return true;
+    if (email.privacy_gate?.routing === 'BLOCK') return true;
+    const text = `${email.subject || ''} ${email.snippet || ''} ${email.sender || ''}`.toLowerCase();
+    const moneyScam = /\b(won|winner|lottery|prize|jackpot|claim\s+reward|inheritance|funds?\s+transfer|crypto\s+giveaway|casino|western union)\b/i.test(text);
+    const credentialScam = /\b(password|verify your account|account (?:suspended|locked|terminated|compromised)|unauthorized access|login immediately|credentials?|security notice.*click here|update your (?:payment|billing))\b/i.test(text);
+    const phishUrl = /https?:\/\/(?:\d{1,3}\.){3}\d{1,3}|\b(?:bit\.ly|tinyurl\.com|t\.co|is\.gd)\//i.test(text);
+    const urgentAction = /\b(act immediately|within 24 hours|urgent notice|final warning)\b/i.test(text);
+    return Boolean(moneyScam || (credentialScam && (urgentAction || phishUrl)) || (urgentAction && phishUrl));
+  }
+
   function renderEmails(emails) {
     window.MailmateObjects?.unregisterType('email');
+    updateFilterBadges(state.data?.emails || emails);
     const filtered = emails.filter(email => {
       if (state.inboxFilter === 'important') return isImportant(email);
       if (state.inboxFilter === 'action') {
@@ -851,6 +1082,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return Boolean(context.attention_allowed || context.requires_reply || context.work_allowed || context.calendar_allowed);
       }
       if (state.inboxFilter === 'unread') return email.is_read === false;
+      if (state.inboxFilter === 'phishing') return isSuspiciousEmail(email);
       return true;
     });
 
@@ -858,13 +1090,14 @@ document.addEventListener('DOMContentLoaded', () => {
     els.emailList.innerHTML = filtered.length
       ? filtered.slice(0, 40).map((email, index) => {
         const selected = state.selectedEmailId && state.selectedEmailId === emailKey(email);
+        const suspicious = isSuspiciousEmail(email);
         return `
-          <article class="email-item ${selected ? 'is-selected' : ''} ${email.is_read === false ? 'is-unread' : ''} ${isImportant(email) ? 'is-important' : ''}" data-index="${index}" data-kyle-type="email" data-kyle-id="${escapeHtml(emailKey(email))}" data-kyle-label="${escapeHtml(email.subject || 'No subject')}">
+          <article class="email-item ${selected ? 'is-selected' : ''} ${email.is_read === false ? 'is-unread' : ''} ${isImportant(email) ? 'is-important' : ''} ${suspicious ? 'is-suspicious' : ''}" data-index="${index}" data-kyle-type="email" data-kyle-id="${escapeHtml(emailKey(email))}" data-kyle-label="${escapeHtml(email.subject || 'No subject')}">
             <span class="email-marker"></span>
             <div class="email-copy">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">
                 <p class="email-sender">${escapeHtml(senderName(email.sender))}</p>
-                ${privacyPillHtml(email.privacy_gate, email)}
+                ${suspicious ? '<span class="privacy-pill privacy-block" style="font-size:10px;padding:2px 6px;color:#ef4444;border-color:rgba(239,68,68,0.3);"><i class="fas fa-triangle-exclamation"></i> Suspicious</span>' : privacyPillHtml(email.privacy_gate, email)}
               </div>
               <p class="email-subject">${escapeHtml(email.subject || 'No subject')}</p>
               <p class="email-preview">${safeSnippet(emailOverviewText(email))}</p>
@@ -2008,7 +2241,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
   function attentionSourceId(item) {
-    return String(item?.source_message_id || item?.message_id || item?.email_id || '').trim();
+    return String(item?.source_message_id || item?.message_id || item?.email_id || item?.id || item?.subject || item?.title || '').trim();
   }
 
   function isImportant(email) {
@@ -2503,27 +2736,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderAllDayRow(container, weekStart, items) {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     let html = '<div class="calendar-all-day-label">all-day / deadlines</div>';
 
     for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
       const day = addDays(weekStart, dayIndex);
+      const checkDay = new Date(day);
+      checkDay.setHours(0, 0, 0, 0);
+      const isToday = checkDay.getTime() === today.getTime();
+      const isPast = checkDay.getTime() < today.getTime();
       const dayKey = toLocalDateInput(day);
-      const isToday = day.toDateString() === today.toDateString();
       const dayItems = items.filter(event => {
         if (!event.all_day) return false;
         return String(event.start).slice(0, 10) === dayKey;
       });
 
       html += `
-        <div class="calendar-all-day-cell">
-          <div class="calendar-day-head ${isToday ? 'is-today' : ''}">
+        <div class="calendar-all-day-cell ${isPast ? 'is-past' : ''} ${isToday ? 'is-today' : ''}">
+          <div class="calendar-day-head ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}">
             <small>${day.toLocaleDateString([], { weekday: 'short' })}</small>
             <strong>${day.getDate()}</strong>
           </div>
           <div class="calendar-all-day-events">
             ${dayItems.map(event => `
-              <button class="calendar-allday-chip ${eventTypeClass(event)} urgency-${eventUrgency(event)} ${event.conflict ? 'conflict' : ''}" type="button" data-calendar-event="${escapeHtml(event.id)}" data-kyle-type="calendar-event" data-kyle-id="${escapeHtml(event.id)}" data-kyle-label="${escapeHtml(event.title)}" title="${escapeHtml(event.deadline_label || event.title)}">
-                ${escapeHtml(event.title)}
+              <button class="calendar-allday-chip ${eventTypeClass(event)} urgency-${eventUrgency(event)} ${event.conflict ? 'conflict' : ''} ${isPast ? 'is-past' : ''}" type="button" data-calendar-event="${escapeHtml(event.id)}" data-kyle-type="calendar-event" data-kyle-id="${escapeHtml(event.id)}" data-kyle-label="${escapeHtml(event.title)}" title="${isPast ? '[Past] ' : ''}${escapeHtml(event.deadline_label || event.title)}">
+                ${isPast ? '<span class="past-badge">Past</span> ' : ''}${escapeHtml(event.title)}
               </button>`).join('')}
           </div>
         </div>`;
@@ -2535,13 +2772,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function eventUrgency(event) {
     if (event.conflict) return 'clash';
-    if (event.urgency) return event.urgency;
     const start = parseEventStart(event);
-    if (!start) return 'normal';
+    if (!start) return event.urgency || 'normal';
     const hours = (start.getTime() - Date.now()) / 3600000;
+    if (hours < 0) return 'past';
     if (hours <= 6) return 'critical';
     if (hours <= 24) return 'urgent';
-    return 'normal';
+    return event.urgency || 'normal';
   }
 
   function eventTypeClass(event) {
@@ -2550,6 +2787,32 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'source-google';
   }
 
+  function calendarEventLanes(events) {
+    const entries = events.map(event => {
+      const start = parseEventStart(event);
+      const end = parseEventEnd(event) || new Date(start.getTime() + 30 * 60000);
+      return { event, start, end: end > start ? end : new Date(start.getTime() + 30 * 60000) };
+    });
+    const lanes = new Map();
+    for (let index = 0; index < entries.length;) {
+      const cluster = [];
+      let clusterEnd = entries[index].end;
+      do {
+        const entry = entries[index++];
+        cluster.push(entry);
+        if (entry.end > clusterEnd) clusterEnd = entry.end;
+      } while (index < entries.length && entries[index].start < clusterEnd);
+      const laneEnds = [];
+      cluster.forEach(entry => {
+        let lane = laneEnds.findIndex(laneEnd => laneEnd <= entry.start);
+        if (lane === -1) lane = laneEnds.length;
+        laneEnds[lane] = entry.end;
+        lanes.set(entry.event, { lane, count: 0 });
+      });
+      cluster.forEach(entry => { lanes.get(entry.event).count = laneEnds.length; });
+    }
+    return lanes;
+  }
   function renderTimedGrid(container, weekStart, items) {
     const START_HOUR = 0;
     const END_HOUR = 24;
@@ -2561,19 +2824,24 @@ document.addEventListener('DOMContentLoaded', () => {
     for (let hour = START_HOUR; hour <= END_HOUR; hour += 1) {
       const top = (hour - START_HOUR) * HOUR_HEIGHT;
       const labelDate = new Date(2000, 0, 1, hour % 24);
-      timeHtml += `<span class="calendar-time-label" style="top:${top}px">${labelDate.toLocaleTimeString([], { hour: 'numeric' })}</span>`;
+      const isFirst = hour === START_HOUR;
+      timeHtml += `<span class="calendar-time-label ${isFirst ? 'is-first' : ''}" style="top:${top}px">${labelDate.toLocaleTimeString([], { hour: 'numeric' })}</span>`;
     }
     timeHtml += '</div>';
 
     let columns = '';
     for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
       const day = addDays(weekStart, dayIndex);
-      const isToday = day.toDateString() === today.toDateString();
+      const checkDay = new Date(day);
+      checkDay.setHours(0, 0, 0, 0);
+      const isToday = checkDay.getTime() === today.getTime();
+      const isPast = checkDay.getTime() < today.getTime();
       const dayKey = toLocalDateInput(day);
 
       const dayItems = items
         .filter(event => !event.all_day && parseEventStart(event)?.toDateString() === day.toDateString())
         .sort((a, b) => parseEventStart(a) - parseEventStart(b));
+      const eventLanes = calendarEventLanes(dayItems);
 
       let blocks = '';
       dayItems.forEach(event => {
@@ -2588,16 +2856,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const top = ((visibleStart - START_HOUR * 60) / 60) * HOUR_HEIGHT;
         const height = Math.max(22, ((visibleEnd - visibleStart) / 60) * HOUR_HEIGHT - 2);
+        const layout = eventLanes.get(event) || { lane: 0, count: 1 };
+        const width = 100 / layout.count;
+        const left = layout.lane * width;
         const classes = [
           'calendar-event-block',
           height < 42 ? 'is-compact' : '',
           eventTypeClass(event),
           `urgency-${eventUrgency(event)}`,
-          event.conflict ? 'conflict' : ''
+          event.conflict ? 'conflict' : '',
+          isPast ? 'is-past' : ''
         ].filter(Boolean).join(' ');
 
         blocks += `
-          <button class="${classes}" type="button" data-calendar-event="${escapeHtml(event.id)}" data-kyle-type="calendar-event" data-kyle-id="${escapeHtml(event.id)}" data-kyle-label="${escapeHtml(event.title)}" style="top:${top}px;height:${height}px" title="${escapeHtml(event.title)}">
+          <button class="${classes}" type="button" data-calendar-event="${escapeHtml(event.id)}" data-kyle-type="calendar-event" data-kyle-id="${escapeHtml(event.id)}" data-kyle-label="${escapeHtml(event.title)}" style="top:${top}px;height:${height}px;left:calc(${left}% + 4px);right:auto;width:calc(${width}% - 8px)" title="${isPast ? '[Past] ' : ''}${escapeHtml(event.title)}">
             <strong>${event.source === 'ai' ? '<span class="calendar-ai-mark">AI</span> ' : ''}${escapeHtml(event.title)}</strong>
             <small>${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${event.conflict ? ' · CLASH' : event.source === 'ai' ? ' · AUTO' : ''}</small>
           </button>`;
@@ -2612,7 +2884,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      columns += `<div class="calendar-day-column ${isToday ? 'is-today' : ''}" data-calendar-day="${dayKey}">${blocks}${nowLine}</div>`;
+      columns += `<div class="calendar-day-column ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}" data-calendar-day="${dayKey}">${blocks}${nowLine}</div>`;
     }
 
     container.innerHTML = timeHtml + columns;
