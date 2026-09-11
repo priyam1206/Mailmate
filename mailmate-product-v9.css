@@ -148,15 +148,24 @@ body #kyleMount .kyle-widget[data-state="SPEAKING"] .kyle-result-panel {
   display: none !important;
 }
 
-/* Floating conversation is opt-in. Overview always uses Canvas instead. */
+/* Floating conversation history is opt-in. Overview always uses Canvas instead.
+   Collapsing history must not hide Kyle's current answer: the caption is the only
+   response surface for compact/floating pages such as Inbox. */
 #kyleMount.kyle-overview-mount .kyle-transcript,
 #kyleMount.kyle-overview-mount .kyle-history-toggle,
 #kyleMount.kyle-overview-mount .kyle-caption-bubble {
   display: none !important;
 }
-#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-transcript,
-#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-caption-bubble {
+#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-transcript {
   display: none !important;
+}
+#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-caption-bubble.is-visible {
+  display: block !important;
+  max-height: 180px !important;
+  opacity: 1 !important;
+  transform: none !important;
+  overflow: visible !important;
+  pointer-events: auto !important;
 }
 #kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-history-toggle:not([hidden]) {
   display: grid !important;
