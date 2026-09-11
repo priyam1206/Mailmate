@@ -1,5 +1,6 @@
 import os
 import json
+import secrets
 from urllib.parse import urlencode, urlparse
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -16,7 +17,6 @@ from copy import deepcopy
 from dateutil import parser as date_parser
 
 from flask import Flask, request, jsonify, redirect, send_from_directory, session, abort, Response
-from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Resolve everything relative to app.py, not the shell/Antigravity working directory.
@@ -27,9 +27,13 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Load environment before importing services; service modules may read env at import time.
 load_dotenv(BASE_DIR / 'api.env')
 
+APP_ENV = str(os.getenv('MAILMATE_ENV') or os.getenv('FLASK_ENV') or 'development').strip().lower()
+IS_PRODUCTION = APP_ENV in {'prod', 'production'}
+
 # Localhost-only OAuth development flags. Keep these before google-auth-oauthlib is used.
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
-os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+if not IS_PRODUCTION:
+    os.environ.setdefault('OAUTHLIB_INSECURE_TRANSPORT', '1')
+    os.environ.setdefault('OAUTHLIB_RELAX_TOKEN_SCOPE', '1')
 
 from email.utils import parseaddr
 from services.whisper_service import whisper_service
@@ -47,14 +51,20 @@ from services.mail_context_service import mail_context_service
 from services.kyle_agent_planner import plan_kyle_turn
 from services.mail_sync_service import MailSyncService
 from services.elevenlabs_service import ElevenLabsError, signed_agent_url, status as elevenlabs_status, synthesize as elevenlabs_synthesize
+from services.secure_storage import DataEncryptionError, read_encrypted_json, write_encrypted_json
+from services.cloud_key_recovery import cloud_key_recovery
 
 app = Flask(__name__, static_folder=None)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-secret-key-123')
+_session_secret = str(os.getenv('FLASK_SECRET_KEY') or '').strip()
+if IS_PRODUCTION and len(_session_secret) < 32:
+    raise RuntimeError('FLASK_SECRET_KEY must be set to at least 32 characters in production.')
+app.secret_key = _session_secret or secrets.token_urlsafe(32)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Lax'
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    MAX_CONTENT_LENGTH=25 * 1024 * 1024,
 )
-CORS(app)
 
 # Initialize local Whisper STT in background
 if str(os.getenv('MAILMATE_DISABLE_WHISPER_INIT', '')).strip().lower() not in {'1', 'true', 'yes', 'on'}:
@@ -82,6 +92,33 @@ _mail_send_operations = {}
 _calendar_dismissal_lock = threading.Lock()
 _mailbox_snapshot_lock = threading.Lock()
 _mailbox_snapshots = {}
+
+
+@app.before_request
+def enforce_same_origin_api_writes():
+    """Reject cross-site browser writes while preserving non-browser clients."""
+    if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'} or not request.path.startswith('/api/'):
+        return None
+    origin = str(request.headers.get('Origin') or '').strip()
+    if not origin:
+        return None
+    parsed = urlparse(origin)
+    if parsed.scheme not in {'http', 'https'} or parsed.netloc.lower() != request.host.lower():
+        return jsonify({'error': 'Cross-origin request rejected'}), 403
+    return None
+
+
+@app.after_request
+def apply_security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'DENY')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)')
+    if request.path.startswith('/api/'):
+        response.headers.setdefault('Cache-Control', 'no-store')
+    if request.is_secure:
+        response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    return response
 
 
 def _run_scheduled_kyle_goal(automation):
@@ -138,11 +175,11 @@ def _calendar_account_key(profile=None):
 
 
 def _read_calendar_dismissals():
-    if not CALENDAR_DISMISSALS_FILE.exists():
-        return {}
     try:
-        data = json.loads(CALENDAR_DISMISSALS_FILE.read_text(encoding='utf-8'))
+        data = read_encrypted_json(CALENDAR_DISMISSALS_FILE, 'calendar_dismissals', default={})
         return data if isinstance(data, dict) else {}
+    except DataEncryptionError:
+        raise
     except Exception:
         return {}
 
@@ -165,9 +202,7 @@ def _remember_calendar_dismissal(profile, marker):
         values = {str(value) for value in (data.get(account) or []) if value}
         values.add(marker)
         data[account] = sorted(values)
-        tmp = CALENDAR_DISMISSALS_FILE.with_suffix('.tmp')
-        tmp.write_text(json.dumps(data, indent=2), encoding='utf-8')
-        tmp.replace(CALENDAR_DISMISSALS_FILE)
+        write_encrypted_json(CALENDAR_DISMISSALS_FILE, data, 'calendar_dismissals')
     return True
 
 
@@ -722,7 +757,6 @@ def auth_google_callback():
         app.logger.exception('Google OAuth callback failed')
         return jsonify({
             'error': 'Google OAuth callback failed',
-            'detail': str(exc),
             'hasState': bool(state),
             'hasCodeVerifier': bool(code_verifier),
             'callbackHost': request.host,
@@ -782,10 +816,9 @@ def user_avatar():
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
     session.clear()
-    credential_file = DATA_DIR / 'google_credentials.json'
     try:
-        if credential_file.exists():
-            credential_file.unlink()
+        from services.secure_storage import delete_encrypted_json
+        delete_encrypted_json(DATA_DIR / 'google_credentials.json')
     except Exception as exc:
         app.logger.warning('Could not delete local Google credentials: %s', exc)
     return jsonify({"ok": True, "redirect": "/"})
@@ -1096,7 +1129,9 @@ def _build_live_dashboard(profile, force_ai=False):
         email['privacy_gate'] = PrivacyGate.evaluate(email)
 
     user_id = profile.get('id') or profile.get('sub') or profile.get('email') or ''
-    context_result = mail_context_service.update(user_id, emails)
+    # Keep first paint deterministic and fast. Kyle can do deeper model-backed
+    # reasoning on demand after the current Gmail overview is visible.
+    context_result = mail_context_service.update(user_id, emails, allow_semantic=False)
     replied_source_ids = _resolved_message_ids_from_threads(threads)
     if replied_source_ids:
         mail_context_service.delete_context(user_id, replied_source_ids)
@@ -1433,19 +1468,45 @@ def cache_status():
     if not profile:
         return jsonify({"authenticated": False, "supabase": {"enabled": False, "configured": False, "ready": False}}), 401
 
+    supabase_status = mail_context_service.status()
     return jsonify({
         "authenticated": True,
-        "supabase": {"enabled": False, "configured": False, "ready": False, "mode": "disabled"},
+        "supabase": supabase_status,
         "cache": {
-            "available": False,
-            "mode": "live-gmail",
-            "retention": "transient-browser-ram-only",
+            "available": bool(supabase_status.get('ready')),
+            "mode": "encrypted-derived-context" if supabase_status.get('ready') else "live-gmail",
+            "retention": "encrypted-derived-context-only",
         },
         "policy": {
             "sync_check_seconds": CACHE_SYNC_SECONDS,
             "reprocess_seconds": CACHE_REPROCESS_SECONDS,
         }
     })
+
+
+@app.route('/api/security/cloud-recovery', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def cloud_recovery_settings():
+    profile = get_user_profile()
+    if not profile:
+        return jsonify({'error': 'Not authenticated'}), 401
+    identity = profile.get('id') or profile.get('sub') or profile.get('email')
+    try:
+        if request.method == 'POST':
+            return jsonify({'ok': True, **cloud_key_recovery.enroll(identity)})
+        if request.method == 'PUT':
+            credentials = read_encrypted_json(DATA_DIR / 'google_credentials.json', 'google_credentials', default=None)
+            recovered = cloud_key_recovery.recover_key(identity)
+            from services.secure_storage import install_recovered_data_key
+            install_recovered_data_key(recovered)
+            if credentials:
+                write_encrypted_json(DATA_DIR / 'google_credentials.json', credentials, 'google_credentials')
+            return jsonify({'ok': True, **cloud_key_recovery.status(identity)})
+        if request.method == 'DELETE':
+            return jsonify({'ok': True, **cloud_key_recovery.disable(identity)})
+        return jsonify(cloud_key_recovery.status(identity))
+    except Exception as exc:
+        app.logger.warning('Cloud key recovery request failed: %s', type(exc).__name__)
+        return jsonify({'error': 'Cloud recovery is temporarily unavailable.'}), 503
 
 
 @app.route('/api/gmail/messages/<message_id>', methods=['DELETE'])
@@ -3030,7 +3091,8 @@ def elevenlabs_speak():
         content, content_type = elevenlabs_synthesize(text)
         return Response(content, status=200, content_type=content_type, headers={'Cache-Control': 'no-store'})
     except ElevenLabsError as exc:
-        return jsonify({'error': str(exc), 'fallback': 'browser'}), 503
+        app.logger.warning('ElevenLabs speech failed: %s', type(exc).__name__)
+        return jsonify({'error': 'ElevenLabs speech is temporarily unavailable.'}), 503
 
 
 @app.route('/api/voice/agent/signed-url')
@@ -3040,7 +3102,8 @@ def elevenlabs_agent_signed_url():
     try:
         return jsonify({'signed_url': signed_agent_url()})
     except ElevenLabsError as exc:
-        return jsonify({'error': str(exc)}), 503
+        app.logger.warning('ElevenLabs agent connection failed: %s', type(exc).__name__)
+        return jsonify({'error': 'ElevenLabs agent is temporarily unavailable.'}), 503
 
 
 @app.route('/api/kyle/chat', methods=['POST'])
@@ -3090,11 +3153,16 @@ def kyle_chat_endpoint():
     })
 
 if __name__ == '__main__':
-    print('[Mailmate] Running with zero central mailbox retention (transient browser RAM only).')
+    print('[Mailmate] Raw Gmail content is transient; persisted derived state is encrypted when enabled.')
     port = int(os.getenv('PORT', 5000))
-    print(f"Flask server running on http://localhost:{port}")
+    host = str(os.getenv('HOST') or ('0.0.0.0' if IS_PRODUCTION else '127.0.0.1')).strip()
+    print(f"MailMate server running on http://{host}:{port}")
     print(f"[Static] project root: {BASE_DIR}")
     print(f"[Static] styles.css: {(BASE_DIR / 'styles.css').is_file()}")
-    app.run(port=port, host='0.0.0.0', debug=False, threaded=True)
+    if IS_PRODUCTION:
+        from waitress import serve
+        serve(app, host=host, port=port, threads=max(4, int(os.getenv('WEB_THREADS', '8'))))
+    else:
+        app.run(port=port, host=host, debug=False, threaded=True)
 
 

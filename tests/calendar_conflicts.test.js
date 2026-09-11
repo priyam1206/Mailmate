@@ -48,10 +48,13 @@ const sameTitleOverlap = CalendarConflicts.annotate([
 assert.equal(sameTitleOverlap.events.length, 2);
 assert.deepEqual(sameTitleOverlap.pairs, [{ a: 'standup-a', b: 'standup-b', overlapMinutes: 60 }]);
 
-// Human Google events remain blocking even when their title contains words
-// that MailMate uses for derived deadline/reminder points.
+// A deadline marker does not occupy time unless attendance metadata says it does.
 assert.equal(pairCount([
-  event('deadline-review', { title: 'Deadline review', blocking: true }),
+  event('deadline-review', { title: 'Deadline review', blocking: true, attendees: [{ self: true }] }),
+  event('meeting', { start: '2026-09-08T10:30:00+05:30', end: '2026-09-08T11:30:00+05:30' })
+]), 0);
+assert.equal(pairCount([
+  event('deadline-review', { title: 'Deadline review', blocking: true, location: 'Conference room' }),
   event('meeting', { start: '2026-09-08T10:30:00+05:30', end: '2026-09-08T11:30:00+05:30' })
 ]), 1);
 assert.equal(pairCount([

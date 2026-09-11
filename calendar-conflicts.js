@@ -30,14 +30,20 @@
     return String(event?.source || 'google').trim().toLowerCase();
   }
 
+  function isDeadlineMarker(event) {
+    const deadlineWording = /\b(deadline|due|submit|submission|registration closes?)\b/.test(normalizedTitle(event));
+    const invitedOthers = (event?.attendees || []).some(attendee => !attendee?.self);
+    const attendanceSignal = Boolean(event?.location || invitedOthers || event?.hangout_link);
+    return deadlineWording && !attendanceSignal;
+  }
+
   function isBlocking(event) {
     const source = sourceOf(event);
 
-    // Derived MailMate deadline/reminder points are identified by metadata,
-    // not title wording. A real timed Google event called "Deadline review"
-    // or "Reminder: dentist" must still be allowed to conflict normally.
+    // Derived deadlines and plain deadline markers do not occupy time. A
+    // location, attendee, or meeting link makes it an attendance commitment.
     if (DERIVED_SOURCES.has(source)) return false;
-    if (source !== 'google' || event?.all_day || !interval(event)) return false;
+    if (source !== 'google' || event?.all_day || !interval(event) || isDeadlineMarker(event)) return false;
     if (event?.status === 'cancelled' || event?.cancelled === true || event?.transparency === 'transparent') return false;
     if (event?.blocking === false) return false;
     return true;

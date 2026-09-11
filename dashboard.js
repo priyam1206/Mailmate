@@ -93,13 +93,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const liveProfile = await hydrateAuthenticatedProfile();
     if (!liveProfile && !state.userId) return;
     setProfile(liveProfile || {});
+    window.MailmateBoot?.mark?.('profile');
 
-    // Paint the last same-session snapshot immediately, then refresh network data.
-    hydrateSessionSnapshot();
     const inboxPromise = loadInbox(false);
     const healthPromise = loadHealth();
     const automationsPromise = loadAutomations();
     await Promise.allSettled([inboxPromise, healthPromise, automationsPromise]);
+    await loadCloudRecovery();
     startCalendarAutoSync();
     startInboxAutoSync();
   }
@@ -124,37 +124,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.warn('[Mailmate] profile hydration failed:', error.message || error);
       return null;
-    }
-  }
-
-  function sessionSnapshotKey() {
-    return `mailmate.dashboard.${state.userId || 'anonymous'}`;
-  }
-
-  function hydrateSessionSnapshot() {
-    if (!state.userId) return false;
-    try {
-      const raw = sessionStorage.getItem(sessionSnapshotKey());
-      if (!raw) return false;
-      const snapshot = JSON.parse(raw);
-      if (!snapshot?.data || Date.now() - Number(snapshot.savedAt || 0) > 15 * 60 * 1000) return false;
-      state.data = normalizeTextTree(snapshot.data);
-      state.calendarDismissedMarkers = new Set(state.data.calendar_dismissed_markers || []);
-      renderDashboard(state.data);
-      if (state.data.user) setProfile(state.data.user);
-      els.processState.textContent = 'Showing recent session · refreshing';
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function saveSessionSnapshot(data) {
-    if (!state.userId || !data) return;
-    try {
-      sessionStorage.setItem(sessionSnapshotKey(), JSON.stringify({ savedAt: Date.now(), data }));
-    } catch (_) {
-      // Session storage is only a speed optimization.
     }
   }
 
@@ -218,6 +187,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     $('logoutBtn')?.addEventListener('click', logout);
     $('sidebarProfileBtn')?.addEventListener('click', () => showTab('settings'));
+    $('cloudRecoveryBtn')?.addEventListener('click', toggleCloudRecovery);
+    $('cloudRecoveryEnable')?.addEventListener('click', enableCloudRecovery);
+    $('cloudRecoveryLater')?.addEventListener('click', dismissCloudRecovery);
 
     const themeToggleBtn = $('themeToggleBtn');
     const darkModeToggle = $('settingDarkMode');
@@ -429,6 +401,76 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  let cloudRecoveryState = null;
+
+  async function loadCloudRecovery() {
+    const button = $('cloudRecoveryBtn');
+    try {
+      const response = await fetch(`${API_BASE}/api/security/cloud-recovery`, { cache: 'no-store' });
+      cloudRecoveryState = await response.json();
+      if (!response.ok) throw new Error(cloudRecoveryState.error || 'Recovery status unavailable');
+      if (button) {
+        button.disabled = !cloudRecoveryState.available;
+        button.textContent = cloudRecoveryState.recoveryNeeded ? 'Restore key' : (cloudRecoveryState.enrolled ? 'Enabled' : (cloudRecoveryState.available ? 'Enable' : 'Administrator setup required'));
+      }
+      const dismissed = localStorage.getItem(`mailmate.recovery.dismissed.${state.userId}`) === '1';
+      if (cloudRecoveryState.recommended && !dismissed) openCloudRecovery();
+    } catch (_) {
+      if (button) { button.disabled = true; button.textContent = 'Administrator setup required'; }
+    }
+  }
+
+  function openCloudRecovery() {
+    const modal = $('cloudRecoveryModal');
+    if (!modal) return;
+    modal.hidden = false;
+    document.body.classList.add('modal-open');
+    requestAnimationFrame(() => modal.classList.add('is-visible'));
+  }
+
+  function closeCloudRecovery() {
+    const modal = $('cloudRecoveryModal');
+    modal?.classList.remove('is-visible');
+    document.body.classList.remove('modal-open');
+    setTimeout(() => { if (modal && !modal.classList.contains('is-visible')) modal.hidden = true; }, 140);
+  }
+
+  function dismissCloudRecovery() {
+    localStorage.setItem(`mailmate.recovery.dismissed.${state.userId}`, '1');
+    closeCloudRecovery();
+  }
+
+  async function enableCloudRecovery() {
+    const button = $('cloudRecoveryEnable');
+    if (button) { button.disabled = true; button.textContent = 'Protecting key...'; }
+    try {
+      const response = await fetch(`${API_BASE}/api/security/cloud-recovery`, { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not enable recovery');
+      cloudRecoveryState = result;
+      closeCloudRecovery();
+      await loadCloudRecovery();
+    } catch (error) {
+      addError(`Recovery: ${error.message}`);
+    } finally {
+      if (button) { button.disabled = false; button.textContent = 'Enable recovery'; }
+    }
+  }
+
+  async function toggleCloudRecovery() {
+    if (!cloudRecoveryState?.available) return;
+    if (cloudRecoveryState.recoveryNeeded) {
+      const response = await fetch(`${API_BASE}/api/security/cloud-recovery`, { method: 'PUT' });
+      const result = await response.json();
+      if (!response.ok) return addError(`Recovery: ${result.error || 'Could not restore key'}`);
+      return loadCloudRecovery();
+    }
+    if (!cloudRecoveryState.enrolled) return openCloudRecovery();
+    if (!window.confirm('Disable Google account recovery for this MailMate key?')) return;
+    await fetch(`${API_BASE}/api/security/cloud-recovery`, { method: 'DELETE' });
+    await loadCloudRecovery();
+  }
+
   async function logout() {
     const button = $('logoutBtn');
     if (button) {
@@ -438,7 +480,6 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const response = await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
       if (!response.ok) throw new Error(`Logout returned ${response.status}`);
-      try { sessionStorage.removeItem(sessionSnapshotKey()); } catch (_) {}
       ['userId', 'userName', 'userPicture'].forEach(key => localStorage.removeItem(key));
       window.location.replace('/');
     } catch (error) {
@@ -488,6 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.data = data;
       state.calendarDismissedMarkers = new Set(data.calendar_dismissed_markers || []);
       renderDashboard(data);
+      window.MailmateBoot?.mark?.('overview');
 
       try {
         const workResponse = await fetch(`${API_BASE}/api/work/jobs${forceRefresh ? '' : '?ensure=1'}`, { cache: 'no-store' });
@@ -498,7 +540,6 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (workSyncError) {
         console.debug('Work sync notice:', workSyncError);
       }
-      saveSessionSnapshot(data);
       if (data.user) setProfile(data.user);
 
       await refreshCalendar(false);
@@ -518,6 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
         els.summaryText.textContent = 'Your inbox summary is temporarily unavailable. Try refresh.';
         window.Kyle?.setContext({ health: state.health, emails: [], metrics: {}, currentPage: state.currentPage });
       }
+      window.MailmateBoot?.mark?.('overview');
     } finally {
       state.mailboxLoadingCount = Math.max(0, state.mailboxLoadingCount - 1);
       $('tab-overview')?.classList.toggle('is-loading', state.mailboxLoadingCount > 0);
@@ -885,7 +927,6 @@ document.addEventListener('DOMContentLoaded', () => {
       email.is_read = true;
       const source = state.data?.emails?.find(item => emailKey(item) === id);
       if (source) source.is_read = true;
-      saveSessionSnapshot(state.data);
       fetch(`${API_BASE}/api/gmail/messages/${encodeURIComponent(id)}/read`, { method: 'POST' })
         .then(async response => {
           if (response.ok) return;
@@ -1004,7 +1045,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       state.selectedEmailId = null;
       renderDashboard(state.data || { emails: [], needs_attention: [], waiting_on_others: [], metrics: {} });
-      saveSessionSnapshot(state.data);
       window.KyleTools?.execute?.([{ tool: 'ui.toast', args: { message: 'Moved to Gmail Trash' } }]);
     } catch (error) {
       addError('Gmail: ' + error.message);
@@ -2748,7 +2788,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (marker) {
       state.calendarDismissedMarkers.add(marker);
       if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
-      saveSessionSnapshot(state.data);
     }
     state.calendarEvents = state.calendarEvents.filter(item => String(item.id) !== String(id));
     renderCalendar();
@@ -2767,7 +2806,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!response.ok) throw new Error(detail.error || `Deadline dismissal returned ${response.status}`);
     state.calendarDismissedMarkers.add(marker);
     if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
-    saveSessionSnapshot(state.data);
     renderCalendar();
     return detail;
   }

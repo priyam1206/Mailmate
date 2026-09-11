@@ -79,9 +79,18 @@ def test_distinct_same_title_google_events_are_not_deduplicated():
     assert {item['id'] for item in annotated if item['conflict']} == {'standup-a', 'standup-b'}
 
 
-def test_explicit_blocking_google_deadline_title_still_conflicts():
+def test_google_deadline_marker_without_attendance_does_not_conflict():
     annotated, pairs = pairs_for(
-        event('deadline-review', title='Deadline review', blocking=True),
+        event('deadline-review', title='Deadline review', blocking=True, attendees=[{'self': True}]),
+        event('meeting', start='2026-09-08T10:30:00+05:30', end='2026-09-08T11:30:00+05:30'),
+    )
+    assert pairs == []
+    assert next(item for item in annotated if item['id'] == 'deadline-review')['blocking'] is False
+
+
+def test_deadline_named_meeting_with_location_can_conflict():
+    annotated, pairs = pairs_for(
+        event('deadline-review', title='Deadline review', blocking=True, location='Conference room'),
         event('meeting', start='2026-09-08T10:30:00+05:30', end='2026-09-08T11:30:00+05:30'),
     )
     assert len(pairs) == 1

@@ -182,7 +182,7 @@
       : callback => setTimeout(callback, 0);
 
     const startedAt = now();
-    const settled = { profile: false, overview: false, calendar: false, health: false };
+    const settled = { profile: false, overview: false };
     let done = false;
     let statusTimer = null;
     let finishTimer = null;
@@ -204,12 +204,10 @@
       const important = document.getElementById('importantCount')?.textContent?.trim();
       const emails = document.getElementById('emailCount')?.textContent?.trim();
       const attention = document.getElementById('attentionList')?.textContent || '';
-      const upcoming = document.getElementById('upcomingList')?.textContent || '';
       const profile = document.getElementById('profileName')?.textContent?.trim();
       return important && important !== '--'
         && emails && emails !== '--'
         && !/Loading current priorities/i.test(attention)
-        && !/Loading upcoming commitments/i.test(upcoming)
         && profile && profile !== 'User';
     }
 
@@ -279,36 +277,16 @@
           } else if (path === '/api/dashboard/overview') {
             tracked = 'overview';
             setStatus('Loading Gmail context');
-          } else if (path === '/api/work/jobs') {
-            setStatus('Checking Kyle Work');
-          } else if (path === '/api/calendar/events') {
-            tracked = 'calendar';
-            setStatus('Loading your calendar');
-          } else if (path === '/api/health') {
-            tracked = 'health';
-            setStatus('Checking local services');
-          } else if (path === '/api/automations') {
-            setStatus('Loading automations');
           }
         }
 
-        try {
-          const response = await baseFetch(input, init);
-          if (tracked) mark(tracked);
-          return response;
-        } catch (error) {
-          if (tracked) mark(tracked);
-          throw error;
-        }
+        return baseFetch(input, init);
       };
       window.fetch.__mailmateNativeBoot = true;
     }
 
     setTimeout(() => {
-      if (!done) {
-        setStatus('Opening workspace');
-        setTimeout(() => finish('timeout'), 180);
-      }
+      if (!done) setStatus('Still checking current Gmail');
     }, 10000);
 
     const api = { setStatus, mark, finish, settled };

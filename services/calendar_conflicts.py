@@ -30,11 +30,19 @@ def _marker(event):
 
 
 def _normalized_title(event):
-    return re.sub(r'[^a-z0-9]+', ' ', str(event.get('title') or '')).strip().lower()
+    return re.sub(r'[^a-z0-9]+', ' ', str(event.get('title') or '').lower()).strip()
 
 
 def _source(event):
     return str(event.get('source') or 'google').strip().lower()
+
+
+def _is_deadline_marker(event):
+    title = _normalized_title(event)
+    deadline_wording = bool(re.search(r'\b(deadline|due|submit|submission|registration closes?)\b', title))
+    invited_others = any(not attendee.get('self') for attendee in (event.get('attendees') or []))
+    attendance_signal = bool(event.get('location') or invited_others or event.get('hangout_link'))
+    return deadline_wording and not attendance_signal
 
 
 def _valid_interval(event):
@@ -47,13 +55,12 @@ def is_blocking_event(event):
     source = _source(event)
     start, end = _valid_interval(event)
 
-    # MailMate-derived deadline/reminder points are metadata-identified and do
-    # not occupy calendar time. Do not infer this from a human event title:
-    # real Google events named "Deadline review" or "Reminder: dentist" can
-    # still be genuine blocking appointments.
+    # Derived deadlines and plain deadline markers do not occupy calendar time.
+    # A location, attendee, or meeting link turns a deadline-named event back
+    # into an attendance commitment that can genuinely clash.
     if source in DERIVED_SOURCES:
         return False
-    if source != 'google' or event.get('all_day') or not start or not end:
+    if source != 'google' or event.get('all_day') or not start or not end or _is_deadline_marker(event):
         return False
     if event.get('status') == 'cancelled' or event.get('cancelled') is True:
         return False
