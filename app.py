@@ -1095,7 +1095,9 @@ def _build_live_dashboard(profile, force_ai=False):
         email['privacy_gate'] = PrivacyGate.evaluate(email)
 
     user_id = profile.get('id') or profile.get('sub') or profile.get('email') or ''
-    context_result = mail_context_service.update(user_id, emails)
+    # Keep first paint deterministic and fast. Kyle can do deeper model-backed
+    # reasoning on demand after the current Gmail overview is visible.
+    context_result = mail_context_service.update(user_id, emails, allow_semantic=False)
     replied_source_ids = _resolved_message_ids_from_threads(threads)
     if replied_source_ids:
         mail_context_service.delete_context(user_id, replied_source_ids)

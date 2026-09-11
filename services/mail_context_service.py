@@ -409,7 +409,7 @@ class MailContextService:
     def _sync_key(user_uuid):
         return opaque_key('sync_state', user_uuid)
 
-    def update(self, user_id, messages):
+    def update(self, user_id, messages, allow_semantic=True):
         user_key = str(user_id or 'default').lower()
         changed = []
         pending = []
@@ -427,7 +427,7 @@ class MailContextService:
                     continue
                 pending.append(message)
 
-        enabled = str(os.getenv('MAILMATE_SEMANTIC_CLASSIFIER_ENABLED', '1')).lower() in {'1', 'true', 'yes', 'on'}
+        enabled = allow_semantic and str(os.getenv('MAILMATE_SEMANTIC_CLASSIFIER_ENABLED', '1')).lower() in {'1', 'true', 'yes', 'on'}
         semantic_by_id = {}
         if enabled and not (os.getenv('PYTEST_CURRENT_TEST') and 'MAILMATE_TEST_SEMANTIC' not in os.environ):
             for routing in ('CLOUD_ALLOWED', 'LOCAL_ONLY'):

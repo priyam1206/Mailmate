@@ -93,9 +93,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const liveProfile = await hydrateAuthenticatedProfile();
     if (!liveProfile && !state.userId) return;
     setProfile(liveProfile || {});
+    window.MailmateBoot?.mark?.('profile');
 
-    // Paint the last same-session snapshot immediately, then refresh network data.
-    hydrateSessionSnapshot();
     const inboxPromise = loadInbox(false);
     const healthPromise = loadHealth();
     const automationsPromise = loadAutomations();
@@ -125,37 +124,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.warn('[Mailmate] profile hydration failed:', error.message || error);
       return null;
-    }
-  }
-
-  function sessionSnapshotKey() {
-    return `mailmate.dashboard.${state.userId || 'anonymous'}`;
-  }
-
-  function hydrateSessionSnapshot() {
-    if (!state.userId) return false;
-    try {
-      const raw = sessionStorage.getItem(sessionSnapshotKey());
-      if (!raw) return false;
-      const snapshot = JSON.parse(raw);
-      if (!snapshot?.data || Date.now() - Number(snapshot.savedAt || 0) > 15 * 60 * 1000) return false;
-      state.data = normalizeTextTree(snapshot.data);
-      state.calendarDismissedMarkers = new Set(state.data.calendar_dismissed_markers || []);
-      renderDashboard(state.data);
-      if (state.data.user) setProfile(state.data.user);
-      els.processState.textContent = 'Showing recent session · refreshing';
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function saveSessionSnapshot(data) {
-    if (!state.userId || !data) return;
-    try {
-      sessionStorage.setItem(sessionSnapshotKey(), JSON.stringify({ savedAt: Date.now(), data }));
-    } catch (_) {
-      // Session storage is only a speed optimization.
     }
   }
 
@@ -512,7 +480,6 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const response = await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
       if (!response.ok) throw new Error(`Logout returned ${response.status}`);
-      try { sessionStorage.removeItem(sessionSnapshotKey()); } catch (_) {}
       ['userId', 'userName', 'userPicture'].forEach(key => localStorage.removeItem(key));
       window.location.replace('/');
     } catch (error) {
@@ -562,6 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.data = data;
       state.calendarDismissedMarkers = new Set(data.calendar_dismissed_markers || []);
       renderDashboard(data);
+      window.MailmateBoot?.mark?.('overview');
 
       try {
         const workResponse = await fetch(`${API_BASE}/api/work/jobs${forceRefresh ? '' : '?ensure=1'}`, { cache: 'no-store' });
@@ -572,7 +540,6 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (workSyncError) {
         console.debug('Work sync notice:', workSyncError);
       }
-      saveSessionSnapshot(data);
       if (data.user) setProfile(data.user);
 
       await refreshCalendar(false);
@@ -592,6 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
         els.summaryText.textContent = 'Your inbox summary is temporarily unavailable. Try refresh.';
         window.Kyle?.setContext({ health: state.health, emails: [], metrics: {}, currentPage: state.currentPage });
       }
+      window.MailmateBoot?.mark?.('overview');
     } finally {
       state.mailboxLoadingCount = Math.max(0, state.mailboxLoadingCount - 1);
       $('tab-overview')?.classList.toggle('is-loading', state.mailboxLoadingCount > 0);
@@ -959,7 +927,6 @@ document.addEventListener('DOMContentLoaded', () => {
       email.is_read = true;
       const source = state.data?.emails?.find(item => emailKey(item) === id);
       if (source) source.is_read = true;
-      saveSessionSnapshot(state.data);
       fetch(`${API_BASE}/api/gmail/messages/${encodeURIComponent(id)}/read`, { method: 'POST' })
         .then(async response => {
           if (response.ok) return;
@@ -1078,7 +1045,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       state.selectedEmailId = null;
       renderDashboard(state.data || { emails: [], needs_attention: [], waiting_on_others: [], metrics: {} });
-      saveSessionSnapshot(state.data);
       window.KyleTools?.execute?.([{ tool: 'ui.toast', args: { message: 'Moved to Gmail Trash' } }]);
     } catch (error) {
       addError('Gmail: ' + error.message);
@@ -2822,7 +2788,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (marker) {
       state.calendarDismissedMarkers.add(marker);
       if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
-      saveSessionSnapshot(state.data);
     }
     state.calendarEvents = state.calendarEvents.filter(item => String(item.id) !== String(id));
     renderCalendar();
@@ -2841,7 +2806,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!response.ok) throw new Error(detail.error || `Deadline dismissal returned ${response.status}`);
     state.calendarDismissedMarkers.add(marker);
     if (state.data) state.data.calendar_dismissed_markers = [...state.calendarDismissedMarkers];
-    saveSessionSnapshot(state.data);
     renderCalendar();
     return detail;
   }
