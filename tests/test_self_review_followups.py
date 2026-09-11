@@ -56,3 +56,16 @@ def test_overview_deduper_preserves_distinct_google_event_ids():
     assert "itemId && existingId && itemId !== existingId" in dashboard
     assert "String(item.source || 'google').toLowerCase() === 'google'" in dashboard
     assert "String(existing.source || 'google').toLowerCase() === 'google'" in dashboard
+
+
+def test_floating_kyle_keeps_current_response_visible_with_history_closed():
+    css = (ROOT / 'mailmate-product-v9.css').read_text(encoding='utf-8')
+    hidden_pair = (
+        '#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-transcript,\n'
+        '#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-caption-bubble'
+    )
+    assert hidden_pair not in css
+    assert '#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-transcript {' in css
+    assert '#kyleMount.kyle-floating-mount .kyle-widget.mailmate-history-closed .kyle-caption-bubble.is-visible {' in css
+    assert 'max-height: 180px !important;' in css
+    assert 'opacity: 1 !important;' in css
