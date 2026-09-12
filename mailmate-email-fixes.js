@@ -166,7 +166,7 @@
         node.style.display = protectedCount ? '' : 'none';
       });
 
-      list.querySelectorAll('.mailmate-risk-empty').forEach(node => node.remove());
+      const existingEmpty = list.querySelector('.mailmate-risk-empty');
       const phishingMode = document.querySelector('.filter-tab[data-filter="phishing"]')?.classList.contains('active') && !protectedMode;
 
       list.querySelectorAll('article.email-item').forEach(article => {
@@ -183,12 +183,14 @@
       });
 
       if ((protectedMode || phishingMode) && visible === 0) {
-        const empty = document.createElement('div');
+        const empty = existingEmpty || document.createElement('div');
         empty.className = 'mailmate-risk-empty';
         empty.textContent = protectedMode
           ? 'No protected messages in the current mailbox view.'
           : 'No suspicious messages detected.';
-        list.appendChild(empty);
+        if (!existingEmpty) list.appendChild(empty);
+      } else if (existingEmpty) {
+        existingEmpty.remove();
       }
 
       if (protectedMode || phishingMode) {
