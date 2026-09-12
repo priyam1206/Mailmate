@@ -130,6 +130,7 @@
       const all = filters.querySelector('.filter-tab[data-filter="all"]');
       all?.click();
       requestAnimationFrame(() => {
+        protectedMode = true;
         filters.querySelectorAll('.filter-tab').forEach(item => item.classList.remove('active'));
         button.classList.add('active');
         refreshInboxRiskView();
