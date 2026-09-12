@@ -118,4 +118,15 @@
   });
 
   window.MailmateContext = { state, setPage, select, open, clear, remember, snapshot };
+
+  // Fork-only stabilization layer. Keep the experimental fixes isolated until
+  // they are verified and folded back into the core dashboard modules.
+  if (!document.querySelector('script[data-mailmate-fork-fixes]')) {
+    const patch = document.createElement('script');
+    patch.src = './mailmate-fork-fixes.js?v=1';
+    patch.async = false;
+    patch.dataset.mailmateForkFixes = 'true';
+    patch.onerror = () => console.warn('[MailMate] fork fixes failed to load');
+    document.head.appendChild(patch);
+  }
 })();
