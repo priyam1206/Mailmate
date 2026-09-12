@@ -129,4 +129,13 @@
     patch.onerror = () => console.warn('[MailMate] fork fixes failed to load');
     document.head.appendChild(patch);
   }
+
+  if (!document.querySelector('script[data-mailmate-email-fixes]')) {
+    const emailPatch = document.createElement('script');
+    emailPatch.src = './mailmate-email-fixes.js?v=1';
+    emailPatch.async = false;
+    emailPatch.dataset.mailmateEmailFixes = 'true';
+    emailPatch.onerror = () => console.warn('[MailMate] email safety/theme fixes failed to load');
+    document.head.appendChild(emailPatch);
+  }
 })();
